@@ -58,7 +58,7 @@
     "@uiw/react-codemirror": "^4.25.11",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^4.9.0",
-    "lucide-react": "^0.469.0",
+    "lucide-react": "^1.31.0",
     "node-cron": "^3.0.3",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
