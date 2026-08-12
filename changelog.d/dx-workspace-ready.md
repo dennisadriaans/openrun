@@ -1,0 +1,1 @@
+You no longer save, enable, or run an automation against a worktree that is still creating or failed setup — Open Run refuses until the workspace is ready (same gate chat already used), and lists flag non-ready workspaces.

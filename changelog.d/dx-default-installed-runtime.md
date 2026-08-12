@@ -1,0 +1,1 @@
+- You no longer land on Claude by default when creating an automation or plan without a last-used runtime — Open Run picks an installed CLI so the first try works without hunting for a binary that isn't on PATH.

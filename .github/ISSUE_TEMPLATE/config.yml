@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup help and questions
+    url: https://github.com/dennisadriaans/openrun/discussions
+    about: >
+      Installing, connecting a Slack app, choosing a runtime, writing prompts.
+      Setup friction reported here shapes what gets built next.
+  - name: Report a security vulnerability
+    url: https://github.com/dennisadriaans/openrun/security/advisories/new
+    about: >
+      Private disclosure. Never open a public issue for a vulnerability —
+      see SECURITY.md.
+  - name: Commercial licensing
+    url: https://github.com/dennisadriaans/openrun/blob/main/COMMERCIAL-LICENSE.md
+    about: AGPLv3 does not fit your organisation, or you want the hosted planes.

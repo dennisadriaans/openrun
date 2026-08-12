@@ -1,0 +1,179 @@
+/**
+ * Claude Code `--output-format stream-json` → ACP-shaped turn events.
+ *
+ * Claude speaks Anthropic Messages envelopes: `type: "assistant"` with content
+ * blocks, `type: "user"` carrying `tool_result` blocks, a final `type:
+ * "result"`, and — under `--permission-prompt-tool stdio` — `control_request`
+ * lines asking for tool approval (see `lib/claudeControl.ts`).
+ *
+ * Claude sends no tool `kind`, `status` or `locations`, so we infer them:
+ * a `tool_use` block starts an `in_progress` call and the matching
+ * `tool_result` settles it.
+ */
+import { toolCallTitle, toolKindFromName } from '../acp.ts'
+import { parseControlRequest } from '../claudeControl.ts'
+import { permissionOptionsForTool } from '../approvals.ts'
+import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
+import {
+  locationsFromToolInput,
+  textFromContentBlocks,
+  toolInputSummary,
+  toolResultContent,
+  type ParsedTurnEvent,
+} from './types.ts'
+
+export function parseClaudeObject(obj: Record<string, unknown>): ParsedTurnEvent[] {
+  const type = String(obj.type ?? '')
+
+  // Supervised mode: a `can_use_tool` control request means Claude is waiting
+  // for an allow/deny decision on stdin. Surface it as a structured event so
+  // chat + SSE can prompt without scraping stdout.
+  if (type === 'control_request') {
+    const approval = parseControlRequest(obj)
+    if (!approval) return []
+    const role = toolCallRoleFields(approval.toolName, approval.input)
+    return [
+      {
+        kind: 'approval_request',
+        payload: {
+          requestId: approval.requestId,
+          name: approval.toolName,
+          title: toolCallRoleTitle(
+            role.callRole,
+            approval.toolName,
+            approval.input,
+            {
+              mcpServer: role.mcpServer,
+              fallback: toolCallTitle(
+                approval.toolName,
+                toolInputSummary(approval.toolName, approval.input),
+              ),
+            },
+          ),
+          toolKind: toolKindFromName(approval.toolName),
+          callRole: role.callRole,
+          ...(role.mcpServer ? { mcpServer: role.mcpServer } : {}),
+          input: approval.input,
+          locations: locationsFromToolInput(approval.input),
+          options: permissionOptionsForTool(approval.toolName),
+        },
+      },
+    ]
+  }
+
+  if (type === 'assistant') {
+    const message = obj.message as Record<string, unknown> | undefined
+    const content = message?.content
+    const out: ParsedTurnEvent[] = []
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue
+        const b = block as Record<string, unknown>
+        if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
+          out.push({ kind: 'assistant', payload: { text: b.text } })
+        } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking) {
+          out.push({ kind: 'thought', payload: { text: b.thinking } })
+        } else if (b.type === 'tool_use') {
+          const name = typeof b.name === 'string' ? b.name : 'tool'
+          const role = toolCallRoleFields(name, b.input)
+          out.push({
+            kind: 'tool_start',
+            payload: {
+              toolCallId: typeof b.id === 'string' ? b.id : undefined,
+              name,
+              title: toolCallRoleTitle(role.callRole, name, b.input, {
+                mcpServer: role.mcpServer,
+                fallback: toolCallTitle(name, toolInputSummary(name, b.input)),
+              }),
+              toolKind: toolKindFromName(name),
+              callRole: role.callRole,
+              ...(role.mcpServer ? { mcpServer: role.mcpServer } : {}),
+              status: 'in_progress',
+              input: b.input,
+              locations: locationsFromToolInput(b.input),
+            },
+          })
+        }
+      }
+    } else {
+      const text = textFromContentBlocks(content)
+      if (text) out.push({ kind: 'assistant', payload: { text } })
+    }
+    return out
+  }
+
+  if (type === 'user') {
+    const message = obj.message as Record<string, unknown> | undefined
+    const content = message?.content
+    const out: ParsedTurnEvent[] = []
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue
+        const b = block as Record<string, unknown>
+        if (b.type === 'tool_result') {
+          out.push({
+            kind: 'tool_result',
+            payload: {
+              toolCallId: typeof b.tool_use_id === 'string' ? b.tool_use_id : undefined,
+              // Claude marks a failed tool with is_error on the result block.
+              status: b.is_error === true ? 'failed' : 'completed',
+              content: toolResultContent(b.content),
+            },
+          })
+        }
+      }
+    }
+    return out
+  }
+
+  if (type === 'result') {
+    const out: ParsedTurnEvent[] = []
+    const errored = obj.is_error === true || obj.subtype === 'error'
+    if (errored) {
+      out.push({
+        kind: 'error',
+        payload: {
+          message:
+            (typeof obj.error === 'string' && obj.error) ||
+            (typeof obj.result === 'string' && obj.result) ||
+            'Claude reported an error result',
+        },
+      })
+    }
+    // Do not emit `assistant` here — Claude already streamed type=assistant
+    // text blocks; `result` repeats that final text. Keep it on turn_done so
+    // chat can fall back when a turn had no assistant events.
+    // A stop reason describes how a turn ended *normally*, so a failed result
+    // gets none — the error event above already says what happened.
+    const stopReason =
+      obj.subtype === 'error_max_turns'
+        ? ('max_turn_requests' as const)
+        : errored
+          ? undefined
+          : ('end_turn' as const)
+    out.push({
+      kind: 'turn_done',
+      payload: {
+        result: typeof obj.result === 'string' ? obj.result : undefined,
+        ...(stopReason ? { stopReason } : {}),
+      },
+    })
+    return out
+  }
+
+  if (type === 'error') {
+    return [
+      {
+        kind: 'error',
+        payload: {
+          message:
+            (typeof obj.message === 'string' && obj.message) ||
+            (typeof obj.error === 'string' && obj.error) ||
+            JSON.stringify(obj),
+        },
+      },
+    ]
+  }
+
+  return []
+}

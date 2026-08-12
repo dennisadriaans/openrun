@@ -1,0 +1,116 @@
+Open Run
+Copyright (C) 2026 Dennis Adriaansen
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See the LICENSE file for the full text.
+
+If AGPLv3 does not work for your organisation, a commercial license is
+available — see COMMERCIAL-LICENSE.md.
+
+
+================================================================================
+Design attribution
+================================================================================
+
+The run conversation view — the chat transcript, the "Files Changed" summary box
+and the slide-over diff viewer — is modelled on t3code
+(https://github.com/t3-tools/t3code), MIT © T3 Tools Inc.
+
+The layout and interaction patterns are adapted; the implementation in this
+repository is independent and much smaller in scope. This entry is an
+attribution of design influence, not a redistribution of t3code source.
+
+The MIT License text is reproduced below so that the attribution stands on its
+own if any portion of that work is later determined to be incorporated here.
+
+    MIT License
+
+    Copyright (c) T3 Tools Inc.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+
+================================================================================
+Protocols and specifications
+================================================================================
+
+The turn-event vocabulary in src/lib/acp.ts is a hand-written subset of the
+Agent Client Protocol (https://agentclientprotocol.com). The
+@agentclientprotocol/sdk package is a devDependency used only to type-check that
+subset (src/lib/acpConformance.ts); no SDK code is bundled or redistributed.
+
+
+================================================================================
+Third-party dependencies
+================================================================================
+
+This program links against open-source packages installed from npm. Their
+licenses are their own and are not superseded by this project's license. The
+production dependency tree is predominantly MIT and ISC.
+
+To regenerate a current inventory:
+
+    pnpm licenses list --prod
+
+Measured across the production tree (218 packages) at the time of writing:
+
+    MIT                                  190
+    ISC                                   14
+    BSD-3-Clause                           4
+    Apache-2.0                             3
+    MPL-2.0                                2
+    Python-2.0                             1
+    CC-BY-4.0                              1
+    (MIT OR WTFPL)                         1
+    (BSD-2-Clause OR MIT OR Apache-2.0)    1
+    Unlicense                              1
+
+All permissive. No GPL, LGPL or AGPL dependency is present. The two MPL-2.0
+packages are file-level copyleft, which attaches only to modifications of those
+files; they are used unmodified.
+
+Direct production dependencies:
+
+    @codemirror/*, @lezer/highlight        MIT
+    @tailwindcss/vite, tailwindcss         MIT
+    @tanstack/react-query                  MIT
+    @tanstack/react-router                 MIT
+    @tanstack/react-start                  MIT
+    @tanstack/react-devtools               MIT
+    @uiw/react-codemirror                  MIT
+    better-sqlite3                         MIT
+    cron-parser                            MIT
+    lucide-react                           ISC
+    node-cron                              ISC
+    react, react-dom                       MIT
+
+Re-run the audit before each tagged release; CI reports it on every pull request.
+
+
+================================================================================
+Coding-agent CLIs
+================================================================================
+
+Open Run invokes coding-agent CLIs (claude, codex, grok, gemini) as child
+processes. Those programs are separate works, distributed under their own terms
+by their own vendors, and are neither bundled with nor derived from this
+program. Invoking a separate program at arm's length over a pipe does not make
+it part of this work. You must obtain and be licensed for those CLIs yourself.

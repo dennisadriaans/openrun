@@ -1,0 +1,87 @@
+name: Bug report
+description: Something in Open Run behaves incorrectly
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Setup help ("my Slack app won't connect", "which runtime should I use")
+        belongs in [Discussions](../../discussions), not here. Issues are for
+        bugs and roadmap work.
+
+        **Never paste tokens, webhook secrets, or private repository contents.**
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a project pointing at …
+        2. Create an automation with runtime … and prompt …
+        3. Press Run now
+        4. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Roughly where does this live? Guess freely.
+      options:
+        - Executor / running an agent
+        - Runtimes / PATH / args template
+        - Scheduler / cron
+        - Projects / workspaces / worktrees
+        - Git actions / diffs / pull requests
+        - Checks / verdicts / repair turns
+        - Attempts / racing
+        - Chat / turn events / approvals
+        - Webhooks (GitHub / Jira / Linear)
+        - Slack control surface
+        - Notifications
+        - UI / live updates
+        - Install / build / setup
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Which agent CLI
+      placeholder: "claude 2.x / codex / grok / gemini / not applicable"
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `node -v`, `pnpm -v`, your OS, and the Open Run commit or tag.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Run log, terminal output, or browser console. Redact anything private.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I ran `pnpm typecheck` and `pnpm test` on a clean checkout
+        - label: I searched existing issues for a duplicate
+        - label: This is a bug, not a setup question
+          required: true

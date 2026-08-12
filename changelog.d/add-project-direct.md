@@ -1,0 +1,1 @@
+"Add project" no longer drops you into the Projects list you just came from. From the project picker on a new run — and from the "Add a project first" empty state — it opens the folder browser straight away, so adding a repo is one step instead of two.

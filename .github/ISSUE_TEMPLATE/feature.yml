@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest something Open Run should do
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing: [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#what-we-will-not-merge)
+        lists what this project will not take — direct model API calls,
+        multi-tenant auth and hosted control planes, IDE-agent runtimes, and
+        rewrites. Checking that list first saves us both time.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Open Run makes hard or impossible? Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. If you already have a design, sketch it.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today instead
+      description: A shell script? A second automation? Nothing?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Does this run entirely on the user's machine?
+      description: >
+        Local features are open source, forever. Anything requiring a shared
+        server, an identity provider, or multi-user state belongs to the
+        commercial planes — see COMMERCIAL-LICENSE.md.
+      options:
+        - Yes — purely local
+        - No — needs a shared/hosted service
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - label: I would be willing to open a PR for this

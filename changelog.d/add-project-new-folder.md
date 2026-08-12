@@ -1,0 +1,1 @@
+Adding a project no longer requires a repo that already exists on disk. The folder picker has a "new folder" button that creates an empty folder where you are browsing and `git init`s it, so a greenfield project starts from Open Run instead of from a terminal.

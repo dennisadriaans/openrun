@@ -1,0 +1,11 @@
+---
+description: Interactive Cursor sessions must not branch/PR unless asked
+alwaysApply: true
+---
+
+# Interactive git
+
+You are in an interactive Cursor session.
+
+- Implement the requested change in the current checkout.
+- Do **not** create a new branch, commit, push, or open a pull request unless the user explicitly asks.

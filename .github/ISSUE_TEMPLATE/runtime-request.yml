@@ -1,0 +1,88 @@
+name: New runtime (agent CLI) support
+description: Ask for — or propose — support for another coding-agent CLI
+labels: ["runtime", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Open Run drives headless coding-agent CLIs as child processes. Adding one
+        is the most self-contained contribution available — see
+        [adding a runtime](https://getopenrun.dev/docs/adding-a-runtime).
+
+        A CLI is a good fit only if it is **non-interactive**: it accepts a prompt
+        on stdin or via a file, does its work, and exits. TUI-only agents and IDE
+        extensions (Cursor, Windsurf, Continue) are architecturally out of scope.
+
+  - type: input
+    id: name
+    attributes:
+      label: CLI name and homepage
+      placeholder: "amp — https://example.com/amp"
+    validations:
+      required: true
+
+  - type: input
+    id: install
+    attributes:
+      label: How is it installed
+      placeholder: "npm i -g @example/amp"
+
+  - type: textarea
+    id: headless
+    attributes:
+      label: Headless invocation
+      description: The exact command that runs one prompt non-interactively and exits.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: prompt-delivery
+    attributes:
+      label: How does it take the prompt
+      options:
+        - stdin
+        - a prompt file (path passed as a flag)
+        - argv
+        - not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: output
+    attributes:
+      label: Machine-readable output
+      description: Anything other than plain text lets Open Run build a real chat transcript instead of a log dump.
+      options:
+        - JSONL / NDJSON streaming events
+        - a single JSON object at the end
+        - Agent Client Protocol (ACP)
+        - plain text only
+        - not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: resume
+    attributes:
+      label: Can a session be resumed
+      description: Required for follow-up turns and for repair turns after failed checks.
+      options:
+        - "Yes — there is a resume/continue flag"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Model/effort flags, permission flags, auth model, rate limits, quirks.
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - label: I would be willing to write the adapter and preset

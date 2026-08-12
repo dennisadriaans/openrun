@@ -1,0 +1,122 @@
+/**
+ * Persist the Open Run control-plane session and machine id.
+ *
+ * Vendor tokens (Jira, …) never land here — only the Open Run access/refresh
+ * pair issued by the Worker. Files are 0600 under ~/.agentops.
+ */
+import { randomBytes } from 'node:crypto'
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { CloudSessionStored } from '../../lib/cloud/types.ts'
+import { agentopsHome } from '../db.ts'
+
+const OWNER_ONLY = 0o600
+
+export function cloudSessionPath(): string {
+  return join(agentopsHome(), 'cloud-session')
+}
+
+export function machineIdPath(): string {
+  return join(agentopsHome(), 'machine-id')
+}
+
+export function cloudPkcePath(): string {
+  return join(agentopsHome(), 'cloud-pkce')
+}
+
+function ensureHome(): void {
+  const home = agentopsHome()
+  if (!existsSync(home)) mkdirSync(home, { recursive: true, mode: 0o700 })
+}
+
+function writeSecretFile(file: string, contents: string): void {
+  ensureHome()
+  writeFileSync(file, contents, { mode: OWNER_ONLY })
+  chmodSync(file, OWNER_ONLY)
+}
+
+export function readMachineId(): string {
+  const file = machineIdPath()
+  if (existsSync(file)) {
+    const stored = readFileSync(file, 'utf8').trim()
+    if (stored) return stored
+  }
+  const id = `mch_${randomBytes(12).toString('hex')}`
+  writeSecretFile(file, `${id}\n`)
+  return id
+}
+
+export function readCloudSession(): CloudSessionStored | null {
+  const file = cloudSessionPath()
+  if (!existsSync(file)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<CloudSessionStored>
+    if (
+      typeof parsed.accessToken !== 'string' ||
+      typeof parsed.refreshToken !== 'string' ||
+      typeof parsed.userId !== 'string' ||
+      typeof parsed.email !== 'string' ||
+      typeof parsed.machineId !== 'string'
+    ) {
+      return null
+    }
+    return {
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+      userId: parsed.userId,
+      email: parsed.email,
+      machineId: parsed.machineId,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function writeCloudSession(session: CloudSessionStored): void {
+  writeSecretFile(cloudSessionPath(), `${JSON.stringify(session, null, 2)}\n`)
+}
+
+export function clearCloudSession(): void {
+  const file = cloudSessionPath()
+  if (existsSync(file)) unlinkSync(file)
+}
+
+export type PkcePending = {
+  verifier: string
+  state: string
+  redirectUri: string
+  createdAt: number
+}
+
+export function writePkcePending(pending: PkcePending): void {
+  writeSecretFile(cloudPkcePath(), `${JSON.stringify(pending)}\n`)
+}
+
+export function readPkcePending(): PkcePending | null {
+  const file = cloudPkcePath()
+  if (!existsSync(file)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<PkcePending>
+    if (
+      typeof parsed.verifier !== 'string' ||
+      typeof parsed.state !== 'string' ||
+      typeof parsed.redirectUri !== 'string' ||
+      typeof parsed.createdAt !== 'number'
+    ) {
+      return null
+    }
+    return {
+      verifier: parsed.verifier,
+      state: parsed.state,
+      redirectUri: parsed.redirectUri,
+      createdAt: parsed.createdAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function clearPkcePending(): void {
+  const file = cloudPkcePath()
+  if (existsSync(file)) unlinkSync(file)
+}

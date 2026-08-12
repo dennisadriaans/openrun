@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # `pnpm build` regenerates src/routeTree.gen.ts through the TanStack Start
+      # Vite plugin, so a stale committed copy shows up as a dirty tree right
+      # here for free.
+      #
+      # Note for anyone tempted to use `pnpm generate-routes` instead: the
+      # standalone router-cli currently emits a *different* Register block from
+      # the Vite plugin (it drops the `config` entry that types the start
+      # instance). The plugin's output is the authoritative one — that is what
+      # dev and build both run.
+      - name: Warn if routeTree.gen.ts is out of date
+        run: |
+          if ! git diff --quiet -- src/routeTree.gen.ts; then
+            echo "::warning file=src/routeTree.gen.ts::Stale. Run 'pnpm build' and commit the regenerated file."
+            git diff -- src/routeTree.gen.ts
+          fi
+
+  licenses:
+    name: dependency licences
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Advisory: AGPLv3 can absorb permissive licences, but a copyleft
+      # production dependency would constrain the commercial licence offer
+      # (COMMERCIAL-LICENSE.md), so surface it early.
+      - name: Production dependency licences
+        run: pnpm licenses list --prod || true
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit
+        run: pnpm audit --prod --audit-level high

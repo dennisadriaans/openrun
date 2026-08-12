@@ -1,0 +1,1 @@
+You no longer create an automation with a blank prompt — Create / Save stay disabled until Agent Instructions has text (hover shows why), and the server refuses empty or whitespace-only prompts the same way.

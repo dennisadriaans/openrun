@@ -1,0 +1,1 @@
+- You no longer discover a bad runtime args template at spawn time — non-array / non-string JSON is rejected when you save on Runtimes, and existing bad rows are flagged on the list instead of crashing the preview.

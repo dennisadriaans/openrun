@@ -1,0 +1,1 @@
+- You no longer need a second dropdown click after picking a project on the Planner — Open Run auto-selects a ready workspace (main checkout preferred), including when a worktree finishes setup and flips from creating to ready.
