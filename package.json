@@ -11,6 +11,7 @@
     "url": "https://github.com/dennisadriaans/openrun/issues"
   },
   "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@10.6.5",
   "type": "module",
   "imports": {
     "#/*": "./src/*"
