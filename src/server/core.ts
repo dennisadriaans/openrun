@@ -15,10 +15,7 @@ import { assertTaskPrompt, hasTaskPrompt } from '../lib/taskPrompt'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
-import {
-  parsePlanProposals,
-  type PlanProposal,
-} from '../lib/planProposals'
+import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
 import {
   defaultEffort,
   defaultModel,
@@ -30,7 +27,14 @@ import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
-import { getDb, type CheckResultRow, type MessageRow, type RuntimeRow, type RunRow, type TaskRow } from './db'
+import {
+  getDb,
+  type CheckResultRow,
+  type MessageRow,
+  type RuntimeRow,
+  type RunRow,
+  type TaskRow,
+} from './db'
 import {
   answerApproval as _answerApproval,
   cancelRun as _cancelRun,
@@ -60,12 +64,7 @@ import {
   type PreviewCommandInput,
   type PreviewCommandResult,
 } from './commandPreview'
-import {
-  getProject,
-  getWorkspace,
-  listWorkspaces,
-  resolveWorkspacePath,
-} from './workspaces'
+import { getProject, getWorkspace, listWorkspaces, resolveWorkspacePath } from './workspaces'
 import { bootSlack, onSlackRunFinalized } from './slack'
 import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
@@ -304,9 +303,7 @@ function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWith
   const workspaceStatus = workspace?.status ?? null
   const workspaceReadyOk = workspaceOk && isWorkspaceReady(workspaceStatus)
   const runtimeBin = runtime?.bin?.trim() ?? ''
-  const runtimeInstalled = runtime
-    ? checkRuntimeInstalled(runtime.bin).installed
-    : false
+  const runtimeInstalled = runtime ? checkRuntimeInstalled(runtime.bin).installed : false
   const promptOk = hasTaskPrompt(task.prompt)
   const project = workspace ? getProject(workspace.projectId) : undefined
   return {
@@ -389,9 +386,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
   const db = getDb()
   const tid = input.id ?? id('task')
   const now = Date.now()
-  const existingRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(tid) as
-    | TaskRow
-    | undefined
+  const existingRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(tid) as TaskRow | undefined
 
   // cwd stays the source of truth for git operations (executor, diff panel,
   // etc.) — resolve once here so cwd stays in sync with the workspace path.
@@ -537,7 +532,9 @@ export function listPendingRuns() {
 }
 
 export function runTaskNow(taskId: string): { runId: string } {
-  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as
+    | TaskRow
+    | undefined
   if (!task) throw new Error('Task not found')
   assertWorkspaceId(task.workspaceId)
   // Fail before startRun inserts a row — same readiness gate as chat.
@@ -631,25 +628,23 @@ export function listRuns(opts?: {
   const rows = (
     opts?.taskId
       ? db
-        .prepare(
-          `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
+          .prepare(
+            `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
                     length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
                     archivedAt, verdict, repairAttempts, timedOut
              FROM runs WHERE taskId = ? ${archivedClause} ORDER BY startedAt DESC LIMIT ?`,
-        )
-        .all(opts.taskId, limit)
+          )
+          .all(opts.taskId, limit)
       : db
-        .prepare(
-          `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
+          .prepare(
+            `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
                     length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
                     archivedAt, verdict, repairAttempts, timedOut
              FROM runs WHERE 1=1 ${archivedClause} ORDER BY startedAt DESC LIMIT ?`,
-        )
-        .all(limit)
+          )
+          .all(limit)
   ) as Omit<RunSummary, 'runtimeLabel'>[]
-  const labelById = new Map(
-    listRuntimes().map((runtime) => [runtime.id, runtime.label] as const),
-  )
+  const labelById = new Map(listRuntimes().map((runtime) => [runtime.id, runtime.label] as const))
   return rows.map((row) => ({
     ...row,
     runtimeLabel: resolveRuntimeLabel(labelById.get(row.runtimeId), row.runtimeId),
@@ -750,9 +745,7 @@ export function getConversation(runId: string) {
       ? stored.map((m) => {
           const events = eventsByMessage.get(m.id) ?? []
           const fromEvents =
-            m.role === 'assistant' && events.length > 0
-              ? assistantTextFromEvents(events)
-              : ''
+            m.role === 'assistant' && events.length > 0 ? assistantTextFromEvents(events) : ''
           // Prefer events for chat text; omit duplicating fat per-message logs
           // when structured events already carry the turn.
           const hasEvents = events.length > 0
@@ -769,10 +762,8 @@ export function getConversation(runId: string) {
 
   const workspace = run.workspaceId ? getWorkspace(run.workspaceId) : undefined
   const siblings = workspace ? listWorkspaces(workspace.projectId) : []
-  const workspaceWithMeta = workspace
-    ? siblings.find((w) => w.id === workspace.id) ?? null
-    : null
-  const project = workspace ? getProject(workspace.projectId) ?? null : null
+  const workspaceWithMeta = workspace ? (siblings.find((w) => w.id === workspace.id) ?? null) : null
+  const project = workspace ? (getProject(workspace.projectId) ?? null) : null
 
   const catalog = runtime ? modelsForBin(runtime.bin) : []
   const matchedModel = findModel(catalog, run.model)
@@ -906,7 +897,9 @@ export function postMessage(input: {
   const prompt = input.prompt.trim()
   if (!prompt) throw new Error('Message cannot be empty')
   if (prompt.length > MAX_MESSAGE_PROMPT_CHARS) {
-    throw new Error(`Message is too long (max ${MAX_MESSAGE_PROMPT_CHARS.toLocaleString()} characters)`)
+    throw new Error(
+      `Message is too long (max ${MAX_MESSAGE_PROMPT_CHARS.toLocaleString()} characters)`,
+    )
   }
   return sendFollowUp({
     runId: input.runId,
@@ -955,7 +948,10 @@ export function writeWorkspaceFile(input: { runId: string; path: string; content
  * commit only stages run-owned changes (already-committed mid-run work is
  * skipped; pre-existing dirt outside the delta is skipped).
  */
-function commitableRunPaths(run: { cwd: string; baseSnapshot: string }, paths?: string[]): string[] | undefined {
+function commitableRunPaths(
+  run: { cwd: string; baseSnapshot: string },
+  paths?: string[],
+): string[] | undefined {
   if (!run.baseSnapshot) return paths
 
   const delta = new Set(git.changedFiles(run.cwd, run.baseSnapshot).map((f) => f.path))
@@ -1278,9 +1274,7 @@ export function deleteIntegration(integrationId: string) {
 }
 
 /** One-click install: local endpoint, optional remote webhook + automation. */
-export async function installIntegration(
-  input: InstallIntegrationInput,
-): Promise<InstallResult> {
+export async function installIntegration(input: InstallIntegrationInput): Promise<InstallResult> {
   return installIntegrationRow(input, {
     createAutomation: (args) => {
       const task = upsertTask({

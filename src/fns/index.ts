@@ -168,13 +168,8 @@ export const getRunWorkspace = createServerFn({ method: 'GET' })
 
 export const postMessage = createServerFn({ method: 'POST' })
   .validator(
-    (d: {
-      runId: string
-      prompt: string
-      model?: string
-      effort?: string
-      runtimeMode?: string
-    }) => d,
+    (d: { runId: string; prompt: string; model?: string; effort?: string; runtimeMode?: string }) =>
+      d,
   )
   .handler(async ({ data }) => (await core()).postMessage(data))
 
@@ -244,23 +239,14 @@ export const planObjective = createServerFn({ method: 'POST' })
 
 export const installPlanProposal = createServerFn({ method: 'POST' })
   .validator(
-    (d: {
-      runtimeId: string
-      workspaceId: string
-      proposal: PlanProposal
-      enabled?: boolean
-    }) => d,
+    (d: { runtimeId: string; workspaceId: string; proposal: PlanProposal; enabled?: boolean }) => d,
   )
   .handler(async ({ data }) => (await core()).installPlanProposal(data))
 
 export const createTasksFromPlan = createServerFn({ method: 'POST' })
   .validator(
-    (d: {
-      runtimeId: string
-      workspaceId: string
-      proposals: PlanProposal[]
-      enabled?: boolean
-    }) => d,
+    (d: { runtimeId: string; workspaceId: string; proposals: PlanProposal[]; enabled?: boolean }) =>
+      d,
   )
   .handler(async ({ data }) => (await core()).createTasksFromPlan(data))
 
@@ -280,8 +266,13 @@ export const createLocalFolder = createServerFn({ method: 'POST' })
 
 export const addProject = createServerFn({ method: 'POST' })
   .validator(
-    (d: { mode: 'clone' | 'register'; url?: string; path?: string; name?: string; setupCommand?: string }) =>
-      d,
+    (d: {
+      mode: 'clone' | 'register'
+      url?: string
+      path?: string
+      name?: string
+      setupCommand?: string
+    }) => d,
   )
   .handler(async ({ data }) => (await core()).addProject(data))
 
@@ -317,7 +308,8 @@ export const listWorkspaces = createServerFn({ method: 'GET' })
 
 export const createWorkspace = createServerFn({ method: 'POST' })
   .validator(
-    (d: { projectId: string; branch: string; fromBranch?: string; useExistingBranch?: boolean }) => d,
+    (d: { projectId: string; branch: string; fromBranch?: string; useExistingBranch?: boolean }) =>
+      d,
   )
   .handler(async ({ data }) => (await core()).createWorkspace(data))
 
