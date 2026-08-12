@@ -29,15 +29,12 @@ type GhPayload = {
 
 function labelsOf(issue: GhIssue | undefined): string[] {
   if (!issue?.labels) return []
-  return issue.labels
-    .map((l) => (typeof l === 'string' ? l : l.name ?? ''))
-    .filter(Boolean)
+  return issue.labels.map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter(Boolean)
 }
 
 function parseGithub(input: WebhookParseInput): CanonicalWebhookEvent[] {
   const deliveryId =
-    input.headers.get('x-github-delivery')?.trim() ||
-    `github_${Date.now().toString(36)}`
+    input.headers.get('x-github-delivery')?.trim() || `github_${Date.now().toString(36)}`
   const eventName = input.headers.get('x-github-event')?.trim() || ''
 
   if (eventName === 'ping') return []
@@ -50,9 +47,7 @@ function parseGithub(input: WebhookParseInput): CanonicalWebhookEvent[] {
 
   const issue = payload.issue
   const eventType = `issues.${action}`
-  const assignees = (issue.assignees ?? [])
-    .map((a) => a.login || a.name || '')
-    .filter(Boolean)
+  const assignees = (issue.assignees ?? []).map((a) => a.login || a.name || '').filter(Boolean)
   const actorUser = payload.sender ?? issue.user
 
   const event: CanonicalWebhookEvent = {

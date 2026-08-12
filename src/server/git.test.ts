@@ -91,7 +91,9 @@ describe('changedFiles since snapshot', () => {
     writeFileSync(join(cwd, 'agent.txt'), 'new\n')
     writeFileSync(join(cwd, 'tracked.txt'), 'user+agent\n')
 
-    const paths = changedFiles(cwd, snap).map((f) => f.path).sort()
+    const paths = changedFiles(cwd, snap)
+      .map((f) => f.path)
+      .sort()
     assert.deepEqual(paths, ['agent.txt', 'tracked.txt'])
     assert.ok(!paths.includes('pre.txt'))
     assert.ok(!paths.includes('clean.txt'))
@@ -176,7 +178,6 @@ describe('fileDiff since snapshot', () => {
     assert.doesNotMatch(diff, /^-base/)
   })
 })
-
 
 describe('push / createPullRequest origin gate', () => {
   it('push refuses a repo with no origin remote', () => {

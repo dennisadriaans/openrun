@@ -31,12 +31,10 @@ export type ControlApprovalRequest = {
  * line is not a `can_use_tool` control request. The caller has already
  * JSON-parsed the NDJSON line.
  */
-export function parseControlRequest(
-  obj: Record<string, unknown>,
-): ControlApprovalRequest | null {
+export function parseControlRequest(obj: Record<string, unknown>): ControlApprovalRequest | null {
   if (obj.type !== 'control_request') return null
   const request = obj.request as Record<string, unknown> | undefined
-  if (!request || request.subtype !== 'can_use_tool') return null
+  if (request?.subtype !== 'can_use_tool') return null
 
   const requestId =
     (typeof obj.request_id === 'string' && obj.request_id) ||
@@ -79,7 +77,7 @@ export function buildControlResponse(input: {
     request_id: input.requestId,
     response,
   }
-  return JSON.stringify(envelope) + '\n'
+  return `${JSON.stringify(envelope)}\n`
 }
 
 /**
@@ -95,5 +93,5 @@ export function buildStreamJsonUserMessage(prompt: string): string {
       content: [{ type: 'text', text: prompt }],
     },
   }
-  return JSON.stringify(envelope) + '\n'
+  return `${JSON.stringify(envelope)}\n`
 }

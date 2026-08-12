@@ -15,7 +15,10 @@
  */
 export function isLoopbackAddress(address: string | undefined | null): boolean {
   if (!address) return false
-  const addr = address.trim().toLowerCase().replace(/^::ffff:/, '')
+  const addr = address
+    .trim()
+    .toLowerCase()
+    .replace(/^::ffff:/, '')
   if (addr === '::1') return true
   // The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1.
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr)

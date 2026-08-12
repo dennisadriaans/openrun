@@ -4,7 +4,13 @@
  * `server/core.ts` reaches Slack only through this module, the same way it
  * reaches integrations through `server/integrations/index.ts`.
  */
-export { getSlackSettings, publicSettings, saveSlackSettings, type SlackSettingsInput, type SlackSettingsPublic } from './settings.ts'
+export {
+  getSlackSettings,
+  publicSettings,
+  saveSlackSettings,
+  type SlackSettingsInput,
+  type SlackSettingsPublic,
+} from './settings.ts'
 export {
   isSlackSocketConnected,
   restartSlackSocket,
@@ -13,7 +19,11 @@ export {
   stopSlackSocket,
 } from './socketMode.ts'
 export { onSlackRunFinalized, startSlackWatchers, stopSlackWatchers } from './announce.ts'
-export { handleSlackEventsRequest, handleSlackInteractionsRequest, type SlackHttpResult } from './http.ts'
+export {
+  handleSlackEventsRequest,
+  handleSlackInteractionsRequest,
+  type SlackHttpResult,
+} from './http.ts'
 export { dispatchSlackCommand, type DispatchResult, type SlackCommandContext } from './dispatch.ts'
 export { pruneThreads } from './threads.ts'
 export { clearQueued, countQueued } from './pendingTurns.ts'

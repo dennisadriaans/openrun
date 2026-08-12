@@ -1,20 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import {
-  hasPendingApproval,
-  pendingApprovals,
-  resolvedApprovalIds,
-} from './pendingApprovals.ts'
+import { hasPendingApproval, pendingApprovals, resolvedApprovalIds } from './pendingApprovals.ts'
 import type { TurnEventKind, TurnEventRow } from './turnEvents.ts'
 
 let seq = 0
 
-function ev(
-  kind: TurnEventKind,
-  payload: unknown,
-  createdAt = 1_000 + seq,
-): TurnEventRow {
+function ev(kind: TurnEventKind, payload: unknown, createdAt = 1_000 + seq): TurnEventRow {
   seq += 1
   return {
     id: `te_${seq}`,
@@ -57,7 +49,10 @@ test('resolution is matched by requestId, not by order', () => {
     ev('approval_resolved', { requestId: 'r2', decision: 'deny' }),
   ]
   const pending = pendingApprovals(events)
-  assert.deepEqual(pending.map((p) => p.requestId), ['r1'])
+  assert.deepEqual(
+    pending.map((p) => p.requestId),
+    ['r1'],
+  )
 })
 
 test('duplicate requestIds collapse to one pending entry', () => {
@@ -80,7 +75,10 @@ test('malformed payload JSON does not throw', () => {
     ev('approval_resolved', '}}}'),
   ]
   const pending = pendingApprovals(events)
-  assert.deepEqual(pending.map((p) => p.requestId), ['r1'])
+  assert.deepEqual(
+    pending.map((p) => p.requestId),
+    ['r1'],
+  )
 })
 
 test('toolName falls back to "tool" when the payload omits a name', () => {

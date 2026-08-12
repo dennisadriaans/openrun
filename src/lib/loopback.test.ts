@@ -45,10 +45,7 @@ test('a path that merely mentions the prefix later does not match', () => {
 
 test('loopback is allowed regardless of feature state or path', () => {
   for (const mobileEnabled of [true, false]) {
-    assert.equal(
-      allowRemoteRequest({ address: '127.0.0.1', url: '/', mobileEnabled }),
-      true,
-    )
+    assert.equal(allowRemoteRequest({ address: '127.0.0.1', url: '/', mobileEnabled }), true)
     assert.equal(
       allowRemoteRequest({ address: '::1', url: '/_serverFn/writeWorkspaceFile', mobileEnabled }),
       true,
@@ -80,10 +77,6 @@ test('with the feature on, a remote caller reaches only the mobile API', () => {
     '/_serverFn/writeWorkspaceFile',
     '/_serverFn/addProject',
   ]) {
-    assert.equal(
-      allowRemoteRequest({ address: remote, url, mobileEnabled: true }),
-      false,
-      url,
-    )
+    assert.equal(allowRemoteRequest({ address: remote, url, mobileEnabled: true }), false, url)
   }
 })

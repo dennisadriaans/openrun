@@ -23,9 +23,7 @@ export type TaskCandidate = {
   name: string
 }
 
-export type ResolveResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: string }
+export type ResolveResult<T> = { ok: true; value: T } | { ok: false; reason: string }
 
 const LATEST_WORDS = new Set(['last', 'latest', 'current', 'it', 'this'])
 
@@ -68,13 +66,19 @@ export function resolveRunRef(
   const prefixed = candidates.filter((c) => c.id.toLowerCase().startsWith(lower))
   if (prefixed.length === 1) return { ok: true, value: prefixed[0].id }
   if (prefixed.length > 1) {
-    return { ok: false, reason: `\`${raw}\` matches ${prefixed.length} runs — use its number instead.` }
+    return {
+      ok: false,
+      reason: `\`${raw}\` matches ${prefixed.length} runs — use its number instead.`,
+    }
   }
 
   const named = candidates.filter((c) => (c.taskName ?? '').toLowerCase().includes(lower))
   if (named.length === 1) return { ok: true, value: named[0].id }
   if (named.length > 1) {
-    return { ok: false, reason: `\`${raw}\` matches ${named.length} runs — use its number instead.` }
+    return {
+      ok: false,
+      reason: `\`${raw}\` matches ${named.length} runs — use its number instead.`,
+    }
   }
 
   return { ok: false, reason: `Could not find a run matching \`${raw}\`.` }
@@ -119,7 +123,10 @@ export function resolveTaskRef(
 
   const ambiguous = prefix.length > 1 ? prefix : contains
   if (ambiguous.length > 1) {
-    const names = ambiguous.slice(0, 4).map((c) => `\`${c.name}\``).join(', ')
+    const names = ambiguous
+      .slice(0, 4)
+      .map((c) => `\`${c.name}\``)
+      .join(', ')
     return { ok: false, reason: `\`${raw}\` matches ${ambiguous.length} automations: ${names}.` }
   }
 

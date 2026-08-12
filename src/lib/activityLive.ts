@@ -22,19 +22,19 @@ export type ActivityLiveEvent =
    * auto-denies.
    */
   | {
-    type: 'approval_pending'
-    runId: string
-    requestId: string
-    toolName: string
-    expiresAt: number
-  }
+      type: 'approval_pending'
+      runId: string
+      requestId: string
+      toolName: string
+      expiresAt: number
+    }
   /** An approval was answered, or timed out into a deny. */
   | {
-    type: 'approval_settled'
-    runId: string
-    requestId: string
-    decision: 'allow' | 'deny'
-  }
+      type: 'approval_settled'
+      runId: string
+      requestId: string
+      decision: 'allow' | 'deny'
+    }
 
 /** Path the browser EventSource connects to for list-page live updates. */
 export function activityLiveStreamPath(): string {
@@ -48,9 +48,7 @@ export function activityLiveStreamPath(): string {
  * rides its own event type — it must not wait for a coincidental `run_changed`
  * while stream-healthy polling is off.
  */
-export function activityLiveInvalidateKeys(
-  event: ActivityLiveEvent,
-): readonly string[] {
+export function activityLiveInvalidateKeys(event: ActivityLiveEvent): readonly string[] {
   switch (event.type) {
     case 'run_changed':
       return ['runs', 'dashboard', 'tasks']

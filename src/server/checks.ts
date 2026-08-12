@@ -15,7 +15,12 @@
  */
 import { spawn } from 'node:child_process'
 import { latestPass } from '../lib/checkPass.ts'
-import { CHECK_OUTPUT_TAIL_CHARS, CHECK_TIMEOUT_MS, parseChecks, type CheckDef } from '../lib/checks.ts'
+import {
+  CHECK_OUTPUT_TAIL_CHARS,
+  CHECK_TIMEOUT_MS,
+  parseChecks,
+  type CheckDef,
+} from '../lib/checks.ts'
 import { RUN_KILL_GRACE_MS } from '../lib/runBudget.ts'
 import type { CheckOutcome } from '../lib/verdict.ts'
 import { getDb, type CheckResultRow } from './db.ts'

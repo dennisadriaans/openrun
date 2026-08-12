@@ -35,17 +35,26 @@ describe('assertTaskPrompt', () => {
   })
 
   it('throws a clear message when empty or whitespace-only', () => {
-    assert.throws(() => assertTaskPrompt(''), (err: Error) => {
-      assert.equal(err.message, emptyTaskPromptMessage())
-      return true
-    })
-    assert.throws(() => assertTaskPrompt('   '), (err: Error) => {
-      assert.equal(err.message, emptyTaskPromptMessage())
-      return true
-    })
-    assert.throws(() => assertTaskPrompt(undefined), (err: Error) => {
-      assert.equal(err.message, emptyTaskPromptMessage())
-      return true
-    })
+    assert.throws(
+      () => assertTaskPrompt(''),
+      (err: Error) => {
+        assert.equal(err.message, emptyTaskPromptMessage())
+        return true
+      },
+    )
+    assert.throws(
+      () => assertTaskPrompt('   '),
+      (err: Error) => {
+        assert.equal(err.message, emptyTaskPromptMessage())
+        return true
+      },
+    )
+    assert.throws(
+      () => assertTaskPrompt(undefined),
+      (err: Error) => {
+        assert.equal(err.message, emptyTaskPromptMessage())
+        return true
+      },
+    )
   })
 })

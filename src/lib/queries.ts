@@ -132,7 +132,10 @@ export function useConversation(runId: string, opts?: { streamHealthy?: boolean 
 }
 
 /** Files / repo / gh for the run detail right panel (deferred from chat). */
-export function useRunWorkspace(runId: string, opts?: { enabled?: boolean; streamHealthy?: boolean }) {
+export function useRunWorkspace(
+  runId: string,
+  opts?: { enabled?: boolean; streamHealthy?: boolean },
+) {
   const streamHealthy = opts?.streamHealthy ?? false
   return useQuery({
     queryKey: ['runWorkspace', runId],
@@ -282,7 +285,9 @@ export function useOpenPullRequest(runId: string) {
 
 export function useInvalidate() {
   const qc = useQueryClient()
-  return (keys: string[]) => keys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
+  return (keys: string[]) => {
+    for (const k of keys) qc.invalidateQueries({ queryKey: [k] })
+  }
 }
 
 export function useSaveTask() {

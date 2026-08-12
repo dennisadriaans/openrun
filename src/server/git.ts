@@ -52,7 +52,11 @@ function gitEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...extra }
 }
 
-function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): { ok: boolean; stdout: string; stderr: string } {
+function git(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): { ok: boolean; stdout: string; stderr: string } {
   try {
     const res = spawnSync('git', args, {
       cwd,
@@ -420,7 +424,11 @@ export function push(cwd: string): { branch: string; output: string } {
  * Omitting `paths` discards every path in the run delta (when `since` is set)
  * or the entire dirty tree (legacy).
  */
-export function discard(cwd: string, paths?: string[], since?: string): { discarded: 'all' | number } {
+export function discard(
+  cwd: string,
+  paths?: string[],
+  since?: string,
+): { discarded: 'all' | number } {
   if (!isRepo(cwd)) throw new Error('Not a git repository')
 
   const base = since && since.length > 0 ? since : undefined
@@ -429,9 +437,7 @@ export function discard(cwd: string, paths?: string[], since?: string): { discar
     const targets =
       paths && paths.length > 0
         ? paths
-        : changedFiles(cwd, base).flatMap((f) =>
-            f.oldPath ? [f.path, f.oldPath] : [f.path],
-          )
+        : changedFiles(cwd, base).flatMap((f) => (f.oldPath ? [f.path, f.oldPath] : [f.path]))
     if (targets.length === 0) return { discarded: paths && paths.length > 0 ? 0 : 'all' }
 
     for (const path of targets) {
@@ -475,9 +481,8 @@ export function discard(cwd: string, paths?: string[], since?: string): { discar
 }
 
 const GH_STATUS_TTL_MS = 60_000
-let ghStatusCache:
-  | { at: number; value: { installed: boolean; authenticated: boolean } }
-  | null = null
+let ghStatusCache: { at: number; value: { installed: boolean; authenticated: boolean } } | null =
+  null
 
 /** Whether the `gh` CLI is installed and authenticated (cached ~60s). */
 export function ghStatus(): { installed: boolean; authenticated: boolean } {

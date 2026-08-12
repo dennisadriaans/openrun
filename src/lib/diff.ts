@@ -117,7 +117,8 @@ export function toSplitRows(hunk: DiffHunk): SplitRow[] {
     // Collect the contiguous block of deletions then additions, and zip them.
     const deletions: DiffLine[] = []
     const additions: DiffLine[] = []
-    while (i < hunk.lines.length && hunk.lines[i]!.type === 'delete') deletions.push(hunk.lines[i++]!)
+    while (i < hunk.lines.length && hunk.lines[i]!.type === 'delete')
+      deletions.push(hunk.lines[i++]!)
     while (i < hunk.lines.length && hunk.lines[i]!.type === 'add') additions.push(hunk.lines[i++]!)
 
     const pairs = Math.max(deletions.length, additions.length)
@@ -128,4 +129,3 @@ export function toSplitRows(hunk: DiffHunk): SplitRow[] {
 
   return rows
 }
-

@@ -93,9 +93,9 @@ function matchingTasks(integrationId: string, event: CanonicalWebhookEvent): Tas
 }
 
 function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
-  const runtime = getDb()
-    .prepare('SELECT * FROM runtimes WHERE id = ?')
-    .get(task.runtimeId) as RuntimeRow | undefined
+  const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
+    | RuntimeRow
+    | undefined
   if (!runtime) throw new Error(`Runtime not found: ${task.runtimeId}`)
   if (!hasWorkspaceId(task.workspaceId)) {
     throw new Error(`Task ${task.id} has no workspace`)
@@ -127,7 +127,7 @@ export async function handleWebhookRequest(input: {
   headers: Headers
 }): Promise<WebhookHandleResult> {
   const integration = getIntegration(input.integrationId)
-  if (!integration || !integration.enabled) {
+  if (!integration?.enabled) {
     return { ok: false, status: 404, body: { error: 'Integration not found' } }
   }
 
@@ -207,7 +207,7 @@ function ingestCanonicalEvents(
   events: CanonicalWebhookEvent[],
 ): WebhookHandleResult {
   const integration = getIntegration(integrationId)
-  if (!integration || !integration.enabled) {
+  if (!integration?.enabled) {
     return { ok: false, status: 404, body: { error: 'Integration not found' } }
   }
 
@@ -277,16 +277,11 @@ function ingestCanonicalEvents(
 
 export function listRecentDeliveries(limit = 50): DeliveryRow[] {
   return getDb()
-    .prepare(
-      `SELECT * FROM webhook_deliveries ORDER BY receivedAt DESC LIMIT ?`,
-    )
+    .prepare(`SELECT * FROM webhook_deliveries ORDER BY receivedAt DESC LIMIT ?`)
     .all(limit) as DeliveryRow[]
 }
 
-export function listDeliveriesForIntegration(
-  integrationId: string,
-  limit = 30,
-): DeliveryRow[] {
+export function listDeliveriesForIntegration(integrationId: string, limit = 30): DeliveryRow[] {
   return getDb()
     .prepare(
       `SELECT * FROM webhook_deliveries

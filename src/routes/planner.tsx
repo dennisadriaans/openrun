@@ -3,20 +3,14 @@ import { Loader2, Sparkles, Wand2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import * as fns from '../fns'
 import type { PlanProposal } from '../lib/planProposals'
-import {
-  PlanProposalList,
-  type ProposalInstallState,
-} from '../components/PlanProposalCard'
+import { PlanProposalList, type ProposalInstallState } from '../components/PlanProposalCard'
 import { RuntimePicker } from '../components/ComposerControls'
 import { NeedProjectEmpty } from '../components/NeedProjectEmpty'
 import { Button, Card, Field, inputClass } from '../components/ui'
 import { WorkspacePicker } from '../components/WorkspacePicker'
 import { hasProjects } from '../lib/projectGate'
 import { pickDefaultRuntime } from '../lib/pickRuntime'
-import {
-  loadDismissedProposals,
-  persistDismissedProposals,
-} from '../lib/planProposalDismiss'
+import { loadDismissedProposals, persistDismissedProposals } from '../lib/planProposalDismiss'
 import { useProjects, useRuntimes, useWorkspaces } from '../lib/queries'
 import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
@@ -61,9 +55,7 @@ function PlannerPage() {
     () => workspaces?.find((w) => w.id === workspaceId),
     [workspaces, workspaceId],
   )
-  const workspaceReady = Boolean(
-    selectedWorkspace && isWorkspaceReady(selectedWorkspace.status),
-  )
+  const workspaceReady = Boolean(selectedWorkspace && isWorkspaceReady(selectedWorkspace.status))
 
   const generate = async () => {
     if (!objective.trim()) return
@@ -141,11 +133,12 @@ function PlannerPage() {
         <div className="mt-2 flex flex-wrap gap-1.5">
           {EXAMPLES.map((ex) => (
             <button
+              type="button"
               key={ex}
               onClick={() => setObjective(ex)}
               className="rounded-md border border-border bg-[var(--bg-quaternary)] px-2 py-1 text-left text-[11px] text-tier-secondary hover:bg-active hover:text-foreground"
             >
-              {ex.length > 52 ? ex.slice(0, 52) + '…' : ex}
+              {ex.length > 52 ? `${ex.slice(0, 52)}…` : ex}
             </button>
           ))}
         </div>
@@ -161,7 +154,9 @@ function PlannerPage() {
                   onChange={setRuntimeId}
                 />
               ) : (
-                <span className="px-2.5 text-ui-base text-tier-quaternary">No runtimes configured</span>
+                <span className="px-2.5 text-ui-base text-tier-quaternary">
+                  No runtimes configured
+                </span>
               )}
             </div>
           </Field>
@@ -197,10 +192,7 @@ function PlannerPage() {
             variant="primary"
             onClick={generate}
             disabled={
-              loading ||
-              !objective.trim() ||
-              !hasWorkspaceId(workspaceId) ||
-              !workspaceReady
+              loading || !objective.trim() || !hasWorkspaceId(workspaceId) || !workspaceReady
             }
             title={
               !hasWorkspaceId(workspaceId)
@@ -226,11 +218,11 @@ function PlannerPage() {
         <section className="mt-6">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-tier-secondary">
-              Proposed automations{' '}
-              <span className="text-tier-tertiary">({proposals.length})</span>
+              Proposed automations <span className="text-tier-tertiary">({proposals.length})</span>
             </h2>
             {runId ? (
               <button
+                type="button"
                 onClick={() => navigate({ to: '/runs/$runId', params: { runId } })}
                 className="text-xs text-tier-secondary underline underline-offset-2 hover:text-foreground"
               >

@@ -65,7 +65,10 @@ export function normalizeUserIds(ids: readonly string[] | undefined): string[] {
   const seen = new Set<string>()
   for (const raw of ids) {
     for (const part of String(raw).split(/[,\s]+/)) {
-      const id = part.replace(/[<>@|]/g, '').trim().toUpperCase()
+      const id = part
+        .replace(/[<>@|]/g, '')
+        .trim()
+        .toUpperCase()
       // Member ids start with U (person) or W (Enterprise Grid person).
       if (/^[UW][A-Z0-9]{4,}$/.test(id)) seen.add(id)
     }

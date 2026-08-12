@@ -42,7 +42,10 @@ describe('discardBlockedReason', () => {
   it('flags a clean working tree with the same copy as Commit', () => {
     assert.equal(discardBlockedReason({ hasChanges: false }), workingTreeCleanMessage())
     assert.equal(canDiscard({ hasChanges: false }), false)
-    assert.equal(discardBlockedReason({ hasChanges: false }), commitBlockedReason({ hasChanges: false }))
+    assert.equal(
+      discardBlockedReason({ hasChanges: false }),
+      commitBlockedReason({ hasChanges: false }),
+    )
   })
 })
 

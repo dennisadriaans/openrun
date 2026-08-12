@@ -64,7 +64,10 @@ function browseUrl(issue: JiraIssue | undefined): string {
   return issue.self ?? ''
 }
 
-function changelogHas(field: string, items: JiraChangelogItem[] | undefined): JiraChangelogItem | undefined {
+function changelogHas(
+  field: string,
+  items: JiraChangelogItem[] | undefined,
+): JiraChangelogItem | undefined {
   return items?.find((i) => (i.field ?? '').toLowerCase() === field.toLowerCase())
 }
 
@@ -77,9 +80,7 @@ function parseJira(input: WebhookParseInput): CanonicalWebhookEvent[] {
     input.headers.get('x-atlassian-webhook-identifier')?.trim() ||
     input.headers.get('x-atlassian-webhook-retry')?.trim() ||
     ''
-  const deliveryId =
-    deliveryHeader ||
-    `jira_${payload.timestamp ?? Date.now()}_${webhookEvent}`
+  const deliveryId = deliveryHeader || `jira_${payload.timestamp ?? Date.now()}_${webhookEvent}`
 
   const issue = payload.issue
   const fields = issue?.fields

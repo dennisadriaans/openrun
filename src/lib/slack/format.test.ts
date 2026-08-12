@@ -30,7 +30,7 @@ test('truncate keeps the head and marks the cut', () => {
 
 test('codeBlock keeps the tail of a long log', () => {
   // The end of a log is where the failure is.
-  const block = codeBlock('x'.repeat(50) + 'FAILED', 40)
+  const block = codeBlock(`${'x'.repeat(50)}FAILED`, 40)
   assert.ok(block.startsWith('```\n'))
   assert.ok(block.endsWith('\n```'))
   assert.ok(block.includes('FAILED'))

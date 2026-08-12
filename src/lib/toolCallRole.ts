@@ -24,12 +24,7 @@ function pickString(obj: Record<string, unknown>, ...keys: string[]): string | u
 /** Where a tool call came from, for chat chrome (not ACP ToolKind). */
 export type ToolCallRole = 'tool' | 'mcp' | 'skill' | 'subagent'
 
-export const TOOL_CALL_ROLES: readonly ToolCallRole[] = [
-  'tool',
-  'mcp',
-  'skill',
-  'subagent',
-]
+export const TOOL_CALL_ROLES: readonly ToolCallRole[] = ['tool', 'mcp', 'skill', 'subagent']
 
 export function isToolCallRole(value: unknown): value is ToolCallRole {
   return typeof value === 'string' && (TOOL_CALL_ROLES as readonly string[]).includes(value)

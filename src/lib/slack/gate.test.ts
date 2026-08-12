@@ -1,6 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isSlackUserAllowed, normalizeUserIds, slackAuthRefusal, slackConfigRefusal } from './gate.ts'
+import {
+  isSlackUserAllowed,
+  normalizeUserIds,
+  slackAuthRefusal,
+  slackConfigRefusal,
+} from './gate.ts'
 import { emptySlackSettings } from './types.ts'
 
 const enabled = { enabled: true, allowedUserIds: ['U123ABC'] }

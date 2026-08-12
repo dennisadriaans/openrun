@@ -25,12 +25,13 @@ Node 22+ and `pnpm` are required. Platform notes and first-run steps:
 ## Before you open a pull request
 
 ```bash
+pnpm lint        # Biome — formatting and lint in one pass (pnpm lint:fix applies it)
 pnpm typecheck   # tsc --noEmit — strict, plus noUnusedLocals/Parameters
 pnpm test        # node:test, no Vitest/Jest
 pnpm build       # catches client/server bundle violations
 ```
 
-All three must pass. `pnpm build` matters more than it looks: the most common
+All four must pass. `pnpm build` matters more than it looks: the most common
 way to break this project is a static import of `src/server/*` from a route
 component or from `src/fns/index.ts`, which drags `better-sqlite3` and
 `child_process` into the client bundle. Typecheck will not catch it; the build
@@ -63,6 +64,12 @@ back, so they are worth knowing up front:
 
 ## Conventions
 
+- **Style is Biome's problem, not yours.** `biome.json` is the whole answer:
+  single quotes, no semicolons, 100 columns. Run `pnpm lint:fix` and move on.
+  Two rule groups are switched off deliberately rather than silently: React's
+  `useExhaustiveDependencies` / `noArrayIndexKey`, and most of the `a11y` group.
+  Each needs per-site judgement, and turning them on across the existing UI is a
+  standalone contribution we would welcome — one rule per PR, not all at once.
 - **Tests** — `node:test` + `node:assert/strict`, colocated as
   `src/lib/foo.test.ts` beside `foo.ts`. Pure `lib/` logic is what's covered:
   gates, cron, args templates, matchers. **A new rule module gets a colocated

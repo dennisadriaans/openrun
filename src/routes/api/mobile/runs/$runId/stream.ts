@@ -23,9 +23,9 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/stream')({
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
 
         const runId = params.runId
-        const row = getDb()
-          .prepare('SELECT status FROM runs WHERE id = ?')
-          .get(runId) as { status: string } | undefined
+        const row = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+          | { status: string }
+          | undefined
         if (!row) return Response.json({ error: 'Not found' }, { status: 404 })
 
         const stream = createRunLiveSseStream(runId, {

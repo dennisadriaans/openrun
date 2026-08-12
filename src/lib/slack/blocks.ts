@@ -140,11 +140,7 @@ export function errorBlocks(text: string): SlackBlock[] {
 }
 
 export function statusBlocks(view: StatusView, baseUrl: string): SlackBlock[] {
-  const bits = [
-    `*${view.running}* running`,
-    `*${view.queued}* queued`,
-    `*${view.runsToday}* today`,
-  ]
+  const bits = [`*${view.running}* running`, `*${view.queued}* queued`, `*${view.runsToday}* today`]
   if (view.successRate !== null) bits.push(`*${view.successRate}%* green`)
   if (view.needsAttention > 0) bits.push(`:warning: *${view.needsAttention}* need attention`)
 
@@ -303,7 +299,9 @@ export function automationsBlocks(
   return [
     section(lines.join('\n')),
     ...actions(buttons),
-    context('`start <name>` to run one now · `enable <name>` / `disable <name>` to arm or pause it.'),
+    context(
+      '`start <name>` to run one now · `enable <name>` / `disable <name>` to arm or pause it.',
+    ),
   ]
 }
 

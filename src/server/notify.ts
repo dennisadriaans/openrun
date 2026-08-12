@@ -46,9 +46,7 @@ function id(prefix: string) {
 // ---------------------------------------------------------------------------
 
 export function listNotifiers(): NotifierRow[] {
-  return getDb()
-    .prepare('SELECT * FROM notifiers ORDER BY createdAt ASC')
-    .all() as NotifierRow[]
+  return getDb().prepare('SELECT * FROM notifiers ORDER BY createdAt ASC').all() as NotifierRow[]
 }
 
 export function getNotifier(notifierId: string): NotifierRow | undefined {
@@ -124,9 +122,7 @@ export function listNotificationDeliveries(opts?: {
   return (
     opts?.notifierId
       ? db
-          .prepare(
-            `${select} WHERE d.notifierId = ? ORDER BY d.sentAt DESC LIMIT ?`,
-          )
+          .prepare(`${select} WHERE d.notifierId = ? ORDER BY d.sentAt DESC LIMIT ?`)
           .all(opts.notifierId, limit)
       : db.prepare(`${select} ORDER BY d.sentAt DESC LIMIT ?`).all(limit)
   ) as NotificationDeliveryListItem[]
@@ -183,7 +179,10 @@ function deliverDesktop(notification: RunNotification): Promise<void> {
     process.platform === 'darwin'
       ? [
           'osascript',
-          ['-e', `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`],
+          [
+            '-e',
+            `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`,
+          ],
         ]
       : process.platform === 'win32'
         ? [
@@ -265,10 +264,7 @@ export function notifyRunFinished(runId: string, changedFiles: number): void {
 
   const verdict = parseVerdict(run.verdict)
   const matching = notifiers.filter((n) =>
-    notifierMatches(
-      { enabled: n.enabled === 1, verdicts: parseVerdictList(n.verdicts) },
-      verdict,
-    ),
+    notifierMatches({ enabled: n.enabled === 1, verdicts: parseVerdictList(n.verdicts) }, verdict),
   )
   if (matching.length === 0) return
 

@@ -44,10 +44,7 @@ export function countFailingChecks(results: readonly CheckPassRow[]): number {
  * True when the newest pass verified an earlier turn than the one the run is
  * now on — the panel is showing a judgement about code that has since moved.
  */
-export function isPassStale(
-  results: readonly CheckPassRow[],
-  currentMessageId: string,
-): boolean {
+export function isPassStale(results: readonly CheckPassRow[], currentMessageId: string): boolean {
   const pass = latestPass(results)
   const messageId = pass[0]?.messageId ?? ''
   if (!messageId || !currentMessageId) return false

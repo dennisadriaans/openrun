@@ -12,7 +12,10 @@ import {
 test('no session means the local edition even with a cloud URL', () => {
   assert.equal(resolveEdition({}), 'local')
   assert.equal(resolveEdition({ cloudUrl: 'https://cloud.example.com' }), 'local')
-  assert.equal(resolveEdition({ cloudUrl: 'https://cloud.example.com', hasSession: false }), 'local')
+  assert.equal(
+    resolveEdition({ cloudUrl: 'https://cloud.example.com', hasSession: false }),
+    'local',
+  )
   assert.equal(resolveEdition({ hasSession: true }), 'local')
   assert.equal(resolveEdition({ cloudUrl: '', hasSession: true }), 'local')
   assert.equal(resolveEdition({ cloudUrl: '   ', hasSession: true }), 'local')
@@ -72,7 +75,11 @@ const ALLOWED_EDITION_CONSUMERS = new Set([
   'lib/cloud/edition.ts',
 ])
 
-const EDITION_SYMBOLS = ['resolveEdition', 'hasControlPlaneCapability', 'CONTROL_PLANE_CAPABILITIES']
+const EDITION_SYMBOLS = [
+  'resolveEdition',
+  'hasControlPlaneCapability',
+  'CONTROL_PLANE_CAPABILITIES',
+]
 
 function sourceFiles(dir: string, base = dir): Array<string> {
   const found: Array<string> = []

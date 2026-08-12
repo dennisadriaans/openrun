@@ -21,9 +21,6 @@ export function editionFromSession(input: {
   return resolveEdition({ cloudUrl, hasSession: true })
 }
 
-export function cloudCapability(
-  edition: Edition,
-  capability: ControlPlaneCapability,
-): boolean {
+export function cloudCapability(edition: Edition, capability: ControlPlaneCapability): boolean {
   return hasControlPlaneCapability(edition, capability)
 }

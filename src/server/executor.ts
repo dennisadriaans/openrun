@@ -39,11 +39,7 @@ import {
   type TurnEventRow,
 } from './turnEvents'
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
-import {
-  DEFAULT_RUNTIME_MODE,
-  parseRuntimeMode,
-  type RuntimeMode,
-} from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
 import { assertWorkspaceId } from '../lib/workspaceRef'
 import {
@@ -61,11 +57,7 @@ import { withPrCapability } from '../lib/prCapability'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { checksForWorkspace, clearCheckPass, runCheckPass } from './checks'
-import {
-  RUN_KILL_GRACE_MS,
-  resolveRunTimeoutMs,
-  runTimedOutMessage,
-} from '../lib/runBudget'
+import { RUN_KILL_GRACE_MS, resolveRunTimeoutMs, runTimedOutMessage } from '../lib/runBudget'
 import {
   buildRepairPrompt,
   deriveVerdict,
@@ -560,8 +552,7 @@ function spawnTurn(input: {
   const structuredEvents = hasEventAdapter(kind) && !isPlainCliOutput(spawnArgs)
   // Grok streams token-sized `text` deltas; coalesce so chat gets prose, not
   // one event per word. Claude/Codex already emit whole messages.
-  const grokCoalescer =
-    structuredEvents && kind === 'grok' ? new AssistantDeltaCoalescer() : null
+  const grokCoalescer = structuredEvents && kind === 'grok' ? new AssistantDeltaCoalescer() : null
   let eventSeq = 0
   const insertEvent = db.prepare(
     `INSERT INTO turn_events (id, messageId, runId, seq, kind, payload, createdAt)
@@ -575,7 +566,12 @@ function spawnTurn(input: {
   const approvalOptions = new Map<string, PermissionOption[]>()
   const toolCallsById = new Map<
     string,
-    { name?: string; toolKind?: ToolKind; callRole?: TurnEventPayload['callRole']; mcpServer?: string }
+    {
+      name?: string
+      toolKind?: ToolKind
+      callRole?: TurnEventPayload['callRole']
+      mcpServer?: string
+    }
   >()
 
   const persistEvents = (events: ParsedTurnEvent[]) => {
@@ -682,9 +678,7 @@ function spawnTurn(input: {
     } catch {
       // Fall back to the generic label.
     }
-    void pushApprovalRequest({ runId, requestId, toolName, taskName, expiresAt }).catch(
-      () => {},
-    )
+    void pushApprovalRequest({ runId, requestId, toolName, taskName, expiresAt }).catch(() => {})
   }
 
   function resolveApproval(requestId: string, answer: ApprovalAnswer): boolean {
@@ -847,9 +841,9 @@ function spawnTurn(input: {
 
     // Capture the session id from the first turn's output when the runtime
     // reports one (Codex), so follow-ups can resume it.
-    const row = db.prepare('SELECT stdout, stderr FROM messages WHERE id = ?').get(assistantMsgId) as
-      | { stdout: string; stderr: string }
-      | undefined
+    const row = db
+      .prepare('SELECT stdout, stderr FROM messages WHERE id = ?')
+      .get(assistantMsgId) as { stdout: string; stderr: string } | undefined
     const existingSession = (
       db.prepare('SELECT sessionId FROM runs WHERE id = ?').get(runId) as { sessionId: string }
     ).sessionId
@@ -959,15 +953,20 @@ function spawnAcpTurn(input: {
   )
 
   let eventSeq = (
-    db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM turn_events WHERE messageId = ?').get(
-      assistantMsgId,
-    ) as { n: number }
+    db
+      .prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM turn_events WHERE messageId = ?')
+      .get(assistantMsgId) as { n: number }
   ).n
   const approvalTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const approvalOptions = new Map<string, PermissionOption[]>()
   const toolCallsById = new Map<
     string,
-    { name?: string; toolKind?: ToolKind; callRole?: TurnEventPayload['callRole']; mcpServer?: string }
+    {
+      name?: string
+      toolKind?: ToolKind
+      callRole?: TurnEventPayload['callRole']
+      mcpServer?: string
+    }
   >()
   // Agent prose arrives as token-sized chunks over ACP; coalesce so chat gets
   // one paragraph per stretch instead of a row per token.
@@ -1066,9 +1065,7 @@ function spawnAcpTurn(input: {
     } catch {
       // Fall back to the generic label.
     }
-    void pushApprovalRequest({ runId, requestId, toolName, taskName, expiresAt }).catch(
-      () => {},
-    )
+    void pushApprovalRequest({ runId, requestId, toolName, taskName, expiresAt }).catch(() => {})
   }
 
   function resolveApproval(requestId: string, answer: ApprovalAnswer): boolean {
@@ -1195,14 +1192,13 @@ function finalizeMessage(
   cwd: string,
 ) {
   const db = getDb()
-  const row = db.prepare('SELECT stdout, stderr, runId FROM messages WHERE id = ?').get(messageId) as
-    | { stdout: string; stderr: string; runId: string }
-    | undefined
+  const row = db
+    .prepare('SELECT stdout, stderr, runId FROM messages WHERE id = ?')
+    .get(messageId) as { stdout: string; stderr: string; runId: string } | undefined
 
   const events = listTurnEventsForMessage(messageId)
   const fromEvents = assistantTextFromEvents(events)
-  const content =
-    fromEvents || parseAssistantText(row?.stdout ?? '') || (row?.stderr ?? '').trim()
+  const content = fromEvents || parseAssistantText(row?.stdout ?? '') || (row?.stderr ?? '').trim()
 
   const run = row?.runId
     ? (db.prepare('SELECT baseSnapshot FROM runs WHERE id = ?').get(row.runId) as
@@ -1498,7 +1494,9 @@ export async function runChecksNow(runId: string): Promise<CheckResultRow[]> {
   if (run.workspaceId.trim().length > 0) assertWorkspaceFree(run.workspaceId)
 
   const last = db
-    .prepare("SELECT id FROM messages WHERE runId = ? AND role = 'assistant' ORDER BY createdAt DESC LIMIT 1")
+    .prepare(
+      "SELECT id FROM messages WHERE runId = ? AND role = 'assistant' ORDER BY createdAt DESC LIMIT 1",
+    )
     .get(runId) as { id: string } | undefined
   const messageId = last?.id ?? ''
 
@@ -1620,9 +1618,10 @@ export function cancelRunsForTask(taskId: string): number {
  */
 export function reconcileOrphanRuns(): { marked: number; killed: number } {
   const db = getDb()
-  const orphans = db
-    .prepare("SELECT id, pid FROM runs WHERE status = 'running'")
-    .all() as Array<{ id: string; pid: number | null }>
+  const orphans = db.prepare("SELECT id, pid FROM runs WHERE status = 'running'").all() as Array<{
+    id: string
+    pid: number | null
+  }>
 
   let killed = 0
   const now = Date.now()
@@ -1666,9 +1665,7 @@ export function cancelAllLiveRuns(): number {
   const ids = new Set<string>([
     ...liveMap().keys(),
     ...(
-      getDb()
-        .prepare("SELECT id FROM runs WHERE status = 'running'")
-        .all() as Array<{ id: string }>
+      getDb().prepare("SELECT id FROM runs WHERE status = 'running'").all() as Array<{ id: string }>
     ).map((r) => r.id),
   ])
   for (const id of ids) cancelRun(id)

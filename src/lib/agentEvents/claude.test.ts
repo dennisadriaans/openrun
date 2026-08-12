@@ -76,9 +76,7 @@ describe('parseClaudeObject', () => {
     const [event] = parseClaudeObject({
       type: 'assistant',
       message: {
-        content: [
-          { type: 'tool_use', id: 't', name: 'Edit', input: { file_path: '/repo/a.ts' } },
-        ],
+        content: [{ type: 'tool_use', id: 't', name: 'Edit', input: { file_path: '/repo/a.ts' } }],
       },
     })
     assert.equal(event?.payload.toolKind, 'edit')
@@ -99,9 +97,7 @@ describe('parseClaudeObject', () => {
     const [failed] = parseClaudeObject({
       type: 'user',
       message: {
-        content: [
-          { type: 'tool_result', tool_use_id: 'toolu_2', is_error: true, content: 'boom' },
-        ],
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_2', is_error: true, content: 'boom' }],
       },
     })
     assert.equal(failed?.payload.status, 'failed')

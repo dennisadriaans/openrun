@@ -42,10 +42,7 @@ export function hasEventAdapter(kind: EventRuntimeKind): boolean {
  * non-envelope lines become `assistant` (coalesced into prose) instead of a
  * `raw` pill per line.
  */
-export function parseTurnEventLine(
-  line: string,
-  kind: EventRuntimeKind,
-): ParsedTurnEvent[] {
+export function parseTurnEventLine(line: string, kind: EventRuntimeKind): ParsedTurnEvent[] {
   const trimmed = line.trim()
   if (!trimmed) return []
 
@@ -68,9 +65,7 @@ export function parseTurnEventLine(
 }
 
 /** Join assistant texts (and turn_done result as fallback) into chat content. */
-export function assistantTextFromEvents(
-  events: Array<{ kind: string; payload: string }>,
-): string {
+export function assistantTextFromEvents(events: Array<{ kind: string; payload: string }>): string {
   const texts: string[] = []
   let doneResult = ''
   for (const ev of events) {
@@ -104,13 +99,10 @@ export function assistantTextFromEvents(
  * saved Runtimes row. Users who already chose `json` / `stream-json` / `--json`
  * keep their choice; only the legacy `text` default (and missing flags) change.
  */
-export function ensureMachineReadableArgs(
-  args: string[],
-  kind: EventRuntimeKind,
-): string[] {
+export function ensureMachineReadableArgs(args: string[], kind: EventRuntimeKind): string[] {
   if (kind === 'claude') {
     const next = [...args]
-    const fmtIdx = next.findIndex((a) => a === '--output-format')
+    const fmtIdx = next.indexOf('--output-format')
     if (fmtIdx >= 0) {
       const current = next[fmtIdx + 1]
       if (current === 'text') next[fmtIdx + 1] = 'stream-json'
@@ -137,7 +129,7 @@ export function ensureMachineReadableArgs(
 
   if (kind === 'grok') {
     const next = [...args]
-    const fmtIdx = next.findIndex((a) => a === '--output-format')
+    const fmtIdx = next.indexOf('--output-format')
     if (fmtIdx >= 0) {
       const current = next[fmtIdx + 1]
       if (current === 'plain' || current === 'text') next[fmtIdx + 1] = 'streaming-json'

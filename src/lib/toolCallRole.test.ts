@@ -81,10 +81,7 @@ describe('role titles and input helpers', () => {
   })
 
   it('builds role-aware titles', () => {
-    assert.equal(
-      toolCallRoleTitle('mcp', 'mcp__github__list_prs', {}),
-      'github · list_prs',
-    )
+    assert.equal(toolCallRoleTitle('mcp', 'mcp__github__list_prs', {}), 'github · list_prs')
     assert.equal(toolCallRoleTitle('skill', 'Skill', { skill: 'figma-use' }), 'figma-use')
     assert.equal(
       toolCallRoleTitle('subagent', 'Task', {

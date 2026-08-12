@@ -148,7 +148,11 @@ function SlackPage() {
 
         <Field
           label="Bot token"
-          hint={<a href="https://api.slack.com/apps" target="_blank" rel="noreferrer">Slack app → OAuth</a>}
+          hint={
+            <a href="https://api.slack.com/apps" target="_blank" rel="noreferrer">
+              Slack app → OAuth
+            </a>
+          }
         >
           <input
             className={inputClass}
@@ -282,6 +286,7 @@ function describe(status: {
     }
   }
   if (status.lastError) return { tone: 'bad', text: status.lastError }
-  if (!status.configured) return { tone: 'bad', text: 'Add both tokens and an allowlist to connect.' }
+  if (!status.configured)
+    return { tone: 'bad', text: 'Add both tokens and an allowlist to connect.' }
   return { tone: 'idle', text: 'Connecting…' }
 }

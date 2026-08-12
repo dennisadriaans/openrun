@@ -22,10 +22,7 @@ test('describeWebhookDelivery flags ok with empty runIds as matched nothing', ()
 })
 
 test('describeWebhookDelivery summarizes started runs', () => {
-  assert.equal(
-    describeWebhookDelivery({ status: 'ok', runIds: ['run_1'] }).detail,
-    '1 run',
-  )
+  assert.equal(describeWebhookDelivery({ status: 'ok', runIds: ['run_1'] }).detail, '1 run')
   assert.equal(
     describeWebhookDelivery({
       status: 'ok',
@@ -69,8 +66,5 @@ test('describeWebhookDelivery labels ignored and duplicate', () => {
 })
 
 test('describeWebhookDelivery falls back for bare error status', () => {
-  assert.equal(
-    describeWebhookDelivery({ status: 'error', runIds: [] }).detail,
-    'error',
-  )
+  assert.equal(describeWebhookDelivery({ status: 'error', runIds: [] }).detail, 'error')
 })

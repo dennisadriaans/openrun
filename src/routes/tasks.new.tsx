@@ -25,9 +25,7 @@ function NewTaskPage() {
   const { data: integrations } = useIntegrations()
 
   if (isLoading) {
-    return (
-      <div className="px-8 py-8 text-ui-base text-tier-tertiary">Loading…</div>
-    )
+    return <div className="px-8 py-8 text-ui-base text-tier-tertiary">Loading…</div>
   }
 
   if (!hasProjects(projects?.length ?? 0)) {

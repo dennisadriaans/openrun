@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  agentSpawnOptions,
-  isPidAlive,
-  isShuttingDown,
-  setShuttingDown,
-} from './processControl.ts'
+import { agentSpawnOptions, isPidAlive, isShuttingDown, setShuttingDown } from './processControl.ts'
 
 describe('processControl', () => {
   it('reports the current process as alive and nonsense pids as dead', () => {

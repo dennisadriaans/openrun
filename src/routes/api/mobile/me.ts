@@ -9,7 +9,7 @@ export const Route = createFileRoute('/api/mobile/me')({
       GET: async ({ request }) => {
         const auth = requireDevice(request)
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleMe(auth.device)
+        const result = await handleMe(auth.device)
         return Response.json(result.body, { status: result.status })
       },
     },

@@ -221,9 +221,7 @@ export function addProject(input: AddProjectInput): ProjectRow {
 
     // Resolve to the repo root — registering a subdirectory should still
     // register (and later diff/checkout) the whole repo.
-    const toplevel = git.repoInfo(rawPath).isRepo
-      ? gitTopLevel(rawPath)
-      : rawPath
+    const toplevel = git.repoInfo(rawPath).isRepo ? gitTopLevel(rawPath) : rawPath
     const resolvedPath = toplevel || rawPath
 
     const existing = db.prepare('SELECT id FROM projects WHERE path = ?').get(resolvedPath) as
@@ -370,9 +368,7 @@ export function deleteProject(id: string, deleteFiles: boolean): void {
       .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
       .get(ws.id) as { id: string } | undefined
     if (active) {
-      throw new Error(
-        `Cannot delete project — workspace "${ws.name}" has a run in progress`,
-      )
+      throw new Error(`Cannot delete project — workspace "${ws.name}" has a run in progress`)
     }
   }
 
@@ -492,9 +488,8 @@ export function createWorkspace(input: {
   // registered repo may be offline / have no origin, so fall back to the
   // plain local branch name in that case.
   const remoteRef = `origin/${fromBranch}`
-  const baseRef = git.isRepo(project.path) && refExists(project.path, remoteRef)
-    ? remoteRef
-    : fromBranch
+  const baseRef =
+    git.isRepo(project.path) && refExists(project.path, remoteRef) ? remoteRef : fromBranch
 
   try {
     git.addWorktree({
@@ -551,14 +546,20 @@ export function runSetup(workspaceId: string): WorkspaceRow {
   const exitCode = res.status ?? -1
   const status = exitCode === 0 ? 'ready' : 'error'
 
-  db.prepare(
-    'UPDATE workspaces SET status = ?, setupLog = ?, setupExitCode = ? WHERE id = ?',
-  ).run(status, setupLog, exitCode, workspaceId)
+  db.prepare('UPDATE workspaces SET status = ?, setupLog = ?, setupExitCode = ? WHERE id = ?').run(
+    status,
+    setupLog,
+    exitCode,
+    workspaceId,
+  )
 
   return getWorkspace(workspaceId)!
 }
 
-export function archiveWorkspace(id: string, force: boolean): { removed: boolean; warning?: string } {
+export function archiveWorkspace(
+  id: string,
+  force: boolean,
+): { removed: boolean; warning?: string } {
   const db = getDb()
   const workspace = getWorkspace(id)
   if (!workspace) throw new Error('Workspace not found')
@@ -584,9 +585,7 @@ export function archiveWorkspace(id: string, force: boolean): { removed: boolean
       const parts: string[] = []
       if (dirty) parts.push('uncommitted changes')
       if (ahead > 0) parts.push(`${ahead} unpushed commit${ahead === 1 ? '' : 's'}`)
-      throw new Error(
-        `Workspace has ${parts.join(' and ')} — archive with force to discard`,
-      )
+      throw new Error(`Workspace has ${parts.join(' and ')} — archive with force to discard`)
     }
     git.removeWorktree(project.path, workspace.path, force)
   }

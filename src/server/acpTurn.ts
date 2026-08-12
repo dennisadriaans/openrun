@@ -69,7 +69,9 @@ export type AcpTurnInput = {
 
 /** A permission request waiting on a human decision. */
 type PendingPermission = {
-  resolve: (outcome: ReturnType<typeof permissionOutcome> | ReturnType<typeof cancelledOutcome>) => void
+  resolve: (
+    outcome: ReturnType<typeof permissionOutcome> | ReturnType<typeof cancelledOutcome>,
+  ) => void
   options: PermissionOption[]
 }
 

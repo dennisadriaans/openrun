@@ -153,8 +153,8 @@ function NewRun() {
           <div className="max-w-md text-center">
             <h1 className="text-ui-lg text-foreground">Start a new run</h1>
             <p className="mt-1.5 text-ui-base text-tier-tertiary">
-              Confirm the project and branch above, pick a runtime, then send the first message.
-              The run appears in history the moment the agent starts.
+              Confirm the project and branch above, pick a runtime, then send the first message. The
+              run appears in history the moment the agent starts.
             </p>
             {error ? <p className="mt-3 text-ui-base text-danger">{error}</p> : null}
           </div>

@@ -10,11 +10,7 @@
  */
 import { hasTaskPrompt } from '../lib/taskPrompt.ts'
 import { isWorkspaceReady } from '../lib/workspaceReady.ts'
-import {
-  queueDecision,
-  type PendingEntry,
-  type QueueTrigger,
-} from '../lib/runQueue.ts'
+import { queueDecision, type PendingEntry, type QueueTrigger } from '../lib/runQueue.ts'
 import { publishActivityLive } from './activityLive.ts'
 import { getDb, type RunQueueRow, type RuntimeRow, type TaskRow } from './db.ts'
 import { runTask } from './executor.ts'
@@ -31,8 +27,8 @@ export function listQueue(workspaceId?: string): RunQueueRow[] {
   return (
     workspaceId
       ? db
-        .prepare('SELECT * FROM run_queue WHERE workspaceId = ? ORDER BY queuedAt ASC')
-        .all(workspaceId)
+          .prepare('SELECT * FROM run_queue WHERE workspaceId = ? ORDER BY queuedAt ASC')
+          .all(workspaceId)
       : db.prepare('SELECT * FROM run_queue ORDER BY queuedAt ASC').all()
   ) as RunQueueRow[]
 }
@@ -63,9 +59,7 @@ function publishDepth(workspaceId: string) {
   })
 }
 
-export type EnqueueResult =
-  | { queued: true; position: number }
-  | { queued: false; reason: string }
+export type EnqueueResult = { queued: true; position: number } | { queued: false; reason: string }
 
 /**
  * Park an unattended fire for a busy workspace. Returns why not when the entry
@@ -171,7 +165,7 @@ export function drainWorkspace(workspaceId: string): void {
     // Deleted, disabled, empty prompt, or pointed at a workspace / runtime that
     // is no longer usable while it waited — drop it and try the next entry.
     // Same gates the scheduler applies before arming a fresh tick.
-    if (!task || !task.enabled) continue
+    if (!task?.enabled) continue
     if (!hasTaskPrompt(task.prompt) && !entry.prompt.trim()) continue
     const workspace = getWorkspace(workspaceId)
     if (!workspace || !isWorkspaceReady(workspace.status)) continue
@@ -203,9 +197,9 @@ export function drainWorkspace(workspaceId: string): void {
  * behind by a crash or restart is not stranded until the next cron tick.
  */
 export function drainAllQueues(): void {
-  const workspaces = getDb()
-    .prepare('SELECT DISTINCT workspaceId FROM run_queue')
-    .all() as Array<{ workspaceId: string }>
+  const workspaces = getDb().prepare('SELECT DISTINCT workspaceId FROM run_queue').all() as Array<{
+    workspaceId: string
+  }>
   for (const row of workspaces) {
     try {
       drainWorkspace(row.workspaceId)

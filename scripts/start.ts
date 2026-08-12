@@ -25,11 +25,7 @@ import { existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import {
-  DEFAULT_HOST,
-  insecureHostWarning,
-  serverBindRefusal,
-} from '../src/lib/serverAccess.ts'
+import { DEFAULT_HOST, insecureHostWarning, serverBindRefusal } from '../src/lib/serverAccess.ts'
 
 // ---------------------------------------------------------------------------
 // 1. Refuse an unsafe bind

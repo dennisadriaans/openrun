@@ -1,11 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  countFailingChecks,
-  isPassStale,
-  latestPass,
-  type CheckPassRow,
-} from './checkPass.ts'
+import { countFailingChecks, isPassStale, latestPass, type CheckPassRow } from './checkPass.ts'
 
 function row(partial: Partial<CheckPassRow> & { messageId: string }): CheckPassRow {
   return { attempt: 0, outcome: 'passed', startedAt: 0, ...partial }

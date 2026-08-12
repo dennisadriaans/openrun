@@ -85,10 +85,9 @@ describe('formatCommandLine', () => {
 
 describe('promptChannels', () => {
   it('detects stdin', () => {
-    assert.deepEqual(
-      promptChannels({ args: ['-p'], stdinText: 'hi', promptFileContents: null }),
-      ['stdin'],
-    )
+    assert.deepEqual(promptChannels({ args: ['-p'], stdinText: 'hi', promptFileContents: null }), [
+      'stdin',
+    ])
   })
 
   it('detects a prompt file from the unresolved token', () => {

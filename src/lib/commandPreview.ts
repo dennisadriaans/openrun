@@ -76,9 +76,7 @@ function lcsPairs(a: string[], b: string[]): Array<[number, number]> {
   for (let i = rows - 1; i >= 0; i--) {
     for (let j = cols - 1; j >= 0; j--) {
       table[i]![j] =
-        a[i] === b[j]
-          ? table[i + 1]![j + 1]! + 1
-          : Math.max(table[i + 1]![j]!, table[i]![j + 1]!)
+        a[i] === b[j] ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!)
     }
   }
 
@@ -140,10 +138,7 @@ export function promptChannels(input: {
   const token = input.promptToken ?? PREVIEW_PROMPT
   const channels: PromptChannel[] = []
   if (input.stdinText !== null) channels.push('stdin')
-  if (
-    input.promptFileContents !== null ||
-    input.args.some((a) => a.includes(PROMPT_FILE_TOKEN))
-  ) {
+  if (input.promptFileContents !== null || input.args.some((a) => a.includes(PROMPT_FILE_TOKEN))) {
     channels.push('promptFile')
   }
   if (input.args.some((a) => a.includes(token))) channels.push('argv')
@@ -205,7 +200,9 @@ export function commandPreviewWarnings(input: {
       code: 'template-args-dropped',
       message: `Open Run replaced or removed ${input.droppedTemplateArgs
         .map((a) => `\`${a}\``)
-        .join(', ')} from your args template — it owns those flags (session, model/effort, access mode, output format).`,
+        .join(
+          ', ',
+        )} from your args template — it owns those flags (session, model/effort, access mode, output format).`,
     })
   }
 

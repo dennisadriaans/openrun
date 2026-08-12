@@ -22,6 +22,7 @@ turn snapshots git state so the UI can show diffs and open a PR.
 
 ```bash
 pnpm dev             # dev server on :3000 (loopback)
+pnpm lint            # biome check (lint + format); pnpm lint:fix writes
 pnpm build           # production build into dist/
 pnpm start           # serve the build via scripts/start.ts (refuses an unsafe bind)
 pnpm token           # print / create the access token
@@ -90,6 +91,9 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
   covered the moment it is written, and a second mechanism is how one endpoint gets
   forgotten. Signed webhook / Slack routes are exempt via `pathAuthenticatesItself()`
   because they authenticate by HMAC; that list is the only place exemptions live.
+  The same middleware runs `hostHeaderRefusal()` **before** the token check: on a
+  loopback bind, a request that addresses us by a non-loopback name is a rebound
+  DNS answer, and it is refused whether or not a token is configured.
 - **Open core: no local feature may consult the edition.** `lib/edition.ts` is the seam the
   commercial control plane attaches to, and it only ever *adds* surfaces. `lib/edition.test.ts`
   walks `src/` and fails the build if anything outside that module references it. If you are

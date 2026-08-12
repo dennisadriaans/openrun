@@ -18,10 +18,7 @@ describe('applyPatch', () => {
     const withRuntime = applyPatch({}, { runtimeId: 'claude', model: 'claude-opus-4-8' })
     assert.equal(withRuntime.byRuntime?.claude?.model, 'claude-opus-4-8')
 
-    const withPrev = applyPatch(
-      { runtimeId: 'claude' },
-      { effort: 'max' },
-    )
+    const withPrev = applyPatch({ runtimeId: 'claude' }, { effort: 'max' })
     assert.equal(withPrev.byRuntime?.claude?.effort, 'max')
   })
 
@@ -43,8 +40,13 @@ describe('applyPatch', () => {
 
 describe('pickerPrefForRuntime', () => {
   it('returns the stored pref for a runtime', () => {
-    const prefs: PickerPrefs = { byRuntime: { claude: { model: 'claude-opus-4-8', effort: 'high' } } }
-    assert.deepEqual(pickerPrefForRuntime(prefs, 'claude'), { model: 'claude-opus-4-8', effort: 'high' })
+    const prefs: PickerPrefs = {
+      byRuntime: { claude: { model: 'claude-opus-4-8', effort: 'high' } },
+    }
+    assert.deepEqual(pickerPrefForRuntime(prefs, 'claude'), {
+      model: 'claude-opus-4-8',
+      effort: 'high',
+    })
   })
 
   it('returns an empty object for unknown or missing runtime', () => {

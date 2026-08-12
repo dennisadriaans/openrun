@@ -11,10 +11,7 @@ import { createHash, randomBytes } from 'node:crypto'
 
 import { getDb, type DeviceRow, type DevicePairingRow } from '../db'
 import { safeEqualString } from '../integrations/crypto'
-import {
-  DEFAULT_MOBILE_SCOPE,
-  type MobileScope,
-} from '../../lib/mobileScope'
+import { DEFAULT_MOBILE_SCOPE, type MobileScope } from '../../lib/mobileScope'
 import {
   PAIRING_ALPHABET,
   PAIRING_CODE_LENGTH,
@@ -186,9 +183,9 @@ export function redeemPairingCode(input: {
 export function findDeviceByToken(token: string): DeviceRow | null {
   if (!token) return null
   const hash = sha256(token)
-  const row = getDb()
-    .prepare(`SELECT * FROM devices WHERE tokenHash = ?`)
-    .get(hash) as DeviceRow | undefined
+  const row = getDb().prepare(`SELECT * FROM devices WHERE tokenHash = ?`).get(hash) as
+    | DeviceRow
+    | undefined
   if (!row) return null
   if (row.revokedAt !== null) return null
   if (!safeEqualString(row.tokenHash, hash)) return null
@@ -210,24 +207,20 @@ export function touchDevice(device: DeviceRow): void {
 
 /** Paired devices, newest first. Revoked rows are kept for the audit trail. */
 export function listDevices(): DeviceRow[] {
-  return getDb()
-    .prepare(`SELECT * FROM devices ORDER BY createdAt DESC`)
-    .all() as DeviceRow[]
+  return getDb().prepare(`SELECT * FROM devices ORDER BY createdAt DESC`).all() as DeviceRow[]
 }
 
 /** Devices that can receive an APNs push right now. */
 export function pushableDevices(): DeviceRow[] {
   return getDb()
-    .prepare(
-      `SELECT * FROM devices WHERE revokedAt IS NULL AND pushToken != '' ORDER BY createdAt`,
-    )
+    .prepare(`SELECT * FROM devices WHERE revokedAt IS NULL AND pushToken != '' ORDER BY createdAt`)
     .all() as DeviceRow[]
 }
 
 export function getDevice(deviceId: string): DeviceRow | null {
-  const row = getDb()
-    .prepare(`SELECT * FROM devices WHERE id = ?`)
-    .get(deviceId) as DeviceRow | undefined
+  const row = getDb().prepare(`SELECT * FROM devices WHERE id = ?`).get(deviceId) as
+    | DeviceRow
+    | undefined
   return row ?? null
 }
 

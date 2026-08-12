@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  activityLiveInvalidateKeys,
-  activityLiveStreamPath,
-} from './activityLive.ts'
+import { activityLiveInvalidateKeys, activityLiveStreamPath } from './activityLive.ts'
 
 describe('activityLiveInvalidateKeys', () => {
   it('refetches list pages when a run starts or finishes', () => {

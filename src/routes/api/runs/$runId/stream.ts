@@ -14,9 +14,9 @@ export const Route = createFileRoute('/api/runs/$runId/stream')({
     handlers: {
       GET: async ({ params, request }) => {
         const runId = params.runId
-        const row = getDb()
-          .prepare('SELECT status FROM runs WHERE id = ?')
-          .get(runId) as { status: string } | undefined
+        const row = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+          | { status: string }
+          | undefined
 
         if (!row) {
           return new Response('Run not found', { status: 404 })

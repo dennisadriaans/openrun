@@ -9,11 +9,7 @@
  * message says, and what body each destination expects. Delivery (fetch, OS
  * notification) lives in `server/notify.ts`.
  */
-import {
-  verdictLabel,
-  verdictNeedsAttention,
-  type RunVerdict,
-} from './verdict.ts'
+import { verdictLabel, verdictNeedsAttention, type RunVerdict } from './verdict.ts'
 
 export type NotifierKind = 'webhook' | 'desktop'
 
@@ -27,7 +23,7 @@ export type NotifierRule = {
 }
 
 export function parseVerdictList(raw: string | null | undefined): RunVerdict[] {
-  if (!raw || !raw.trim()) return []
+  if (!raw?.trim()) return []
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
@@ -86,13 +82,13 @@ export function buildRunNotification(input: RunNotificationInput): RunNotificati
   if (input.failedChecks.length > 0) {
     parts.push(`Failing: ${input.failedChecks.join(', ')}`)
   }
-  parts.push(
-    input.changedFiles === 1 ? '1 file changed' : `${input.changedFiles} files changed`,
-  )
+  parts.push(input.changedFiles === 1 ? '1 file changed' : `${input.changedFiles} files changed`)
   parts.push(`${humanDuration(input.durationMs)} · ${input.trigger}`)
   if (input.repairAttempts > 0) {
     parts.push(
-      input.repairAttempts === 1 ? 'after 1 repair turn' : `after ${input.repairAttempts} repair turns`,
+      input.repairAttempts === 1
+        ? 'after 1 repair turn'
+        : `after ${input.repairAttempts} repair turns`,
     )
   }
 

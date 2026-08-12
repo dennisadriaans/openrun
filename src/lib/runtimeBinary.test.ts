@@ -35,14 +35,20 @@ describe('assertRuntimeBinaryAvailable', () => {
   })
 
   it('throws when the binary name is empty', () => {
-    assert.throws(() => assertRuntimeBinaryAvailable('', true), (err: Error) => {
-      assert.equal(err.message, emptyRuntimeBinaryMessage())
-      return true
-    })
-    assert.throws(() => assertRuntimeBinaryAvailable('   ', true), (err: Error) => {
-      assert.equal(err.message, emptyRuntimeBinaryMessage())
-      return true
-    })
+    assert.throws(
+      () => assertRuntimeBinaryAvailable('', true),
+      (err: Error) => {
+        assert.equal(err.message, emptyRuntimeBinaryMessage())
+        return true
+      },
+    )
+    assert.throws(
+      () => assertRuntimeBinaryAvailable('   ', true),
+      (err: Error) => {
+        assert.equal(err.message, emptyRuntimeBinaryMessage())
+        return true
+      },
+    )
   })
 
   it('throws a clear message when not on PATH', () => {

@@ -42,9 +42,9 @@ function scheduleTask(task: TaskRow) {
   if (!workspace || !isWorkspaceReady(workspace.status)) return
   // Don't arm a job whose CLI isn't on PATH — enable already refuses; this
   // covers legacy rows that were armed before the binary disappeared.
-  const runtimeRow = getDb()
-    .prepare('SELECT * FROM runtimes WHERE id = ?')
-    .get(task.runtimeId) as RuntimeRow | undefined
+  const runtimeRow = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
+    | RuntimeRow
+    | undefined
   if (!runtimeRow || !checkRuntimeInstalled(runtimeRow.bin).installed) return
   // Same for a blank prompt — enable already refuses; this covers legacy rows
   // armed before Create / Save required Agent Instructions.
@@ -54,7 +54,7 @@ function scheduleTask(task: TaskRow) {
     if (isShuttingDown()) return
     const db = getDb()
     const fresh = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as TaskRow | undefined
-    if (!fresh || !fresh.enabled) return
+    if (!fresh?.enabled) return
     if (!hasWorkspaceId(fresh.workspaceId)) return
     const freshWs = getWorkspace(fresh.workspaceId)
     if (!freshWs || !isWorkspaceReady(freshWs.status)) return
@@ -110,7 +110,9 @@ export function bootScheduler() {
   if (g.__agentopsBooted) return
   g.__agentopsBooted = true
   const db = getDb()
-  const tasks = db.prepare("SELECT * FROM tasks WHERE enabled = 1 AND cron != ''").all() as TaskRow[]
+  const tasks = db
+    .prepare("SELECT * FROM tasks WHERE enabled = 1 AND cron != ''")
+    .all() as TaskRow[]
   for (const t of tasks) scheduleTask(t)
   // A queue left behind by a crash or a restart would otherwise sit untouched
   // until the next cron tick happened to finish a run in that workspace.

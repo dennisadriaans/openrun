@@ -4,10 +4,7 @@
  * Pause always stays available (disarming never needs these checks).
  */
 import { invalidCronMessage } from './cron.ts'
-import {
-  runPrereqBlockedReason,
-  type RunPrereqInput,
-} from './runPrereqGate.ts'
+import { runPrereqBlockedReason, type RunPrereqInput } from './runPrereqGate.ts'
 
 /** Fields the list/detail pages already have on TaskWithMeta. */
 export type EnableGateInput = RunPrereqInput & {

@@ -17,12 +17,7 @@
  * into the database — `integrations.secret` is already stored in plaintext, and
  * a second, more valuable plaintext secret would be a step backwards.
  */
-import {
-  connect,
-  constants,
-  type ClientHttp2Session,
-  type ClientHttp2Stream,
-} from 'node:http2'
+import { connect, constants, type ClientHttp2Session, type ClientHttp2Stream } from 'node:http2'
 import { createSign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -61,8 +56,7 @@ export function apnsConfig(): ApnsConfig | null {
     keyId,
     teamId,
     topic,
-    defaultEnv:
-      process.env.AGENTOPS_APNS_ENV?.trim() === 'production' ? 'production' : 'sandbox',
+    defaultEnv: process.env.AGENTOPS_APNS_ENV?.trim() === 'production' ? 'production' : 'sandbox',
   }
 }
 
@@ -99,9 +93,7 @@ function providerToken(config: ApnsConfig): string {
   }
 
   const header = base64url(JSON.stringify({ alg: 'ES256', kid: config.keyId }))
-  const claims = base64url(
-    JSON.stringify({ iss: config.teamId, iat: Math.floor(now / 1000) }),
-  )
+  const claims = base64url(JSON.stringify({ iss: config.teamId, iat: Math.floor(now / 1000) }))
   const signingInput = `${header}.${claims}`
 
   const key = readFileSync(config.keyPath, 'utf8')
@@ -213,11 +205,7 @@ function postNotification(input: {
 // ---------------------------------------------------------------------------
 
 /** Device tokens Apple told us are dead, so we stop pushing to them. */
-const DEAD_TOKEN_REASONS = new Set([
-  'BadDeviceToken',
-  'Unregistered',
-  'DeviceTokenNotForTopic',
-])
+const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic'])
 
 function hostFor(device: DeviceRow, config: ApnsConfig): string {
   const env = device.pushEnv || config.defaultEnv

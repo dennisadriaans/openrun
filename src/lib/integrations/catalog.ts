@@ -58,7 +58,11 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         label: 'Status changed',
         description: 'Derived when changelog includes status',
       },
-      { id: 'jira:issue_assigned', label: 'Assigned', description: 'Derived when assignee changes' },
+      {
+        id: 'jira:issue_assigned',
+        label: 'Assigned',
+        description: 'Derived when assignee changes',
+      },
       { id: 'comment_created', label: 'Comment created' },
       { id: 'comment_updated', label: 'Comment updated' },
       { id: 'comment_deleted', label: 'Comment deleted' },

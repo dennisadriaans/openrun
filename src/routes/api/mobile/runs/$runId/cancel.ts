@@ -9,7 +9,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/cancel')({
       POST: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'runs.cancel')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleCancelRun(params.runId)
+        const result = await handleCancelRun(params.runId)
         return Response.json(result.body, { status: result.status })
       },
     },

@@ -80,10 +80,7 @@ export function duration(start: number, end: number | null): string {
  * alone — failure keeps a coloured dot on neutral text so a red row never
  * competes for the eye.
  */
-const STATUS_META: Record<
-  string,
-  { label: string; text: string; dot: string }
-> = {
+const STATUS_META: Record<string, { label: string; text: string; dot: string }> = {
   running: {
     label: 'Running',
     text: 'text-success',

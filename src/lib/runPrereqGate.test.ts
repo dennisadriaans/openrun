@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { missingRuntimeBinaryMessage } from './runtimeBinary.ts'
-import {
-  runPrereqBlockedReason,
-  workspaceBlockedReason,
-} from './runPrereqGate.ts'
+import { runPrereqBlockedReason, workspaceBlockedReason } from './runPrereqGate.ts'
 import { emptyTaskPromptMessage } from './taskPrompt.ts'
 import { missingWorkspaceMessage } from './workspaceRef.ts'
 import { workspaceNotReadyMessage } from './workspaceReady.ts'

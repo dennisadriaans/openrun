@@ -74,9 +74,9 @@ export function listIntegrations(): IntegrationPublic[] {
 }
 
 export function getIntegration(integrationId: string): IntegrationRow | undefined {
-  return getDb()
-    .prepare('SELECT * FROM integrations WHERE id = ?')
-    .get(integrationId) as IntegrationRow | undefined
+  return getDb().prepare('SELECT * FROM integrations WHERE id = ?').get(integrationId) as
+    | IntegrationRow
+    | undefined
 }
 
 export function findIntegrationByCloudConnection(
@@ -137,8 +137,7 @@ export function updateIntegration(input: UpdateIntegrationInput): IntegrationPub
   if (!existing) throw new Error('Integration not found')
   const name = input.name?.trim() || existing.name
   const enabled = input.enabled === undefined ? existing.enabled : input.enabled ? 1 : 0
-  const config =
-    input.config === undefined ? existing.config : JSON.stringify(input.config)
+  const config = input.config === undefined ? existing.config : JSON.stringify(input.config)
   const updatedAt = Date.now()
   db.prepare(
     `UPDATE integrations SET name = ?, enabled = ?, config = ?, updatedAt = ? WHERE id = ?`,

@@ -78,7 +78,7 @@ export const DEFAULT_MOBILE_SCOPE: MobileScope = 'control'
 
 /** True when `scope` is a tag this build understands. */
 export function isMobileScope(value: string): value is MobileScope {
-  return Object.prototype.hasOwnProperty.call(SCOPE_OPS, value)
+  return Object.hasOwn(SCOPE_OPS, value)
 }
 
 /**

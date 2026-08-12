@@ -1,10 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  eventMatchesFilters,
-  eventTypeMatches,
-  taskMatchesWebhookEvent,
-} from './match.ts'
+import { eventMatchesFilters, eventTypeMatches, taskMatchesWebhookEvent } from './match.ts'
 import { emptyActor, emptyIssue, type CanonicalWebhookEvent } from './types.ts'
 
 const event: CanonicalWebhookEvent = {

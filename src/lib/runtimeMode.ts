@@ -29,11 +29,7 @@ export const RUNTIME_MODES: Array<{
 ]
 
 export function isRuntimeMode(value: string | null | undefined): value is RuntimeMode {
-  return (
-    value === 'approval-required' ||
-    value === 'auto-accept-edits' ||
-    value === 'full-access'
-  )
+  return value === 'approval-required' || value === 'auto-accept-edits' || value === 'full-access'
 }
 
 export function parseRuntimeMode(value: string | null | undefined): RuntimeMode {

@@ -34,13 +34,19 @@ describe('assertWorkspaceId', () => {
   })
 
   it('throws a clear message when missing', () => {
-    assert.throws(() => assertWorkspaceId(''), (err: Error) => {
-      assert.equal(err.message, missingWorkspaceMessage())
-      return true
-    })
-    assert.throws(() => assertWorkspaceId(undefined), (err: Error) => {
-      assert.equal(err.message, missingWorkspaceMessage())
-      return true
-    })
+    assert.throws(
+      () => assertWorkspaceId(''),
+      (err: Error) => {
+        assert.equal(err.message, missingWorkspaceMessage())
+        return true
+      },
+    )
+    assert.throws(
+      () => assertWorkspaceId(undefined),
+      (err: Error) => {
+        assert.equal(err.message, missingWorkspaceMessage())
+        return true
+      },
+    )
   })
 })

@@ -6,7 +6,14 @@
  * so `../` traversal, absolute paths and symlinks pointing outside are all
  * refused before any read or write happens.
  */
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
 /** Directories never worth listing in a code workspace. */

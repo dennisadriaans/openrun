@@ -15,7 +15,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/diff/file')({
         const auth = requireDeviceOp(request, 'runs.diff')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
         const path = new URL(request.url).searchParams.get('path') ?? ''
-        const result = handleRunFileDiff({ runId: params.runId, path })
+        const result = await handleRunFileDiff({ runId: params.runId, path })
         return Response.json(result.body, { status: result.status })
       },
     },

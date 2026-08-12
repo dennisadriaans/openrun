@@ -61,9 +61,7 @@ function parseLinear(input: WebhookParseInput): CanonicalWebhookEvent[] {
 
   const data = payload.data
   const updatedFrom = payload.updatedFrom
-  const labels =
-    data?.labels?.map((l) => l.name ?? '').filter(Boolean) ??
-    []
+  const labels = data?.labels?.map((l) => l.name ?? '').filter(Boolean) ?? []
 
   const prevState =
     typeof updatedFrom?.stateId === 'string'
@@ -73,10 +71,7 @@ function parseLinear(input: WebhookParseInput): CanonicalWebhookEvent[] {
         : ''
 
   const statusName = data?.state?.name || data?.stateId || ''
-  const previousStatus =
-    prevState && prevState !== (data?.stateId ?? '')
-      ? prevState
-      : ''
+  const previousStatus = prevState && prevState !== (data?.stateId ?? '') ? prevState : ''
 
   const base: CanonicalWebhookEvent = {
     provider: 'linear',
@@ -113,8 +108,7 @@ function parseLinear(input: WebhookParseInput): CanonicalWebhookEvent[] {
       organizationId: payload.organizationId ?? '',
       teamId: data?.teamId ?? '',
       stateId: data?.stateId ?? '',
-      previousStateId:
-        typeof updatedFrom?.stateId === 'string' ? updatedFrom.stateId : '',
+      previousStateId: typeof updatedFrom?.stateId === 'string' ? updatedFrom.stateId : '',
     },
   }
 
@@ -124,7 +118,7 @@ function parseLinear(input: WebhookParseInput): CanonicalWebhookEvent[] {
     resource === 'Issue' &&
     action === 'update' &&
     updatedFrom &&
-    Object.prototype.hasOwnProperty.call(updatedFrom, 'stateId')
+    Object.hasOwn(updatedFrom, 'stateId')
   ) {
     events.push({
       ...base,
@@ -142,7 +136,7 @@ function parseLinear(input: WebhookParseInput): CanonicalWebhookEvent[] {
     resource === 'Issue' &&
     action === 'update' &&
     updatedFrom &&
-    Object.prototype.hasOwnProperty.call(updatedFrom, 'assigneeId')
+    Object.hasOwn(updatedFrom, 'assigneeId')
   ) {
     events.push({
       ...base,
@@ -159,11 +153,7 @@ export const linearProvider: IntegrationProvider = {
   id: 'linear',
   verify(input: WebhookVerifyInput): boolean {
     if (
-      !verifyHexHmacSignature(
-        input.secret,
-        input.rawBody,
-        input.headers.get('linear-signature'),
-      )
+      !verifyHexHmacSignature(input.secret, input.rawBody, input.headers.get('linear-signature'))
     ) {
       return false
     }

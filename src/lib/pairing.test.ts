@@ -88,10 +88,7 @@ test('172.32 is public — it is outside the private range', () => {
 test('plain http to a public host is refused with the ATS instruction', () => {
   const result = validateBaseUrl('http://agentops.example.com')
   assert.equal(result.ok, false)
-  assert.match(
-    result.ok ? '' : result.message,
-    /iOS blocks plain HTTP to public addresses/,
-  )
+  assert.match(result.ok ? '' : result.message, /iOS blocks plain HTTP to public addresses/)
 })
 
 test('https to a public host is accepted — the tunnel path', () => {

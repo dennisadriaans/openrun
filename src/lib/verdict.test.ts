@@ -73,7 +73,10 @@ describe('deriveVerdict', () => {
   })
 
   it('is verified when a check passed and files changed', () => {
-    assert.equal(deriveVerdict({ status: 'success', checks: [passing], changedFiles: 1 }), 'verified')
+    assert.equal(
+      deriveVerdict({ status: 'success', checks: [passing], changedFiles: 1 }),
+      'verified',
+    )
   })
 })
 
@@ -120,7 +123,12 @@ describe('clampRepairAttempts', () => {
 })
 
 describe('shouldAttemptRepair', () => {
-  const base = { verdict: 'failed-checks' as const, attemptsUsed: 0, maxAttempts: 1, canFollowUp: true }
+  const base = {
+    verdict: 'failed-checks' as const,
+    attemptsUsed: 0,
+    maxAttempts: 1,
+    canFollowUp: true,
+  }
 
   it('repairs a failed-checks run with budget left', () => {
     assert.equal(shouldAttemptRepair(base), true)

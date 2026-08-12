@@ -6,10 +6,7 @@ test('normalizeText strips Slack wire formatting', () => {
   assert.equal(normalizeText('<@U123456> runs'), 'runs')
   assert.equal(normalizeText('<@U123|dennis> status'), 'status')
   assert.equal(normalizeText('<#C0001|general> runs'), 'runs')
-  assert.equal(
-    normalizeText('open <https://example.com|example.com>'),
-    'open https://example.com',
-  )
+  assert.equal(normalizeText('open <https://example.com|example.com>'), 'open https://example.com')
 })
 
 test('normalizeText undoes mobile keyboard substitutions', () => {

@@ -20,17 +20,11 @@ describe('pickDefaultWorkspace', () => {
   })
 
   it('prefers a ready main checkout over other ready worktrees', () => {
-    assert.equal(
-      pickDefaultWorkspace([featureReady, creating, mainReady])?.id,
-      'ws-main',
-    )
+    assert.equal(pickDefaultWorkspace([featureReady, creating, mainReady])?.id, 'ws-main')
   })
 
   it('falls back to the first ready worktree when main is not ready', () => {
-    assert.equal(
-      pickDefaultWorkspace([mainCreating, featureReady, creating])?.id,
-      'ws-feat',
-    )
+    assert.equal(pickDefaultWorkspace([mainCreating, featureReady, creating])?.id, 'ws-feat')
   })
 
   it('picks the sole ready workspace', () => {
@@ -39,10 +33,7 @@ describe('pickDefaultWorkspace', () => {
 
   it('ignores archived and error rows even when kind is main', () => {
     assert.equal(
-      pickDefaultWorkspace([
-        { id: 'bad-main', status: 'error', kind: 'main' },
-        featureReady,
-      ])?.id,
+      pickDefaultWorkspace([{ id: 'bad-main', status: 'error', kind: 'main' }, featureReady])?.id,
       'ws-feat',
     )
   })

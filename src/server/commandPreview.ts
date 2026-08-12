@@ -51,7 +51,7 @@ function expandToken(token: string, prompt: string, cwd: string): string {
 }
 
 function previewCwd(workspaceId: string | undefined): string {
-  if (!workspaceId || !workspaceId.trim()) return PREVIEW_CWD
+  if (!workspaceId?.trim()) return PREVIEW_CWD
   try {
     return resolveWorkspacePath(workspaceId)
   } catch {

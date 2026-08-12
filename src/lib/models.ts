@@ -173,7 +173,10 @@ export function modelsForBin(bin: string): ModelOption[] {
   return modelsForKind(modelKindForBin(bin))
 }
 
-export function findModel(models: ModelOption[], slug: string | null | undefined): ModelOption | undefined {
+export function findModel(
+  models: ModelOption[],
+  slug: string | null | undefined,
+): ModelOption | undefined {
   if (!slug) return undefined
   return models.find((m) => m.slug === slug)
 }
@@ -201,7 +204,11 @@ export function isPromptInjectedEffort(model: ModelOption | undefined, effort: s
 export const ULTRATHINK_PREFIX = 'Ultrathink:\n'
 
 /** Apply Ultrathink prefix once (first turn). Follow-ups skip re-injection. */
-export function applyPromptEffort(prompt: string, effort: string, opts?: { isFollowUp?: boolean }): string {
+export function applyPromptEffort(
+  prompt: string,
+  effort: string,
+  opts?: { isFollowUp?: boolean },
+): string {
   if (opts?.isFollowUp) return prompt
   if (effort !== 'ultrathink') return prompt
   if (/^ultrathink:\s*/i.test(prompt)) return prompt

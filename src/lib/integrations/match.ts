@@ -21,7 +21,7 @@ function equalsAny(value: string, allowed: string[]): boolean {
 }
 
 export function parseWebhookEvents(raw: string | null | undefined): string[] {
-  if (!raw || !raw.trim()) return []
+  if (!raw?.trim()) return []
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
@@ -32,7 +32,7 @@ export function parseWebhookEvents(raw: string | null | undefined): string[] {
 }
 
 export function parseWebhookFilters(raw: string | null | undefined): WebhookFilters {
-  if (!raw || !raw.trim()) return {}
+  if (!raw?.trim()) return {}
   try {
     const parsed = JSON.parse(raw) as WebhookFilters
     if (!parsed || typeof parsed !== 'object') return {}

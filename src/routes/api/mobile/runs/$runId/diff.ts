@@ -13,7 +13,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/diff')({
       GET: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'runs.diff')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleRunDiff(params.runId)
+        const result = await handleRunDiff(params.runId)
         return Response.json(result.body, { status: result.status })
       },
     },

@@ -9,7 +9,7 @@ export const Route = createFileRoute('/api/mobile/unpair')({
       POST: async ({ request }) => {
         const auth = requireDeviceOp(request, 'device.unpair')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleUnpair(auth.device)
+        const result = await handleUnpair(auth.device)
         return Response.json(result.body, { status: result.status })
       },
     },

@@ -156,9 +156,7 @@ function RuntimesPage() {
                   {r.promptViaStdin && !isAcp(r.transport) ? '  ‹ stdin' : ''}
                 </div>
                 {isAcp(r.transport) ? (
-                  <div className="mt-1 text-ui-sm text-tier-tertiary">
-                    Agent Client Protocol
-                  </div>
+                  <div className="mt-1 text-ui-sm text-tier-tertiary">Agent Client Protocol</div>
                 ) : null}
                 {!isValidArgsTemplate(r.argsTemplate) ? (
                   <div className="mt-1 text-ui-sm text-danger">invalid args template</div>
@@ -272,14 +270,28 @@ function RuntimeModal({
       <div className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Label">
-            <input className={inputClass} value={value.label} onChange={(e) => set('label', e.target.value)} placeholder="Claude Code" />
+            <input
+              className={inputClass}
+              value={value.label}
+              onChange={(e) => set('label', e.target.value)}
+              placeholder="Claude Code"
+            />
           </Field>
           <Field label="Binary" hint="resolved on PATH">
-            <input className={`${inputClass} mono`} value={value.bin} onChange={(e) => set('bin', e.target.value)} placeholder="claude" />
+            <input
+              className={`${inputClass} mono`}
+              value={value.bin}
+              onChange={(e) => set('bin', e.target.value)}
+              placeholder="claude"
+            />
           </Field>
         </div>
         <Field label="Description" hint="optional">
-          <input className={inputClass} value={value.description} onChange={(e) => set('description', e.target.value)} />
+          <input
+            className={inputClass}
+            value={value.description}
+            onChange={(e) => set('description', e.target.value)}
+          />
         </Field>
         <Field label="Transport" hint="how Open Run talks to this agent">
           <div className="space-y-2">
@@ -322,7 +334,9 @@ function RuntimeModal({
           </div>
         </Field>
         <Field
-          label={value.transport === 'acp' ? 'Launch args (JSON array)' : 'Args template (JSON array)'}
+          label={
+            value.transport === 'acp' ? 'Launch args (JSON array)' : 'Args template (JSON array)'
+          }
           hint={
             <span className="mono">
               {'{prompt}'}, {'{promptFile}'}, and {'{cwd}'} are substituted
@@ -339,7 +353,12 @@ function RuntimeModal({
         {value.transport === 'cli' ? (
           <>
             <label className="flex items-center gap-2.5">
-              <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--base)]" checked={value.promptViaStdin} onChange={(e) => set('promptViaStdin', e.target.checked)} />
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-[var(--base)]"
+                checked={value.promptViaStdin}
+                onChange={(e) => set('promptViaStdin', e.target.checked)}
+              />
               <span className="text-ui-base text-tier-secondary">
                 Pipe prompt to stdin
                 <span className="ml-1.5 text-ui-sm text-tier-quaternary">
@@ -361,7 +380,12 @@ function RuntimeModal({
           </div>
         )}
         <label className="flex items-center gap-2.5">
-          <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--base)]" checked={value.canOpenPrs} onChange={(e) => set('canOpenPrs', e.target.checked)} />
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-[var(--base)]"
+            checked={value.canOpenPrs}
+            onChange={(e) => set('canOpenPrs', e.target.checked)}
+          />
           <span className="text-ui-base text-tier-secondary">
             May open pull requests
             <span className="ml-1.5 text-ui-sm text-tier-quaternary">
@@ -370,7 +394,12 @@ function RuntimeModal({
           </span>
         </label>
         <label className="flex items-center gap-2.5">
-          <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--base)]" checked={value.enabled} onChange={(e) => set('enabled', e.target.checked)} />
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-[var(--base)]"
+            checked={value.enabled}
+            onChange={(e) => set('enabled', e.target.checked)}
+          />
           <span className="text-ui-base text-tier-secondary">Enabled</span>
         </label>
         <div className="flex justify-end gap-2 pt-1">

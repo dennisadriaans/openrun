@@ -11,6 +11,27 @@ available — see COMMERCIAL-LICENSE.md.
 
 
 ================================================================================
+Trademarks
+================================================================================
+
+The AGPLv3 grants rights in the *code*. It grants no rights in names or logos,
+and this notice does not either. "Open Run" and the Open Run logo are marks of
+the copyright holder.
+
+What that means in practice, so nobody has to guess:
+
+  - You may say your work is built on, compatible with, or a fork of Open Run.
+    Accurate, descriptive references are fine and always will be.
+  - You may redistribute Open Run unmodified under its own name, as AGPLv3
+    requires.
+  - Please do not use "Open Run" as the name of a **modified** version, a
+    hosted service, or a product, in a way that suggests it is the official
+    one. Rename the fork; the code is yours to use either way.
+
+If you are unsure whether a use is fine, ask first — the answer is usually yes.
+
+
+================================================================================
 Design attribution
 ================================================================================
 
@@ -70,7 +91,7 @@ To regenerate a current inventory:
 
     pnpm licenses list --prod
 
-Measured across the production tree (218 packages) at the time of writing:
+Measured across the production tree (218 packages) in August 2026:
 
     MIT                                  190
     ISC                                   14

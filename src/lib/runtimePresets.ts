@@ -47,8 +47,7 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     bin: 'grok',
     argsTemplate: ['--prompt-file', '{promptFile}', '--output-format', 'streaming-json'],
     promptViaStdin: false,
-    description:
-      'xAI Grok build CLI (headless). Prompt via temp file; resume + models supported.',
+    description: 'xAI Grok build CLI (headless). Prompt via temp file; resume + models supported.',
   },
   {
     id: 'gemini',

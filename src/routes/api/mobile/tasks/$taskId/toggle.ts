@@ -15,7 +15,7 @@ export const Route = createFileRoute('/api/mobile/tasks/$taskId/toggle')({
       POST: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'tasks.toggle')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleToggleTask({
+        const result = await handleToggleTask({
           taskId: params.taskId,
           body: await readJson(request),
         })

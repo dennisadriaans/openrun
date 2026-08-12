@@ -32,5 +32,8 @@ test('cloudJiraStartUrl carries the session token', () => {
 })
 
 test('localCloudCallbackUrl is origin plus path', () => {
-  assert.equal(localCloudCallbackUrl('http://127.0.0.1:3000/'), 'http://127.0.0.1:3000/cloud/callback')
+  assert.equal(
+    localCloudCallbackUrl('http://127.0.0.1:3000/'),
+    'http://127.0.0.1:3000/cloud/callback',
+  )
 })

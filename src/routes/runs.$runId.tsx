@@ -107,7 +107,10 @@ function RunDetail() {
     return (
       <div className="px-8 py-8">
         <EmptyState title="Run not found">
-          <Link to="/runs" className="text-tier-secondary underline underline-offset-2 hover:text-foreground">
+          <Link
+            to="/runs"
+            className="text-tier-secondary underline underline-offset-2 hover:text-foreground"
+          >
             Back to run history
           </Link>
         </EmptyState>
@@ -229,9 +232,7 @@ function RunDetail() {
                   runtimeTransport={data!.runtime?.transport}
                   runTrigger={run!.trigger}
                   installWorkspaceId={workspace?.id ?? run!.workspaceId}
-                  installWorkspaceReady={
-                    workspace ? isWorkspaceReady(workspace.status) : false
-                  }
+                  installWorkspaceReady={workspace ? isWorkspaceReady(workspace.status) : false}
                   installWorkspaceStatus={workspace?.status}
                   installProjectId={project?.id ?? workspace?.projectId}
                   installProjectName={project?.name}
@@ -285,9 +286,7 @@ function RunDetail() {
               onDiscardPath={(path) => discard.mutate({ paths: [path] })}
               terminalOpen={layout.terminalOpen}
               onToggleTerminal={() => patchLayout({ terminalOpen: !layout.terminalOpen })}
-              onToggleRightPanel={() =>
-                patchLayout({ rightPanelOpen: false, maximized: false })
-              }
+              onToggleRightPanel={() => patchLayout({ rightPanelOpen: false, maximized: false })}
               maximized={layout.maximized}
               onToggleMaximized={() =>
                 patchLayout({ maximized: !layout.maximized, rightPanelOpen: true })
@@ -360,7 +359,8 @@ function RunDetail() {
         <Modal title="Delete run" onClose={() => setConfirmDelete(false)}>
           <div className="space-y-4">
             <p className="text-ui-base text-tier-secondary">
-              Permanently delete <span className="text-foreground">{run.taskName}</span>? This cannot be undone.
+              Permanently delete <span className="text-foreground">{run.taskName}</span>? This
+              cannot be undone.
             </p>
             {remove.isError ? (
               <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">

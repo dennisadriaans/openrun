@@ -9,7 +9,7 @@ export const Route = createFileRoute('/api/mobile/tasks/')({
       GET: async ({ request }) => {
         const auth = requireDeviceOp(request, 'tasks.list')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleListTasks()
+        const result = await handleListTasks()
         return Response.json(result.body, { status: result.status })
       },
     },

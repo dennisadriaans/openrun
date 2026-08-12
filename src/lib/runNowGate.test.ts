@@ -77,10 +77,7 @@ describe('runNowBlockedReason', () => {
   })
 
   it('flags an empty prompt last', () => {
-    assert.equal(
-      runNowBlockedReason({ ...healthy, promptValid: false }),
-      emptyTaskPromptMessage(),
-    )
+    assert.equal(runNowBlockedReason({ ...healthy, promptValid: false }), emptyTaskPromptMessage())
     assert.equal(canRunTaskNow({ ...healthy, promptValid: false }), false)
   })
 

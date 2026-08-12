@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { AssistantDeltaCoalescer } from './types.ts'
-import {
-  extractGrokAssistantText,
-  parseGrokObject,
-  parseGrokStdoutLine,
-} from './grok.ts'
+import { extractGrokAssistantText, parseGrokObject, parseGrokStdoutLine } from './grok.ts'
 
 describe('parseGrokObject', () => {
   it('maps text data deltas to assistant events', () => {
@@ -186,9 +182,6 @@ describe('extractGrokAssistantText', () => {
 
   it('returns null for non-Grok stdout', () => {
     assert.equal(extractGrokAssistantText('hello'), null)
-    assert.equal(
-      extractGrokAssistantText('{"type":"result","result":"ok"}'),
-      null,
-    )
+    assert.equal(extractGrokAssistantText('{"type":"result","result":"ok"}'), null)
   })
 })

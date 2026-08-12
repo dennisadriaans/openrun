@@ -1,6 +1,6 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import {
   Button,
   Card,
@@ -9,29 +9,29 @@ import {
   PageHeader,
   StatusBadge,
   VerdictBadge,
-} from "../components/ui";
-import { absoluteTime, duration, relativeTime } from "../lib/format";
-import { useRemoveRun, useRuns } from "../lib/queries";
+} from '../components/ui'
+import { absoluteTime, duration, relativeTime } from '../lib/format'
+import { useRemoveRun, useRuns } from '../lib/queries'
 
-export const Route = createFileRoute("/runs/")({ component: RunsPage });
+export const Route = createFileRoute('/runs/')({ component: RunsPage })
 
 const ROW_GRID =
-  "grid items-center gap-3 grid-cols-[6.5rem_minmax(0,1fr)_5.5rem_4rem_4.5rem_1.75rem] sm:grid-cols-[6.5rem_minmax(0,1fr)_8rem_5.5rem_4rem_4.5rem_1.75rem]";
+  'grid items-center gap-3 grid-cols-[6.5rem_minmax(0,1fr)_5.5rem_4rem_4.5rem_1.75rem] sm:grid-cols-[6.5rem_minmax(0,1fr)_8rem_5.5rem_4rem_4.5rem_1.75rem]'
 
 function RunsPage() {
-  const { data: runs, isLoading } = useRuns();
-  const remove = useRemoveRun();
-  const navigate = useNavigate();
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const deleteTarget = runs?.find((r) => r.id === deleteId);
+  const { data: runs, isLoading } = useRuns()
+  const remove = useRemoveRun()
+  const navigate = useNavigate()
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const deleteTarget = runs?.find((r) => r.id === deleteId)
 
-  const newRun = () => navigate({ to: "/runs/new" });
+  const newRun = () => navigate({ to: '/runs/new' })
 
   const confirmDelete = async () => {
-    if (!deleteId) return;
-    await remove.mutateAsync(deleteId);
-    setDeleteId(null);
-  };
+    if (!deleteId) return
+    await remove.mutateAsync(deleteId)
+    setDeleteId(null)
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
@@ -47,14 +47,10 @@ function RunsPage() {
 
       <div>
         {isLoading ? (
-          <div className="py-12 text-center text-ui-sm text-tier-quaternary">
-            Loading…
-          </div>
+          <div className="py-12 text-center text-ui-sm text-tier-quaternary">Loading…</div>
         ) : runs && runs.length > 0 ? (
           <Card className="divide-y divide-[var(--border-quaternary)]">
-            <div
-              className={`${ROW_GRID} px-4 py-2 text-ui-sm text-tier-quaternary`}
-            >
+            <div className={`${ROW_GRID} px-4 py-2 text-ui-sm text-tier-quaternary`}>
               <span>Status</span>
               <span>Run</span>
               <span className="hidden sm:block">Runtime</span>
@@ -64,8 +60,8 @@ function RunsPage() {
               <span />
             </div>
             {runs.map((r) => {
-              const busy = r.status === "running";
-              const pending = remove.isPending;
+              const busy = r.status === 'running'
+              const pending = remove.isPending
               return (
                 <div
                   key={r.id}
@@ -78,9 +74,7 @@ function RunsPage() {
                     aria-label={r.taskName}
                   />
                   <StatusBadge status={r.status} />
-                  <span className="truncate text-ui-base text-foreground">
-                    {r.taskName}
-                  </span>
+                  <span className="truncate text-ui-base text-foreground">{r.taskName}</span>
                   <span className="hidden truncate text-ui-sm text-tier-quaternary sm:block">
                     {r.runtimeLabel}
                   </span>
@@ -90,14 +84,12 @@ function RunsPage() {
                   <span
                     className="text-right text-ui-sm tabular-nums text-tier-quaternary"
                     title={
-                      r.trigger === "chat"
-                        ? "Conversations stay open between turns, so elapsed time is not a runtime"
+                      r.trigger === 'chat'
+                        ? 'Conversations stay open between turns, so elapsed time is not a runtime'
                         : undefined
                     }
                   >
-                    {r.trigger === "chat"
-                      ? "—"
-                      : duration(r.startedAt, r.finishedAt)}
+                    {r.trigger === 'chat' ? '—' : duration(r.startedAt, r.finishedAt)}
                   </span>
                   <span
                     className="text-right text-ui-sm tabular-nums text-tier-quaternary"
@@ -109,9 +101,7 @@ function RunsPage() {
                     <Button
                       variant="ghost"
                       disabled={busy || pending}
-                      title={
-                        busy ? "Cancel the run before deleting" : "Delete run"
-                      }
+                      title={busy ? 'Cancel the run before deleting' : 'Delete run'}
                       aria-label={`Delete ${r.taskName}`}
                       onClick={() => setDeleteId(r.id)}
                     >
@@ -119,7 +109,7 @@ function RunsPage() {
                     </Button>
                   </span>
                 </div>
-              );
+              )
             })}
           </Card>
         ) : (
@@ -137,28 +127,20 @@ function RunsPage() {
           <Modal title="Delete run" onClose={() => setDeleteId(null)}>
             <div className="space-y-4">
               <p className="text-ui-base text-tier-secondary">
-                Permanently delete{" "}
-                <span className="text-foreground">{deleteTarget.taskName}</span>
-                ? This cannot be
-                undone.
+                Permanently delete <span className="text-foreground">{deleteTarget.taskName}</span>?
+                This cannot be undone.
               </p>
               {remove.isError ? (
                 <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">
-                  {remove.error instanceof Error
-                    ? remove.error.message
-                    : String(remove.error)}
+                  {remove.error instanceof Error ? remove.error.message : String(remove.error)}
                 </p>
               ) : null}
               <div className="flex justify-end gap-2 pt-1">
                 <Button variant="ghost" onClick={() => setDeleteId(null)}>
                   Cancel
                 </Button>
-                <Button
-                  variant="danger"
-                  onClick={confirmDelete}
-                  disabled={remove.isPending}
-                >
-                  {remove.isPending ? "Deleting…" : "Delete run"}
+                <Button variant="danger" onClick={confirmDelete} disabled={remove.isPending}>
+                  {remove.isPending ? 'Deleting…' : 'Delete run'}
                 </Button>
               </div>
             </div>
@@ -166,5 +148,5 @@ function RunsPage() {
         ) : null}
       </div>
     </div>
-  );
+  )
 }

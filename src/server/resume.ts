@@ -16,11 +16,7 @@ import {
   type RuntimeModelKind,
 } from '../lib/models'
 import { parseArgsTemplate } from '../lib/argsTemplate'
-import {
-  DEFAULT_RUNTIME_MODE,
-  parseRuntimeMode,
-  type RuntimeMode,
-} from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import { isSupervised } from '../lib/supervisedPolicy'
 import { buildStreamJsonUserMessage } from '../lib/claudeControl'
 import { extractGrokAssistantText } from '../lib/agentEvents/grok.ts'

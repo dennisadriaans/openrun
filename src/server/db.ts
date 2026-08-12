@@ -513,9 +513,7 @@ export function getDb(): Database.Database {
  */
 function addColumn(db: Database.Database, table: string, column: string, ddl: string) {
   const cols = new Set(
-    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
-      (c) => c.name,
-    ),
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
   )
   if (!cols.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
 }
@@ -685,9 +683,9 @@ function migrate(db: Database.Database) {
   `)
 
   // Grok: migrate legacy argv-prompt templates to --prompt-file + streaming-json.
-  const grok = db
-    .prepare(`SELECT argsTemplate FROM runtimes WHERE id = 'grok'`)
-    .get() as { argsTemplate: string } | undefined
+  const grok = db.prepare(`SELECT argsTemplate FROM runtimes WHERE id = 'grok'`).get() as
+    | { argsTemplate: string }
+    | undefined
   const grokLegacy = new Set([
     JSON.stringify(['--prompt', '{prompt}']),
     JSON.stringify(['-p', '{prompt}', '--always-approve']),
@@ -826,9 +824,9 @@ function backfillWorkspaces(db: Database.Database) {
       ),
     )
     const projectByPath = new Map(
-      (db.prepare('SELECT id, path FROM projects').all() as Array<{ id: string; path: string }>).map(
-        (p) => [p.path, p.id] as const,
-      ),
+      (
+        db.prepare('SELECT id, path FROM projects').all() as Array<{ id: string; path: string }>
+      ).map((p) => [p.path, p.id] as const),
     )
     const mainWorkspaceByProject = new Set(
       (
@@ -939,9 +937,7 @@ function backfillWorkspaces(db: Database.Database) {
 /** Remember a path so boot backfill will not recreate a deleted project. */
 export function rememberDeletedProjectPath(projectPath: string): void {
   getDb()
-    .prepare(
-      'INSERT OR REPLACE INTO deleted_project_paths (path, deletedAt) VALUES (?, ?)',
-    )
+    .prepare('INSERT OR REPLACE INTO deleted_project_paths (path, deletedAt) VALUES (?, ?)')
     .run(projectPath, Date.now())
 }
 

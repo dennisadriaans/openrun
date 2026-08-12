@@ -83,6 +83,7 @@ function NotificationsPage() {
                 <div key={n.id} className="group/row px-4 py-3 transition-colors hover:bg-hover">
                   <div className="flex items-start justify-between gap-4">
                     <button
+                      type="button"
                       className="min-w-0 flex-1 text-left"
                       onClick={() => setEditing(n)}
                       aria-label={`Edit ${n.name}`}
@@ -278,6 +279,7 @@ function NotifierModal({
           <div className="flex gap-2">
             {(['webhook', 'desktop'] as const).map((k) => (
               <button
+                type="button"
                 key={k}
                 onClick={() => setKind(k)}
                 className={`rounded-md border px-3 py-1.5 text-ui-base transition-colors ${
@@ -324,6 +326,7 @@ function NotifierModal({
               const on = verdicts.includes(v)
               return (
                 <button
+                  type="button"
                   key={v}
                   onClick={() => toggleVerdict(v)}
                   className={`rounded-full border px-2.5 py-0.5 text-ui-sm transition-colors ${

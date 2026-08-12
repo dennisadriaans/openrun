@@ -4,7 +4,7 @@
  * Colors are pulled from the same `--syntax-*` custom properties the rest of
  * the app uses, so the editor matches the workspace chrome exactly.
  */
-import { HighlightStyle, LanguageSupport, syntaxHighlighting } from '@codemirror/language'
+import { HighlightStyle, type LanguageSupport, syntaxHighlighting } from '@codemirror/language'
 import { EditorView } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
 import type { Extension } from '@codemirror/state'
@@ -64,10 +64,20 @@ export const workspaceEditorTheme = EditorView.theme(
 const workspaceHighlight = HighlightStyle.define([
   { tag: [t.keyword, t.moduleKeyword, t.controlKeyword], color: 'var(--syntax-keyword)' },
   { tag: [t.string, t.special(t.string)], color: 'var(--syntax-string)' },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'var(--syntax-function)' },
+  {
+    tag: [t.function(t.variableName), t.function(t.propertyName)],
+    color: 'var(--syntax-function)',
+  },
   { tag: [t.number, t.bool], color: 'var(--syntax-number)' },
-  { tag: [t.comment, t.blockComment, t.lineComment], color: 'var(--syntax-comment)', fontStyle: 'italic' },
-  { tag: [t.constant(t.variableName), t.standard(t.variableName)], color: 'var(--syntax-constant)' },
+  {
+    tag: [t.comment, t.blockComment, t.lineComment],
+    color: 'var(--syntax-comment)',
+    fontStyle: 'italic',
+  },
+  {
+    tag: [t.constant(t.variableName), t.standard(t.variableName)],
+    color: 'var(--syntax-constant)',
+  },
   { tag: [t.propertyName, t.attributeName], color: 'var(--syntax-parameter)' },
   { tag: [t.punctuation, t.separator, t.bracket], color: 'var(--syntax-punctuation)' },
   { tag: [t.typeName, t.className, t.namespace], color: 'var(--syntax-keyword)' },

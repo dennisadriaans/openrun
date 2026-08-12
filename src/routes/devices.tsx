@@ -81,15 +81,18 @@ function DevicesPage() {
       {isLoading ? (
         <div className="text-ui-base text-tier-tertiary">Loading…</div>
       ) : !status?.enabled ? (
-        <DisabledState envVar={status?.envVar ?? 'AGENTOPS_MOBILE'} hint={status?.enableHint ?? ''} />
+        <DisabledState
+          envVar={status?.envVar ?? 'AGENTOPS_MOBILE'}
+          hint={status?.enableHint ?? ''}
+        />
       ) : (
         <div className="space-y-5">
           <ReachabilityCard baseUrls={status.baseUrls} apnsConfigured={status.apnsConfigured} />
 
           {active.length === 0 ? (
             <EmptyState icon={<Smartphone className="size-6" />} title="No phone paired yet">
-              Choose “Pair a phone”, then scan the code from the Open Run app on your
-              iPhone. The code is good for five minutes and works once.
+              Choose “Pair a phone”, then scan the code from the Open Run app on your iPhone. The
+              code is good for five minutes and works once.
             </EmptyState>
           ) : (
             <Card>
@@ -150,8 +153,7 @@ function DevicesPage() {
       {confirmRevoke ? (
         <Modal title="Revoke this device?" onClose={() => setConfirmRevoke(null)}>
           <p className="text-ui-base text-tier-secondary">
-            {confirmRevoke.name} will stop working immediately. Pairing it again needs a
-            new code.
+            {confirmRevoke.name} will stop working immediately. Pairing it again needs a new code.
           </p>
           <div className="mt-5 flex justify-end gap-2">
             <Button onClick={() => setConfirmRevoke(null)}>Cancel</Button>
@@ -176,18 +178,17 @@ function DisabledState({ envVar, hint }: { envVar: string; hint: string }) {
     <Card className="p-5">
       <h2 className="text-ui-base text-foreground">Phone access is off</h2>
       <p className="mt-1.5 max-w-2xl text-ui-base text-tier-secondary">
-        Start the dev server with <code className="text-foreground">{envVar}=1</code> to
-        turn it on:
+        Start the dev server with <code className="text-foreground">{envVar}=1</code> to turn it on:
       </p>
       <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-[var(--bg-quaternary)] px-3 py-2 text-ui-sm text-foreground">
         {hint}
       </pre>
       <p className="mt-3 max-w-2xl text-ui-sm text-tier-tertiary">
-        This makes the server listen on your local network instead of just this machine.
-        Only <code>/api/mobile/…</code> is reachable from other devices, and only with a
-        paired token — the rest of Open Run stays refused. On an untrusted network, point
-        the phone at an https tunnel rather than the LAN address: a bearer token over
-        plain HTTP is readable by anyone on the same Wi‑Fi.
+        This makes the server listen on your local network instead of just this machine. Only{' '}
+        <code>/api/mobile/…</code> is reachable from other devices, and only with a paired token —
+        the rest of Open Run stays refused. On an untrusted network, point the phone at an https
+        tunnel rather than the LAN address: a bearer token over plain HTTP is readable by anyone on
+        the same Wi‑Fi.
       </p>
     </Card>
   )
@@ -205,8 +206,7 @@ function ReachabilityCard({
       <div className="text-ui-sm text-tier-tertiary">This machine is reachable at</div>
       {baseUrls.length === 0 ? (
         <p className="mt-1.5 text-ui-base text-tier-secondary">
-          No local network address found. Connect to Wi‑Fi, or use your own tunnel URL
-          when pairing.
+          No local network address found. Connect to Wi‑Fi, or use your own tunnel URL when pairing.
         </p>
       ) : (
         <ul className="mt-1.5 space-y-1">
@@ -322,6 +322,7 @@ function PairingModal({
               {formatPairingCode(code)}
             </div>
             <button
+              type="button"
               onClick={copy}
               className="mt-1 inline-flex items-center gap-1 text-ui-sm text-tier-tertiary transition-colors hover:text-foreground"
             >
@@ -342,8 +343,7 @@ function PairingModal({
                 On this network that is <span className="font-mono text-foreground">{base}</span>.
               </>
             ) : null}{' '}
-            Using a tunnel? Enter its https URL on the phone instead — the code is the
-            same.
+            Using a tunnel? Enter its https URL on the phone instead — the code is the same.
           </div>
         </div>
       )}

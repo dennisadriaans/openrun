@@ -22,7 +22,9 @@ function requireGh(): void {
   }
 }
 
-export function listGithubReposViaGh(limit = 40): Array<{ owner: string; repo: string; nameWithOwner: string }> {
+export function listGithubReposViaGh(
+  limit = 40,
+): Array<{ owner: string; repo: string; nameWithOwner: string }> {
   requireGh()
   const res = spawnSync(
     'gh',
@@ -42,7 +44,7 @@ export function listGithubReposViaGh(limit = 40): Array<{ owner: string; repo: s
   const out: Array<{ owner: string; repo: string; nameWithOwner: string }> = []
   for (const row of parsed) {
     const name = row.nameWithOwner?.trim()
-    if (!name || !name.includes('/')) continue
+    if (!name?.includes('/')) continue
     const [owner, repo] = name.split('/')
     if (!owner || !repo) continue
     out.push({ owner, repo, nameWithOwner: name })

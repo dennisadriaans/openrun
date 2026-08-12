@@ -6,7 +6,7 @@
  * as "a run started" — use `describeWebhookDelivery` instead.
  */
 export function parseDeliveryRunIds(raw: string | null | undefined): string[] {
-  if (!raw || !raw.trim()) return []
+  if (!raw?.trim()) return []
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []

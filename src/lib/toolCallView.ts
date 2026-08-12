@@ -6,7 +6,12 @@
  * edit / …). This module turns that payload into a verb + target so chat can
  * render a compact row instead of dumping `Bash · command` titles and JSON.
  */
-import { toolKindFromName, type ToolCallLocation, type ToolCallStatus, type ToolKind } from './acp.ts'
+import {
+  toolKindFromName,
+  type ToolCallLocation,
+  type ToolCallStatus,
+  type ToolKind,
+} from './acp.ts'
 
 export type DisplayPath = {
   path: string

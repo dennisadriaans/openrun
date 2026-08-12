@@ -15,7 +15,7 @@ export const Route = createFileRoute('/api/mobile/tasks/$taskId/run')({
       POST: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'tasks.runNow')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleRunTaskNow(params.taskId)
+        const result = await handleRunTaskNow(params.taskId)
         return Response.json(result.body, { status: result.status })
       },
     },

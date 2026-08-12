@@ -20,9 +20,7 @@ export function listIntegrationProviders(): IntegrationProvider[] {
   return Object.values(PROVIDERS)
 }
 
-export function getIntegrationProvider(
-  id: string,
-): IntegrationProvider | undefined {
+export function getIntegrationProvider(id: string): IntegrationProvider | undefined {
   return PROVIDERS[id as IntegrationProviderId]
 }
 

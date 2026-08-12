@@ -65,7 +65,7 @@ function coerceCheck(raw: unknown): CheckDef | null {
  * throws: a corrupt row degrades to "no checks" rather than breaking the page.
  */
 export function parseChecks(raw: string | null | undefined): CheckDef[] {
-  if (!raw || !raw.trim()) return []
+  if (!raw?.trim()) return []
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)

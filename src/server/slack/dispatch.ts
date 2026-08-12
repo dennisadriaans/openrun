@@ -367,7 +367,11 @@ async function runAction(
 
     case 'cancel': {
       const run = c.getRun(runId)
-      if (!run) return reply(errorBlocks('That run is gone.'), 'Run not found', { threadTs: thread, ephemeral: true })
+      if (!run)
+        return reply(errorBlocks('That run is gone.'), 'Run not found', {
+          threadTs: thread,
+          ephemeral: true,
+        })
       if (run.status !== 'running') {
         return reply(
           noticeBlocks(`That run already finished (${escapeMrkdwn(run.status)}).`),
@@ -377,7 +381,9 @@ async function runAction(
       }
       c.cancelRun(runId)
       return reply(
-        noticeBlocks(`:heavy_multiplication_x: Cancelled *${escapeMrkdwn(run.taskName || runId)}*.`),
+        noticeBlocks(
+          `:heavy_multiplication_x: Cancelled *${escapeMrkdwn(run.taskName || runId)}*.`,
+        ),
         'Run cancelled',
         { threadTs: thread },
       )
@@ -449,11 +455,9 @@ async function runAction(
       }
 
       c.postMessage({ runId, prompt: intent.text })
-      return reply(
-        noticeBlocks(':paperclip: Sent — working on it.'),
-        'Sent to the run',
-        { threadTs: rootTs },
-      )
+      return reply(noticeBlocks(':paperclip: Sent — working on it.'), 'Sent to the run', {
+        threadTs: rootTs,
+      })
     }
   }
 }
@@ -516,7 +520,9 @@ function filterRuns(runs: readonly RunView[], filter: 'active' | 'all' | 'failed
     return runs.filter((r) => r.status === 'running' || r.status === 'queued')
   }
   const bad = new Set(['failed-checks', 'timeout', 'crashed'])
-  return runs.filter((r) => r.status === 'failed' || r.status === 'error' || bad.has(r.verdict ?? ''))
+  return runs.filter(
+    (r) => r.status === 'failed' || r.status === 'error' || bad.has(r.verdict ?? ''),
+  )
 }
 
 function reply(

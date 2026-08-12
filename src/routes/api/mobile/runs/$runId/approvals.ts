@@ -15,7 +15,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/approvals')({
       POST: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'approvals.answer')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleAnswerApproval({
+        const result = await handleAnswerApproval({
           runId: params.runId,
           body: await readJson(request),
         })

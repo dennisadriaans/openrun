@@ -38,18 +38,13 @@ export function parseClaudeObject(obj: Record<string, unknown>): ParsedTurnEvent
         payload: {
           requestId: approval.requestId,
           name: approval.toolName,
-          title: toolCallRoleTitle(
-            role.callRole,
-            approval.toolName,
-            approval.input,
-            {
-              mcpServer: role.mcpServer,
-              fallback: toolCallTitle(
-                approval.toolName,
-                toolInputSummary(approval.toolName, approval.input),
-              ),
-            },
-          ),
+          title: toolCallRoleTitle(role.callRole, approval.toolName, approval.input, {
+            mcpServer: role.mcpServer,
+            fallback: toolCallTitle(
+              approval.toolName,
+              toolInputSummary(approval.toolName, approval.input),
+            ),
+          }),
           toolKind: toolKindFromName(approval.toolName),
           callRole: role.callRole,
           ...(role.mcpServer ? { mcpServer: role.mcpServer } : {}),

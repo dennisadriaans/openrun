@@ -9,7 +9,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/message')({
       POST: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'runs.message')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handlePostMessage({
+        const result = await handlePostMessage({
           runId: params.runId,
           body: await readJson(request),
         })

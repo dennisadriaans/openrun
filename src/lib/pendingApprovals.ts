@@ -41,9 +41,7 @@ function payloadOf(ev: TurnEventRow): TurnEventPayload {
  * schedules one timer per id (`scheduleApprovalTimeout` returns early when the
  * id is already tracked), so a repeat is a re-emission, not a second prompt.
  */
-export function pendingApprovals(
-  events: readonly TurnEventRow[],
-): PendingApproval[] {
+export function pendingApprovals(events: readonly TurnEventRow[]): PendingApproval[] {
   const resolved = new Set<string>()
   for (const ev of events) {
     if (ev.kind !== 'approval_resolved') continue
@@ -75,9 +73,7 @@ export function hasPendingApproval(events: readonly TurnEventRow[]): boolean {
 }
 
 /** Request ids already answered — what the transcript needs to stop offering buttons. */
-export function resolvedApprovalIds(
-  events: readonly TurnEventRow[],
-): Set<string> {
+export function resolvedApprovalIds(events: readonly TurnEventRow[]): Set<string> {
   const resolved = new Set<string>()
   for (const ev of events) {
     if (ev.kind !== 'approval_resolved') continue

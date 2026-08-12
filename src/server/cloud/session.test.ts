@@ -9,8 +9,9 @@ test('machine id is stable across reads', async () => {
   const prev = process.env.AGENTOPS_HOME
   process.env.AGENTOPS_HOME = home
   try {
-    const { readMachineId, readCloudSession, writeCloudSession, clearCloudSession } =
-      await import('./session.ts')
+    const { readMachineId, readCloudSession, writeCloudSession, clearCloudSession } = await import(
+      './session.ts'
+    )
     const a = readMachineId()
     const b = readMachineId()
     assert.equal(a, b)

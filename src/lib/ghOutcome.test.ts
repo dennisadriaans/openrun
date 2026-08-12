@@ -22,9 +22,7 @@ test('detects missing gh binary', () => {
 })
 
 test('clean success output is not flagged', () => {
-  const out = detectGhFailure(
-    'https://github.com/acme/repo/pull/42\nCreated pull request #42',
-  )
+  const out = detectGhFailure('https://github.com/acme/repo/pull/42\nCreated pull request #42')
   assert.equal(out.failed, false)
   assert.equal(out.reason, undefined)
 })

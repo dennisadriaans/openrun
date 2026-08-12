@@ -66,33 +66,80 @@ type Verb =
  * regexes so adding a synonym is one line and cannot change another verb.
  */
 const VERBS: Record<string, Verb> = {
-  help: 'help', h: 'help', '?': 'help', commands: 'help',
+  help: 'help',
+  h: 'help',
+  '?': 'help',
+  commands: 'help',
 
-  status: 'status', s: 'status', dashboard: 'status', overview: 'status',
+  status: 'status',
+  s: 'status',
+  dashboard: 'status',
+  overview: 'status',
 
-  runs: 'runs', r: 'runs', ls: 'runs',
+  runs: 'runs',
+  r: 'runs',
+  ls: 'runs',
 
-  show: 'show', run: 'show', detail: 'show', details: 'show', open: 'show',
+  show: 'show',
+  run: 'show',
+  detail: 'show',
+  details: 'show',
+  open: 'show',
 
-  logs: 'logs', log: 'logs', output: 'logs', tail: 'logs',
+  logs: 'logs',
+  log: 'logs',
+  output: 'logs',
+  tail: 'logs',
 
-  diff: 'diff', changes: 'diff', changed: 'diff',
+  diff: 'diff',
+  changes: 'diff',
+  changed: 'diff',
 
-  automations: 'automations', automation: 'automations', tasks: 'automations',
-  task: 'automations', a: 'automations', jobs: 'automations',
+  automations: 'automations',
+  automation: 'automations',
+  tasks: 'automations',
+  task: 'automations',
+  a: 'automations',
+  jobs: 'automations',
 
-  start: 'run_now', trigger: 'run_now', fire: 'run_now', go: 'run_now',
+  start: 'run_now',
+  trigger: 'run_now',
+  fire: 'run_now',
+  go: 'run_now',
 
-  enable: 'enable', on: 'enable', resume: 'enable',
-  disable: 'disable', off: 'disable', pause: 'disable',
+  enable: 'enable',
+  on: 'enable',
+  resume: 'enable',
+  disable: 'disable',
+  off: 'disable',
+  pause: 'disable',
 
-  cancel: 'cancel', stop: 'cancel', kill: 'cancel', abort: 'cancel', x: 'cancel',
+  cancel: 'cancel',
+  stop: 'cancel',
+  kill: 'cancel',
+  abort: 'cancel',
+  x: 'cancel',
 
-  say: 'say', msg: 'say', message: 'say', reply: 'say', tell: 'say', m: 'say',
-  ask: 'say', steer: 'say', followup: 'say',
+  say: 'say',
+  msg: 'say',
+  message: 'say',
+  reply: 'say',
+  tell: 'say',
+  m: 'say',
+  ask: 'say',
+  steer: 'say',
+  followup: 'say',
 
-  approve: 'approve', allow: 'approve', yes: 'approve', y: 'approve', ok: 'approve',
-  deny: 'deny', reject: 'deny', no: 'deny', n: 'deny', nope: 'deny',
+  approve: 'approve',
+  allow: 'approve',
+  yes: 'approve',
+  y: 'approve',
+  ok: 'approve',
+  deny: 'deny',
+  reject: 'deny',
+  no: 'deny',
+  n: 'deny',
+  nope: 'deny',
 }
 
 const RUNS_FILTERS: Record<string, RunsFilter> = {
@@ -117,7 +164,9 @@ const MAX_RUN_LIMIT = 25
 function takeRunNow(tokens: string[]): boolean {
   // Only `run now` — `run it` has to stay free for "show me the current run",
   // since `it` is one of the words that names the latest run.
-  return tokens.length >= 2 && tokens[0].toLowerCase() === 'run' && tokens[1].toLowerCase() === 'now'
+  return (
+    tokens.length >= 2 && tokens[0].toLowerCase() === 'run' && tokens[1].toLowerCase() === 'now'
+  )
 }
 
 export function parseCommand(input: ParseCommandInput): SlackIntent {

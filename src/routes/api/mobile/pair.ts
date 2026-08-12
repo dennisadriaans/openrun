@@ -13,7 +13,7 @@ export const Route = createFileRoute('/api/mobile/pair')({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const result = handlePair({
+        const result = await handlePair({
           body: await readJson(request),
           source: requestSource(request),
         })

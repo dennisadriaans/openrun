@@ -80,9 +80,7 @@ function isPrivateHost(hostname: string): boolean {
   return false
 }
 
-export type BaseUrlResult =
-  | { ok: true; url: string }
-  | { ok: false; message: string }
+export type BaseUrlResult = { ok: true; url: string } | { ok: false; message: string }
 
 /**
  * Validate and canonicalise the server base URL a phone was given.
@@ -117,8 +115,7 @@ export function validateBaseUrl(raw: string): BaseUrlResult {
   if (parsed.protocol === 'http:' && !isPrivateHost(parsed.hostname)) {
     return {
       ok: false,
-      message:
-        'iOS blocks plain HTTP to public addresses; use https or a LAN address.',
+      message: 'iOS blocks plain HTTP to public addresses; use https or a LAN address.',
     }
   }
 

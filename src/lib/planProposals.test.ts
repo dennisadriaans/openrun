@@ -43,10 +43,7 @@ describe('parsePlanProposals', () => {
 
 describe('looksLikePlanProposalArray', () => {
   it('is true for valid planner JSON', () => {
-    assert.equal(
-      looksLikePlanProposalArray('[{"name":"a","prompt":"x","cron":"0 9 * * *"}]'),
-      true,
-    )
+    assert.equal(looksLikePlanProposalArray('[{"name":"a","prompt":"x","cron":"0 9 * * *"}]'), true)
   })
 
   it('is false for empty / unrelated JSON', () => {

@@ -4,10 +4,7 @@
  */
 import { accessSync, constants } from 'node:fs'
 import { isAbsolute } from 'node:path'
-import {
-  assertRuntimeBinaryAvailable,
-  normalizeBin,
-} from '../lib/runtimeBinary.ts'
+import { assertRuntimeBinaryAvailable, normalizeBin } from '../lib/runtimeBinary.ts'
 import { ensureProcessPathAugmented, findOnPath } from './userPath.ts'
 
 /** Check whether a runtime's binary is resolvable on PATH (or as a path). */

@@ -1,11 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
-import {
-  hmacSha256Hex,
-  verifyHexHmacSignature,
-  verifySha256PrefixedSignature,
-} from '../crypto.ts'
+import { hmacSha256Hex, verifyHexHmacSignature, verifySha256PrefixedSignature } from '../crypto.ts'
 import { githubProvider } from './github.ts'
 import { jiraProvider } from './jira.ts'
 import { linearProvider } from './linear.ts'
@@ -58,10 +54,7 @@ test('github provider parses issues.opened', () => {
 
 test('github provider ignores ping', () => {
   const headers = new Headers({ 'x-github-event': 'ping' })
-  assert.deepEqual(
-    githubProvider.parse({ rawBody: '{}', headers, payload: {} }),
-    [],
-  )
+  assert.deepEqual(githubProvider.parse({ rawBody: '{}', headers, payload: {} }), [])
 })
 
 test('jira provider derives status_changed from changelog', () => {

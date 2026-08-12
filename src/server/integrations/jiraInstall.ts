@@ -65,10 +65,7 @@ export async function createJiraWebhook(input: {
     let detail = text.slice(0, 400)
     try {
       const errJson = JSON.parse(text) as { message?: string; errorMessages?: string[] }
-      detail =
-        errJson.message ||
-        errJson.errorMessages?.join('; ') ||
-        detail
+      detail = errJson.message || errJson.errorMessages?.join('; ') || detail
     } catch {
       // keep raw
     }

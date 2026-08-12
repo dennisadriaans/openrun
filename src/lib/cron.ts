@@ -42,12 +42,7 @@ function isNumericInRange(token: string, min: number, max: number): boolean {
  * Validate one cron field (after list-splitting on `,`).
  * Accepts star, star/step, n, n-m, n-m/step, and optional month/dow names.
  */
-function isValidCronField(
-  field: string,
-  min: number,
-  max: number,
-  names?: Set<string>,
-): boolean {
+function isValidCronField(field: string, min: number, max: number, names?: Set<string>): boolean {
   if (!field) return false
   return field.split(',').every((part) => {
     if (!part) return false
@@ -66,8 +61,7 @@ function isValidCronField(
     if (rangePart.includes('-')) {
       const [start, end, ...rest] = rangePart.split('-')
       if (rest.length > 0 || start === undefined || end === undefined) return false
-      const startOk =
-        isNumericInRange(start, min, max) || isNamedToken(start, names)
+      const startOk = isNumericInRange(start, min, max) || isNamedToken(start, names)
       const endOk = isNumericInRange(end, min, max) || isNamedToken(end, names)
       if (!startOk || !endOk) return false
       if (/^\d+$/.test(start) && /^\d+$/.test(end) && Number(end) < Number(start)) {

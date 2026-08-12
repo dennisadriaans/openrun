@@ -73,7 +73,8 @@ function planFrom(raw: unknown): PlanEntry[] {
     if (!content) continue
     const status =
       e.status === 'completed' || e.status === 'in_progress' ? e.status : ('pending' as const)
-    const priority = e.priority === 'high' || e.priority === 'low' ? e.priority : ('medium' as const)
+    const priority =
+      e.priority === 'high' || e.priority === 'low' ? e.priority : ('medium' as const)
     out.push({ content, status, priority })
   }
   return out

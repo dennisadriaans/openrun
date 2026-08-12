@@ -34,7 +34,10 @@ async function linearGraphql<T>(
     throw new Error(res.ok ? 'Linear returned invalid JSON' : `Linear HTTP ${res.status}`)
   }
   if (!res.ok || json.errors?.length) {
-    const msg = json.errors?.map((e) => e.message).filter(Boolean).join('; ')
+    const msg = json.errors
+      ?.map((e) => e.message)
+      .filter(Boolean)
+      .join('; ')
     throw new Error(msg || `Linear HTTP ${res.status}`)
   }
   if (!json.data) throw new Error('Linear returned an empty response')

@@ -6,7 +6,10 @@ const row = (id: string, createdAt: number) => ({ id, createdAt })
 
 test('builtin runtimes rank in preset order', () => {
   const ranks = RUNTIME_PRESETS.map((p) => runtimeSortRank(p.id))
-  assert.deepEqual(ranks, RUNTIME_PRESETS.map((_, i) => i))
+  assert.deepEqual(
+    ranks,
+    RUNTIME_PRESETS.map((_, i) => i),
+  )
 })
 
 test('unknown runtimes rank after every builtin', () => {

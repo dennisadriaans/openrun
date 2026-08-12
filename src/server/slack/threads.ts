@@ -9,11 +9,7 @@
 import { getDb, type SlackThreadRow } from '../db.ts'
 
 /** Bind a thread to a run. Re-binding the same thread is a no-op. */
-export function bindThread(input: {
-  channelId: string
-  threadTs: string
-  runId: string
-}): void {
+export function bindThread(input: { channelId: string; threadTs: string; runId: string }): void {
   if (!input.channelId || !input.threadTs || !input.runId) return
   getDb()
     .prepare(

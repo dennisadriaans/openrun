@@ -50,13 +50,19 @@ describe('assertWorkspaceReady', () => {
   })
 
   it('throws the shared message for creating / error', () => {
-    assert.throws(() => assertWorkspaceReady('creating'), (err: Error) => {
-      assert.equal(err.message, workspaceNotReadyMessage('creating'))
-      return true
-    })
-    assert.throws(() => assertWorkspaceReady('error'), (err: Error) => {
-      assert.equal(err.message, workspaceNotReadyMessage('error'))
-      return true
-    })
+    assert.throws(
+      () => assertWorkspaceReady('creating'),
+      (err: Error) => {
+        assert.equal(err.message, workspaceNotReadyMessage('creating'))
+        return true
+      },
+    )
+    assert.throws(
+      () => assertWorkspaceReady('error'),
+      (err: Error) => {
+        assert.equal(err.message, workspaceNotReadyMessage('error'))
+        return true
+      },
+    )
   })
 })

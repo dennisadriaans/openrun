@@ -41,11 +41,7 @@ export type ToolCallLocation = {
 }
 
 /** Hint about what picking a permission option means. */
-export type PermissionOptionKind =
-  | 'allow_once'
-  | 'allow_always'
-  | 'reject_once'
-  | 'reject_always'
+export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
 
 /** One button on an approval prompt. */
 export type PermissionOption = {
@@ -55,9 +51,7 @@ export type PermissionOption = {
 }
 
 /** The user's answer to an approval prompt. */
-export type PermissionOutcome =
-  | { outcome: 'selected'; optionId: string }
-  | { outcome: 'cancelled' }
+export type PermissionOutcome = { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' }
 
 export type PlanEntryStatus = 'pending' | 'in_progress' | 'completed'
 export type PlanEntryPriority = 'high' | 'medium' | 'low'
@@ -70,12 +64,7 @@ export type PlanEntry = {
 }
 
 /** Why a prompt turn ended. */
-export type StopReason =
-  | 'end_turn'
-  | 'max_tokens'
-  | 'max_turn_requests'
-  | 'refusal'
-  | 'cancelled'
+export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled'
 
 export const TOOL_KINDS: readonly ToolKind[] = [
   'read',
@@ -107,9 +96,7 @@ export function isToolKind(value: unknown): value is ToolKind {
 }
 
 export function isToolCallStatus(value: unknown): value is ToolCallStatus {
-  return (
-    typeof value === 'string' && (TOOL_CALL_STATUSES as readonly string[]).includes(value)
-  )
+  return typeof value === 'string' && (TOOL_CALL_STATUSES as readonly string[]).includes(value)
 }
 
 /**

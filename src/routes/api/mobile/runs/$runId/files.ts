@@ -14,7 +14,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/files')({
         const auth = requireDeviceOp(request, 'runs.files')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
         const dir = new URL(request.url).searchParams.get('dir') ?? ''
-        const result = handleRunFiles({ runId: params.runId, dir })
+        const result = await handleRunFiles({ runId: params.runId, dir })
         return Response.json(result.body, { status: result.status })
       },
     },

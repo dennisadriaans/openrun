@@ -60,7 +60,11 @@ function CopyField({ label, value }: { label: string; value: string }) {
             }
           }}
         >
-          {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-success" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
         </button>
       </div>
     </div>
@@ -286,7 +290,9 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
                 return (
                   <li key={d.id} className="px-4 py-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="mono truncate text-ui-sm text-foreground">{d.eventType}</span>
+                      <span className="mono truncate text-ui-sm text-foreground">
+                        {d.eventType}
+                      </span>
                       <span
                         className={
                           summary.matchedNothing

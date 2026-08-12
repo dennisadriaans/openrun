@@ -4,10 +4,7 @@
  * Cron validity is intentionally omitted: schedules are for Enable; manual
  * runs do not require a valid cron expression.
  */
-import {
-  runPrereqBlockedReason,
-  type RunPrereqInput,
-} from './runPrereqGate.ts'
+import { runPrereqBlockedReason, type RunPrereqInput } from './runPrereqGate.ts'
 
 /** Fields the list/detail pages already have on TaskWithMeta. */
 export type RunNowGateInput = RunPrereqInput

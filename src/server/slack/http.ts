@@ -28,9 +28,7 @@ export type SlackHttpInput = {
 }
 
 /** `POST /api/slack/events` — Events API and URL verification. */
-export async function handleSlackEventsRequest(
-  input: SlackHttpInput,
-): Promise<SlackHttpResult> {
+export async function handleSlackEventsRequest(input: SlackHttpInput): Promise<SlackHttpResult> {
   const settings = getSlackSettings()
   const body = input.rawBody.toString('utf8')
 

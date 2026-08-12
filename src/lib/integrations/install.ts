@@ -41,7 +41,10 @@ export type JiraInstallCredentials = {
 
 export function cloudConnectionIdFromConfig(raw: string): string | null {
   try {
-    const parsed = JSON.parse(raw || '{}') as { installMethod?: unknown; cloudConnectionId?: unknown }
+    const parsed = JSON.parse(raw || '{}') as {
+      installMethod?: unknown
+      cloudConnectionId?: unknown
+    }
     if (parsed.installMethod !== 'hosted') return null
     return typeof parsed.cloudConnectionId === 'string' && parsed.cloudConnectionId.trim()
       ? parsed.cloudConnectionId.trim()
@@ -99,10 +102,7 @@ export function linearResourceTypesFromCatalog(catalogEventIds: string[]): strin
 
 /** Jira admin webhook event names (derived events are local-only). */
 export function jiraRemoteEventsFromCatalog(catalogEventIds: string[]): string[] {
-  const derived = new Set([
-    'jira:issue_status_changed',
-    'jira:issue_assigned',
-  ])
+  const derived = new Set(['jira:issue_status_changed', 'jira:issue_assigned'])
   const out: string[] = []
   const seen = new Set<string>()
   for (const id of catalogEventIds) {

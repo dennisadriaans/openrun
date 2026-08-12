@@ -15,7 +15,7 @@ export const Route = createFileRoute('/api/mobile/runs/$runId/')({
       GET: async ({ params, request }) => {
         const auth = requireDeviceOp(request, 'runs.read')
         if (!auth.ok) return Response.json(auth.body, { status: auth.status })
-        const result = handleGetRun(params.runId)
+        const result = await handleGetRun(params.runId)
         return Response.json(result.body, { status: result.status })
       },
     },

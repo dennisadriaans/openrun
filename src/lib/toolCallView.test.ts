@@ -1,24 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import {
-  displayPath,
-  editHunksFromInput,
-  toolCallVerb,
-  toolCallView,
-} from './toolCallView.ts'
+import { displayPath, editHunksFromInput, toolCallVerb, toolCallView } from './toolCallView.ts'
 
 describe('displayPath', () => {
   it('keeps the last two directories of an absolute path', () => {
-    assert.deepEqual(
-      displayPath(
-        '/Users/dennisadriaansen/Dev/nuxt-clean-gray-dashboard/app/pages/payments.vue',
-      ),
-      {
-        path: '/Users/dennisadriaansen/Dev/nuxt-clean-gray-dashboard/app/pages/payments.vue',
-        dir: 'app/pages',
-        name: 'payments.vue',
-      },
-    )
+    assert.deepEqual(displayPath('/home/dev/projects/dashboard/app/pages/payments.vue'), {
+      path: '/home/dev/projects/dashboard/app/pages/payments.vue',
+      dir: 'app/pages',
+      name: 'payments.vue',
+    })
   })
 
   it('handles a bare filename and a line number', () => {

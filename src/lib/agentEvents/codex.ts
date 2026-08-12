@@ -50,7 +50,9 @@ function planFromTodoList(item: Record<string, unknown>): PlanEntry[] {
 function locationsFromFileChange(item: Record<string, unknown>) {
   const changes = Array.isArray(item.changes) ? item.changes : []
   const locations = changes
-    .map((c) => (c && typeof c === 'object' ? pickString(c as Record<string, unknown>, 'path') : undefined))
+    .map((c) =>
+      c && typeof c === 'object' ? pickString(c as Record<string, unknown>, 'path') : undefined,
+    )
     .filter((p): p is string => Boolean(p))
     .map((path) => ({ path }))
   return locations.length > 0 ? locations : undefined
@@ -101,8 +103,7 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
         ]
       }
       if (type === 'item.completed') {
-        const content =
-          pickString(item, 'aggregated_output', 'output', 'text') ?? ''
+        const content = pickString(item, 'aggregated_output', 'output', 'text') ?? ''
         const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null
         return [
           {
@@ -132,7 +133,14 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
         return [
           {
             kind: 'tool_start',
-            payload: { toolCallId: id, name: 'file_change', title, toolKind: kind, status, locations },
+            payload: {
+              toolCallId: id,
+              name: 'file_change',
+              title,
+              toolKind: kind,
+              status,
+              locations,
+            },
           },
         ]
       }

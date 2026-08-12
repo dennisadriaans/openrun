@@ -22,10 +22,7 @@ test('isLikelyLocalhostUrl detects loopback hosts', () => {
 test('assertPublicBaseUrl rejects localhost and accepts tunnels', () => {
   assert.throws(() => assertPublicBaseUrl('http://localhost:3000'), /cannot reach localhost/)
   assert.throws(() => assertPublicBaseUrl(''), /public base URL/i)
-  assert.equal(
-    assertPublicBaseUrl('https://abc.ngrok-free.app/'),
-    'https://abc.ngrok-free.app',
-  )
+  assert.equal(assertPublicBaseUrl('https://abc.ngrok-free.app/'), 'https://abc.ngrok-free.app')
 })
 
 test('remoteInstallBaseUrl skips empty and localhost, validates the rest', () => {
@@ -56,8 +53,14 @@ test('default install events are non-empty per provider', () => {
 })
 
 test('cloudConnectionIdFromConfig only reads hosted rows', () => {
-  assert.equal(cloudConnectionIdFromConfig('{"installMethod":"hosted","cloudConnectionId":"jconn_1"}'), 'jconn_1')
-  assert.equal(cloudConnectionIdFromConfig('{"installMethod":"api","cloudConnectionId":"jconn_1"}'), null)
+  assert.equal(
+    cloudConnectionIdFromConfig('{"installMethod":"hosted","cloudConnectionId":"jconn_1"}'),
+    'jconn_1',
+  )
+  assert.equal(
+    cloudConnectionIdFromConfig('{"installMethod":"api","cloudConnectionId":"jconn_1"}'),
+    null,
+  )
   assert.equal(cloudConnectionIdFromConfig('{}'), null)
   assert.equal(cloudConnectionIdFromConfig('not-json'), null)
 })
@@ -73,4 +76,3 @@ test('catalog events map to remote provider subscriptions', () => {
     ['jira:issue_created', 'jira:issue_updated'],
   )
 })
-

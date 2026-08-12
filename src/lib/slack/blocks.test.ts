@@ -154,7 +154,14 @@ test('an approval warns that silence denies', () => {
 
 test('automations show schedule state and stay numbered', () => {
   const tasks: TaskView[] = [
-    { id: 't1', ordinal: 1, name: 'nightly docs', enabled: true, cron: '0 3 * * *', nextRunAt: NOW + 3_600_000 },
+    {
+      id: 't1',
+      ordinal: 1,
+      name: 'nightly docs',
+      enabled: true,
+      cron: '0 3 * * *',
+      nextRunAt: NOW + 3_600_000,
+    },
     { id: 't2', ordinal: 2, name: 'manual sweep', enabled: false, cron: '', nextRunAt: null },
   ]
   const text = textOf(automationsBlocks(tasks, { baseUrl, now: NOW }))

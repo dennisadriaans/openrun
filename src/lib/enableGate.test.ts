@@ -25,10 +25,7 @@ describe('enableBlockedReason', () => {
   })
 
   it('allows manual-only (empty cron) when the rest is healthy', () => {
-    assert.equal(
-      enableBlockedReason({ ...healthy, cron: '', cronValid: true }),
-      null,
-    )
+    assert.equal(enableBlockedReason({ ...healthy, cron: '', cronValid: true }), null)
   })
 
   it('flags an invalid schedule first (same order as setTaskEnabled)', () => {
@@ -100,10 +97,7 @@ describe('enableBlockedReason', () => {
   })
 
   it('flags an empty prompt last', () => {
-    assert.equal(
-      enableBlockedReason({ ...healthy, promptValid: false }),
-      emptyTaskPromptMessage(),
-    )
+    assert.equal(enableBlockedReason({ ...healthy, promptValid: false }), emptyTaskPromptMessage())
     assert.equal(canEnableTask({ ...healthy, promptValid: false }), false)
   })
 })

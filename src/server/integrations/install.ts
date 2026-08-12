@@ -61,7 +61,12 @@ export type InstallContext = {
   suggestedPublicBaseUrl: string
   gh: { installed: boolean; authenticated: boolean }
   /** Repos inferred from Open Run projects + gh repo list. */
-  githubRepos: Array<{ owner: string; repo: string; nameWithOwner: string; source: 'project' | 'gh' }>
+  githubRepos: Array<{
+    owner: string
+    repo: string
+    nameWithOwner: string
+    source: 'project' | 'gh'
+  }>
   runtimes: Array<{ id: string; label: string; bin: string; installed: boolean }>
   projects: Array<{
     id: string
@@ -79,10 +84,7 @@ function parseConfig(raw: string): IntegrationConfig {
   }
 }
 
-function resolveEvents(
-  provider: IntegrationProviderId,
-  events: string[] | undefined,
-): string[] {
+function resolveEvents(provider: IntegrationProviderId, events: string[] | undefined): string[] {
   if (events && events.length > 0) {
     return events.filter((e) => typeof e === 'string' && e.trim())
   }
@@ -105,9 +107,9 @@ function assertAutomationTargets(input: InstallIntegrationInput): {
   if (!runtimeId) {
     throw new Error('Pick a runtime for the automation.')
   }
-  const runtime = getDb()
-    .prepare('SELECT * FROM runtimes WHERE id = ?')
-    .get(runtimeId) as RuntimeRow | undefined
+  const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(runtimeId) as
+    | RuntimeRow
+    | undefined
   if (!runtime) throw new Error('Runtime not found')
   return { workspaceId, runtimeId, create: true }
 }
@@ -210,12 +212,10 @@ export async function installIntegration(
 
   const parsedGithub =
     provider === 'github'
-      ? parseGithubOwnerRepo(
-          input.github ? `${input.github.owner}/${input.github.repo}` : '',
-        ) ??
+      ? (parseGithubOwnerRepo(input.github ? `${input.github.owner}/${input.github.repo}` : '') ??
         (input.github?.owner && input.github?.repo
           ? { owner: input.github.owner.trim(), repo: input.github.repo.trim() }
-          : null)
+          : null))
       : null
 
   const connectionName =
@@ -240,9 +240,7 @@ export async function installIntegration(
     throw new Error('Failed to generate webhook secret')
   }
 
-  const webhookUrl = remoteBase
-    ? `${remoteBase}${webhookPathFor(created.id)}`
-    : created.webhookPath
+  const webhookUrl = remoteBase ? `${remoteBase}${webhookPathFor(created.id)}` : created.webhookPath
 
   let remoteWebhookId = ''
   let remoteError: string | undefined
@@ -258,9 +256,7 @@ export async function installIntegration(
       (provider === 'linear' && Boolean(input.linear?.apiKey?.trim())) ||
       (provider === 'jira' &&
         Boolean(
-          input.jira?.siteUrl?.trim() &&
-            input.jira?.email?.trim() &&
-            input.jira?.apiToken?.trim(),
+          input.jira?.siteUrl?.trim() && input.jira?.email?.trim() && input.jira?.apiToken?.trim(),
         )))
 
   if (canRemote && remoteBase) {
@@ -318,11 +314,8 @@ export async function installIntegration(
 
   let automationId: string | null = null
   if (autoTargets.create) {
-    const prompt =
-      input.automation?.prompt?.trim() || defaultAutomationPrompt(provider)
-    const name =
-      input.automation?.name?.trim() ||
-      defaultAutomationName(provider, connectionName)
+    const prompt = input.automation?.prompt?.trim() || defaultAutomationPrompt(provider)
+    const name = input.automation?.name?.trim() || defaultAutomationName(provider, connectionName)
     const enabled = input.automation?.enabled !== false
     try {
       const task = deps.createAutomation({
