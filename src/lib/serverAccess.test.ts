@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   DEFAULT_HOST,
+  hostHeaderRefusal,
+  hostnameFromHostHeader,
   insecureHostWarning,
   isLoopbackHost,
+  parseAllowedHosts,
   pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
@@ -142,6 +145,78 @@ test('an empty or missing token never matches', () => {
   assert.equal(tokensMatch('s3cret', null), false)
   assert.equal(tokensMatch('s3cret', undefined), false)
   assert.equal(tokensMatch('s3cret', ''), false)
+})
+
+test('a Host header is reduced to its hostname', () => {
+  assert.equal(hostnameFromHostHeader('localhost:3000'), 'localhost')
+  assert.equal(hostnameFromHostHeader('127.0.0.1:3000'), '127.0.0.1')
+  assert.equal(hostnameFromHostHeader('127.0.0.1'), '127.0.0.1')
+  assert.equal(hostnameFromHostHeader('  Evil.Example:8080 '), 'evil.example')
+  assert.equal(hostnameFromHostHeader('[::1]:3000'), '::1')
+  assert.equal(hostnameFromHostHeader('[::1]'), '::1')
+
+  // A bare IPv6 literal is not a hostname with a port.
+  assert.equal(hostnameFromHostHeader('::1'), '::1')
+
+  assert.equal(hostnameFromHostHeader(''), null)
+  assert.equal(hostnameFromHostHeader(null), null)
+  assert.equal(hostnameFromHostHeader(undefined), null)
+  assert.equal(hostnameFromHostHeader('[::1'), null)
+})
+
+const loopbackBind = { host: '127.0.0.1', hasToken: false, allowInsecureHost: false }
+
+test('a loopback bind answers only to loopback names', () => {
+  for (const header of ['localhost:3000', '127.0.0.1:3000', '[::1]:3000', 'app.localhost']) {
+    assert.equal(hostHeaderRefusal(loopbackBind, header), null, `${header} should be allowed`)
+  }
+})
+
+test('a rebound hostname is refused even with no token configured', () => {
+  const refusal = hostHeaderRefusal(loopbackBind, 'evil.example:3000')
+  assert.ok(refusal, 'expected a refusal')
+  assert.match(refusal, /evil\.example/)
+  assert.match(refusal, /AGENTOPS_ALLOWED_HOSTS/)
+
+  // A token does not change the answer: the guard runs before it.
+  assert.ok(hostHeaderRefusal({ ...loopbackBind, hasToken: true }, 'evil.example'))
+})
+
+test('a request with no Host header is refused', () => {
+  assert.ok(hostHeaderRefusal(loopbackBind, null))
+  assert.ok(hostHeaderRefusal(loopbackBind, ''))
+})
+
+test('explicitly allowed hostnames pass the rebinding guard', () => {
+  const config = {
+    ...loopbackBind,
+    allowedHosts: parseAllowedHosts('tunnel.example, Other.Test:443'),
+  }
+  assert.equal(hostHeaderRefusal(config, 'tunnel.example:3000'), null)
+  assert.equal(hostHeaderRefusal(config, 'other.test'), null)
+  assert.ok(hostHeaderRefusal(config, 'evil.example'))
+})
+
+test('allowed-host lists are parsed leniently', () => {
+  assert.deepEqual(parseAllowedHosts('a.test, b.test:8080 ,,'), ['a.test', 'b.test'])
+  assert.deepEqual(parseAllowedHosts(''), [])
+  assert.deepEqual(parseAllowedHosts(undefined), [])
+})
+
+test('a published bind is not host-checked — it has names we cannot enumerate', () => {
+  assert.equal(
+    hostHeaderRefusal({ host: '0.0.0.0', hasToken: true, allowInsecureHost: false }, 'laptop.lan'),
+    null,
+    'a token already protects a published bind against a rebound page',
+  )
+  assert.equal(
+    hostHeaderRefusal(
+      { host: '127.0.0.1', hasToken: false, allowInsecureHost: true },
+      'evil.example',
+    ),
+    null,
+    'the explicit override opts out of this guard too',
+  )
 })
 
 test('signed endpoints bypass the token, app endpoints do not', () => {

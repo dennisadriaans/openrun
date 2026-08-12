@@ -13,7 +13,14 @@ That is the product's function, not a defect. The consequence is blunt:
 > **Anyone who can reach the Open Run HTTP server can run commands as you.**
 
 Open Run therefore binds to `127.0.0.1` by default and refuses to start on a
-non-loopback address unless you explicitly opt in *and* set an access token. See
+non-loopback address unless you explicitly opt in *and* set an access token.
+
+Binding to loopback is necessary but not sufficient: a page on the open web can
+point its own domain at `127.0.0.1` (DNS rebinding) and then address Open Run as
+though it were same-origin. So on a loopback bind Open Run also refuses any
+request whose `Host` header is not a loopback name, and cross-site calls to
+server functions are rejected by a CSRF check. If you reach Open Run through a
+tunnel or reverse proxy, name it in `AGENTOPS_ALLOWED_HOSTS`. See
 [the security model](https://getopenrun.dev/docs/security) for the full trust
 model, including what we defend against and what we deliberately do not.
 
@@ -59,6 +66,9 @@ to. There is no bug bounty.
 ## In scope
 
 - Bypassing the access-token check on any `/api/**` route or server function.
+- Reaching Open Run from a web page you merely visited — cross-site requests
+  that drive a server function, or a DNS-rebinding attack that gets past the
+  `Host` check in `src/lib/serverAccess.ts`.
 - Escaping the workspace path boundary in `src/server/files.ts` — reading or
   writing outside the run's working directory via traversal, absolute paths or
   symlinks.

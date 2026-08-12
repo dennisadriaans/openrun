@@ -37,6 +37,8 @@ export type ServerAccessConfig = {
   hasToken: boolean
   /** `AGENTOPS_ALLOW_INSECURE_HOST` — bind wide open, on purpose. */
   allowInsecureHost: boolean
+  /** `AGENTOPS_ALLOWED_HOSTS` — extra names a request may address us by. */
+  allowedHosts?: string[]
 }
 
 /**
@@ -121,6 +123,77 @@ export function insecureHostWarning(config: ServerAccessConfig): string | null {
     `Open Run is bound to ${config.host} and reachable beyond this machine. ` +
     `Requests must carry the access token; keep it secret and prefer an ` +
     `encrypted channel.`
+  )
+}
+
+/**
+ * Hostname a request addressed us by, port and IPv6 brackets removed.
+ *
+ * `null` when the header is absent or unusable — HTTP/1.1 requires `Host`, so
+ * a request without one is not something we need to keep serving.
+ */
+export function hostnameFromHostHeader(header: string | null | undefined): string | null {
+  if (typeof header !== 'string') return null
+  const raw = header.trim().toLowerCase()
+  if (!raw) return null
+
+  if (raw.startsWith('[')) {
+    const close = raw.indexOf(']')
+    if (close === -1) return null
+    const inside = raw.slice(1, close)
+    return inside || null
+  }
+
+  // A bare IPv6 literal has several colons; only a trailing `:port` is a port.
+  const colons = raw.split(':').length - 1
+  const name = colons === 1 ? raw.slice(0, raw.indexOf(':')) : raw
+  return name || null
+}
+
+/** `AGENTOPS_ALLOWED_HOSTS` as a normalized list. */
+export function parseAllowedHosts(raw: string | null | undefined): string[] {
+  if (typeof raw !== 'string') return []
+  return raw
+    .split(',')
+    .map((entry) => hostnameFromHostHeader(entry))
+    .filter((entry): entry is string => entry !== null)
+}
+
+/**
+ * Why a request's `Host` header disqualifies it, or `null` to let it through.
+ *
+ * This is the DNS-rebinding guard. A browser will not let `evil.example` read a
+ * cross-origin response from `127.0.0.1`, but it will happily re-resolve
+ * `evil.example` to `127.0.0.1` after the page has loaded — at which point the
+ * page *is* same-origin with us by the browser's reckoning, ambient credentials
+ * and all, and an origin check has nothing left to compare. The name the
+ * request asked for survives that trick in the `Host` header, so that is what
+ * we check.
+ *
+ * Only enforced for a loopback bind. A server deliberately published to a
+ * network is reached by names we cannot enumerate, and that configuration
+ * already requires an access token (or the explicit insecure override), which
+ * a rebound page cannot obtain.
+ */
+export function hostHeaderRefusal(
+  config: ServerAccessConfig,
+  header: string | null | undefined,
+): string | null {
+  if (!isLoopbackHost(config.host)) return null
+  if (config.allowInsecureHost) return null
+
+  const hostname = hostnameFromHostHeader(header)
+  if (hostname === null) return 'Refused: request has no usable Host header.'
+
+  if (isLoopbackHost(hostname)) return null
+  if (hostname === hostnameFromHostHeader(config.host)) return null
+  if ((config.allowedHosts ?? []).includes(hostname)) return null
+
+  return (
+    `Refused: this request addressed Open Run as "${hostname}", but Open Run is ` +
+    `bound to ${config.host} and only answers to a loopback name. This is the ` +
+    `DNS-rebinding guard. If you are reaching Open Run through a tunnel or a ` +
+    `reverse proxy, add that hostname to AGENTOPS_ALLOWED_HOSTS.`
   )
 }
 

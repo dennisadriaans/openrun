@@ -16,7 +16,9 @@ import {
   ACCESS_TOKEN_HEADER,
   ACCESS_TOKEN_QUERY_PARAM,
   DEFAULT_HOST,
+  hostHeaderRefusal,
   insecureHostWarning,
+  parseAllowedHosts,
   pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
@@ -112,6 +114,7 @@ export function serverAccessConfig(): ServerAccessConfig {
     host: resolveHost(),
     hasToken: resolveAccessToken() !== null,
     allowInsecureHost: allowInsecureHost(),
+    allowedHosts: parseAllowedHosts(process.env.AGENTOPS_ALLOWED_HOSTS),
   }
 }
 
@@ -228,7 +231,6 @@ export function accessRefusalResponse(request: Request): Response | null {
   }
 
   const config = serverAccessConfig()
-  if (!tokenRequiredForRequests(config)) return null
 
   let pathname = '/'
   try {
@@ -238,7 +240,21 @@ export function accessRefusalResponse(request: Request): Response | null {
   }
 
   // Signed webhook and Slack endpoints authenticate their callers themselves.
+  // They are also the endpoints a third party addresses by a tunnel hostname,
+  // so they sit ahead of the Host check as well as the token check.
   if (pathAuthenticatesItself(pathname)) return null
+
+  // Runs before the token check: a rebound page is refused whether or not a
+  // token is configured, and the default install has none.
+  const hostRefusal = hostHeaderRefusal(config, request.headers.get('host'))
+  if (hostRefusal) {
+    return new Response(hostRefusal, {
+      status: 403,
+      headers: { 'Cache-Control': 'no-store' },
+    })
+  }
+
+  if (!tokenRequiredForRequests(config)) return null
 
   const expected = resolveAccessToken()
   if (expected && tokensMatch(expected, presentedToken(request))) return null
