@@ -76,7 +76,9 @@ export function TerminalDrawer({
         <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           Terminal
         </span>
-        <span className="text-[10px] text-muted-foreground/50">read-only · interactive PTY soon</span>
+        <span className="text-[10px] text-muted-foreground/50">
+          read-only · interactive PTY soon
+        </span>
       </div>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-auto px-3 py-2 mono text-[11.5px] leading-relaxed">
@@ -87,7 +89,9 @@ export function TerminalDrawer({
           </div>
         ) : null}
         {log ? (
-          <pre className="whitespace-pre-wrap break-words text-muted-foreground">{log.slice(-12000)}</pre>
+          <pre className="whitespace-pre-wrap break-words text-muted-foreground">
+            {log.slice(-12000)}
+          </pre>
         ) : (
           <div className="py-6 text-center text-[12px] text-muted-foreground/50">
             No process output yet. Agent stdout/stderr will appear here.

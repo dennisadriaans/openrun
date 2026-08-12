@@ -13,9 +13,7 @@ import {
 
 // CodeMirror is ~600KB; keep it out of the workspace chunk so it only loads
 // once a file is actually opened for editing.
-const FileEditor = lazy(() =>
-  import('./FileEditor').then((m) => ({ default: m.FileEditor })),
-)
+const FileEditor = lazy(() => import('./FileEditor').then((m) => ({ default: m.FileEditor })))
 import type { DiffFile } from '../../server/git'
 import type { CachedCheckResult } from '../../lib/applyRunLiveEvent'
 import { countFailingChecks } from '../../lib/checkPass'
@@ -80,11 +78,7 @@ export function RightPanel({
   )
 
   // Exactly one tab is active: a file diff counts as Changed, an editor as Browse.
-  const activeTab: FilesView = editingPath
-    ? 'browse'
-    : selectedPath
-      ? 'changed'
-      : filesView
+  const activeTab: FilesView = editingPath ? 'browse' : selectedPath ? 'changed' : filesView
   const changedActive = activeTab === 'changed'
   const checksActive = activeTab === 'checks'
   const browseActive = activeTab === 'browse'

@@ -10,16 +10,9 @@ import type { ChatMessage } from '../server/core'
 import type { ApprovalDecision } from '../lib/claudeControl'
 import type { TurnEventPayload, TurnEventRow } from '../lib/turnEvents'
 import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
-import {
-  formatChatTimestampTooltip,
-  formatShortTimestamp,
-} from '../lib/format'
+import { formatChatTimestampTooltip, formatShortTimestamp } from '../lib/format'
 import { useAnswerApproval } from '../lib/queries'
-import {
-  DEFAULT_RUNTIME_MODE,
-  parseRuntimeMode,
-  type RuntimeMode,
-} from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
 import { supportsSupervised } from '../lib/supervisedPolicy'
@@ -28,21 +21,15 @@ import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
 import { PlanProposalsInChat } from './PlanProposalsInChat'
 import { looksLikePlanProposalArray, parsePlanProposals } from '../lib/planProposals'
-import {
-  ApprovalEvent,
-  CallEvent,
-  PlanEvent,
-  ThoughtEvent,
-} from './chat/index'
+import { ApprovalEvent, CallEvent, PlanEvent, ThoughtEvent } from './chat/index'
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = []
   const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g
   let last = 0
-  let match: RegExpExecArray | null
   let i = 0
 
-  while ((match = pattern.exec(text)) !== null) {
+  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
     if (match.index > last) nodes.push(text.slice(last, match.index))
     const token = match[0]
     const key = `${keyPrefix}-i${i++}`
@@ -286,11 +273,7 @@ function TurnEvents({
 }: {
   events: TurnEventRow[]
   answering?: boolean
-  onAnswer?: (input: {
-    requestId: string
-    optionId?: string
-    decision?: ApprovalDecision
-  }) => void
+  onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile?: (path: string) => void
 }) {
   const nodes: ReactNode[] = []
@@ -485,6 +468,7 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
         </div>
         {long ? (
           <button
+            type="button"
             onClick={() => setExpanded(!expanded)}
             className="mt-1 text-xs text-muted-foreground hover:text-foreground"
           >
@@ -518,11 +502,7 @@ const AssistantMessage = memo(function AssistantMessage({
   message: ChatMessage
   activePath: string | null
   answering?: boolean
-  onAnswer?: (input: {
-    requestId: string
-    optionId?: string
-    decision?: ApprovalDecision
-  }) => void
+  onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile: (path: string) => void
   runId: string
   runtimeId?: string
@@ -544,7 +524,7 @@ const AssistantMessage = memo(function AssistantMessage({
       if (e.kind === 'raw') return true
       if (e.kind !== 'turn_done') return false
       const result = eventPayload(e).result
-      return !result || !result.trim()
+      return !result?.trim()
     })
   const showContentOverRaw = Boolean(eventsAreRawDump && message.content.trim())
   const showEvents = hasEvents && !showContentOverRaw
@@ -642,11 +622,7 @@ const AssistantMessage = memo(function AssistantMessage({
       </div>
 
       {!running && message.diffSummary.length > 0 ? (
-        <FilesChanged
-          files={message.diffSummary}
-          activePath={activePath}
-          onSelect={onSelectFile}
-        />
+        <FilesChanged files={message.diffSummary} activePath={activePath} onSelect={onSelectFile} />
       ) : null}
     </div>
   )

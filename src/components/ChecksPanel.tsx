@@ -25,10 +25,7 @@ import { useRerunChecks, useSendMessage } from '../lib/queries'
 import { Button } from './ui'
 import { buildFixChecksPrompt, type CheckOutcome } from '../lib/verdict'
 
-const OUTCOME_META: Record<
-  string,
-  { icon: typeof CheckCircle2; tone: string; label: string }
-> = {
+const OUTCOME_META: Record<string, { icon: typeof CheckCircle2; tone: string; label: string }> = {
   passed: { icon: CheckCircle2, tone: 'text-success', label: 'passed' },
   failed: { icon: XCircle, tone: 'text-danger', label: 'failed' },
   timeout: { icon: Clock, tone: 'text-danger', label: 'timed out' },
@@ -50,6 +47,7 @@ function CheckRow({ result }: { result: CachedCheckResult }) {
   return (
     <div>
       <button
+        type="button"
         onClick={() => (hasOutput ? setOpen((v) => !v) : undefined)}
         disabled={!hasOutput}
         className={`flex w-full items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 ${
@@ -156,8 +154,7 @@ export function ChecksPanel({
 
       {stale && !running ? (
         <p className="mx-0.5 mb-2 rounded-md bg-[var(--bg-quaternary)] px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
-          From an earlier turn — the workspace has changed since. Re-run to see where it stands
-          now.
+          From an earlier turn — the workspace has changed since. Re-run to see where it stands now.
         </p>
       ) : null}
 

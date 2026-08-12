@@ -40,13 +40,7 @@ function SimpleMark({
   className?: string
 }) {
   return (
-    <svg
-      role="img"
-      aria-label={title}
-      viewBox="0 0 24 24"
-      className={className}
-      fill={`#${hex}`}
-    >
+    <svg role="img" aria-label={title} viewBox="0 0 24 24" className={className} fill={`#${hex}`}>
       <path d={path} />
     </svg>
   )

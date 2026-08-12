@@ -14,11 +14,7 @@ import {
   type ToolCallStatus,
   type ToolKind,
 } from '../../lib/acp'
-import {
-  resolveCallRole,
-  toolCallRoleTitle,
-  type ToolCallRole,
-} from '../../lib/toolCallRole'
+import { resolveCallRole, toolCallRoleTitle, type ToolCallRole } from '../../lib/toolCallRole'
 import {
   displayPath,
   toolCallView,
@@ -110,13 +106,7 @@ function targetTitle(target: ToolCallTarget): string {
   return target.text
 }
 
-function ToolCallGlyph({
-  role,
-  view,
-}: {
-  role: ToolCallRole
-  view: ToolCallView
-}) {
+function ToolCallGlyph({ role, view }: { role: ToolCallRole; view: ToolCallView }) {
   if (role !== 'tool') {
     const Icon = iconForCallRole(role, view.kind)
     return <Icon className="chat-tool__icon size-3.5 shrink-0" />

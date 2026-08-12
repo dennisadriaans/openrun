@@ -114,7 +114,7 @@ export function AddProjectModal({
               >
                 {listing.isLoading && !current
                   ? 'Loading…'
-                  : selected?.path ?? current?.path ?? '—'}
+                  : (selected?.path ?? current?.path ?? '—')}
               </div>
             </div>
 

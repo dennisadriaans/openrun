@@ -66,8 +66,7 @@ export function WorkspacePicker({
   }
 
   const selectedWorkspace = activeWorkspaces.find((w) => w.id === workspaceId)
-  const selectedNotReady =
-    selectedWorkspace && !isWorkspaceReady(selectedWorkspace.status)
+  const selectedNotReady = selectedWorkspace && !isWorkspaceReady(selectedWorkspace.status)
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -124,7 +123,9 @@ export function WorkspacePicker({
       </Field>
 
       {selectedWorkspace ? (
-        <div className="md:col-span-2 mono text-ui-sm text-tier-tertiary">{selectedWorkspace.path}</div>
+        <div className="md:col-span-2 mono text-ui-sm text-tier-tertiary">
+          {selectedWorkspace.path}
+        </div>
       ) : null}
       {selectedNotReady ? (
         <p className="md:col-span-2 text-ui-sm text-rose-300">

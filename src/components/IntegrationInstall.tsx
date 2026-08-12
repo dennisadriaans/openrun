@@ -12,7 +12,12 @@ import {
   storePublicBaseUrl,
 } from '../lib/integrations/install'
 import type { IntegrationProviderId } from '../lib/integrations/types'
-import { useInstallContext, useInstallIntegration, useCloudStatus, useStartJiraConnect } from '../lib/queries'
+import {
+  useInstallContext,
+  useInstallIntegration,
+  useCloudStatus,
+  useStartJiraConnect,
+} from '../lib/queries'
 import { Button, Field, inputClass } from './ui'
 
 export function IntegrationInstallPanel({
@@ -76,9 +81,7 @@ export function IntegrationInstallPanel({
         ...(provider === 'github' && parsed
           ? { github: { owner: parsed.owner, repo: parsed.repo } }
           : {}),
-        ...(provider === 'linear' && linearKey.trim()
-          ? { linear: { apiKey: linearKey } }
-          : {}),
+        ...(provider === 'linear' && linearKey.trim() ? { linear: { apiKey: linearKey } } : {}),
         ...(provider === 'jira'
           ? {
               jira: {
@@ -193,11 +196,13 @@ export function IntegrationInstallPanel({
       {provider === 'jira' && cloud?.signedIn && !localSetup ? (
         <div className="space-y-3">
           <p className="text-ui-sm text-tier-secondary">
-            Connect Jira in the browser. Tokens stay on the control plane; this
-            machine receives events over an outbound connection.
+            Connect Jira in the browser. Tokens stay on the control plane; this machine receives
+            events over an outbound connection.
           </p>
           {error ? (
-            <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">{error}</p>
+            <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">
+              {error}
+            </p>
           ) : null}
           <div className="flex flex-wrap gap-2">
             <Button
@@ -271,26 +276,33 @@ export function IntegrationInstallPanel({
 
       {showLocal ? (
         <>
-      {error ? (
-        <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">{error}</p>
-      ) : null}
+          {error ? (
+            <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">
+              {error}
+            </p>
+          ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="primary" disabled={install.isPending} onClick={() => void submit()}>
-          {install.isPending ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Installing…
-            </>
-          ) : (
-            'Install'
-          )}
-        </Button>
-        {onCancel ? (
-          <Button type="button" variant="ghost" disabled={install.isPending} onClick={onCancel}>
-            Cancel
-          </Button>
-        ) : null}
-      </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="primary"
+              disabled={install.isPending}
+              onClick={() => void submit()}
+            >
+              {install.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Installing…
+                </>
+              ) : (
+                'Install'
+              )}
+            </Button>
+            {onCancel ? (
+              <Button type="button" variant="ghost" disabled={install.isPending} onClick={onCancel}>
+                Cancel
+              </Button>
+            ) : null}
+          </div>
         </>
       ) : null}
     </div>

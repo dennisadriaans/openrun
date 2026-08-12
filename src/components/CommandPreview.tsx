@@ -47,9 +47,7 @@ export function CommandPreview({
   omitWarnings?: CommandPreviewWarningCode[]
 }) {
   const { copyToClipboard, isCopied } = useCopyToClipboard()
-  const warnings = (preview?.warnings ?? []).filter(
-    (w) => !(omitWarnings ?? []).includes(w.code),
-  )
+  const warnings = (preview?.warnings ?? []).filter((w) => !(omitWarnings ?? []).includes(w.code))
 
   return (
     <div className="rounded-xl border border-border bg-elevated">
@@ -59,7 +57,7 @@ export function CommandPreview({
         {preview ? (
           <>
             <span className="ml-auto text-ui-sm text-tier-quaternary">
-              {preview.installed ? (preview.binaryPath || 'on PATH') : 'not on PATH'}
+              {preview.installed ? preview.binaryPath || 'on PATH' : 'not on PATH'}
             </span>
             <button
               type="button"
@@ -68,11 +66,7 @@ export function CommandPreview({
               onClick={() => void copyToClipboard(preview.commandLine)}
               className="inline-flex size-6 items-center justify-center rounded-md text-tier-quaternary transition-colors hover:bg-hover hover:text-foreground"
             >
-              {isCopied ? (
-                <Check className="size-3 text-success" />
-              ) : (
-                <Copy className="size-3" />
-              )}
+              {isCopied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
             </button>
           </>
         ) : null}

@@ -37,9 +37,7 @@ export function WorkspaceToolbarChip({
           {count}
         </span>
       ) : null}
-      {showChevron ? (
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-      ) : null}
+      {showChevron ? <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" /> : null}
     </button>
   )
 }

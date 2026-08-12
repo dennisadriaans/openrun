@@ -92,13 +92,7 @@ export function ChatEventShell({
   )
 }
 
-export function ChatEventSection({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactNode
-}) {
+export function ChatEventSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="chat-event__section">
       <div className="chat-event__section-label">{label}</div>

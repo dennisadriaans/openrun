@@ -5,7 +5,16 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, FolderGit2, GitBranch, Lock, LockOpen, PenLine, Plus } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  FolderGit2,
+  GitBranch,
+  Lock,
+  LockOpen,
+  PenLine,
+  Plus,
+} from 'lucide-react'
 import {
   defaultEffort,
   effortLabel,
@@ -188,13 +197,17 @@ function MenuItem({
       title={disabled ? hint : undefined}
       onClick={onSelect}
       className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        active ? 'bg-hover text-foreground' : 'text-foreground/85 hover:bg-hover hover:text-foreground'
+        active
+          ? 'bg-hover text-foreground'
+          : 'text-foreground/85 hover:bg-hover hover:text-foreground'
       }`}
     >
       {leading ? <span className="shrink-0 text-tier-secondary">{leading}</span> : null}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
-        {hint ? <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span> : null}
+        {hint ? (
+          <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
+        ) : null}
       </span>
       {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
     </button>
@@ -339,7 +352,9 @@ export function ProjectPicker({
                 }}
               />
             ) : (
-              <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">No repositories yet</div>
+              <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">
+                No repositories yet
+              </div>
             )
           ) : (
             projects.map((p) => (

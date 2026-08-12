@@ -17,13 +17,7 @@ import {
   User,
   Webhook,
 } from 'lucide-react'
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import {
   AppTopBar,
@@ -86,12 +80,7 @@ export const Icon = ({ className = 'w-6 h-6 rounded bg-inverted', ...props }) =>
     >
       <rect width="93" height="93" rx="9" />
       <g className="fill-current text-inverted bg-inverted">
-        <ellipse
-          cx="45.7872"
-          cy="25.5807"
-          rx="3.77421"
-          ry="12.5807"
-        />
+        <ellipse cx="45.7872" cy="25.5807" rx="3.77421" ry="12.5807" />
         <ellipse
           cx="56.6042"
           cy="28.2985"

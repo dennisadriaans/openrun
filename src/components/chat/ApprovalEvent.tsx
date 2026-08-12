@@ -30,11 +30,7 @@ export function ApprovalEvent({
   options: PermissionOption[]
   pending: boolean
   answering: boolean
-  onAnswer?: (input: {
-    requestId: string
-    optionId?: string
-    decision?: ApprovalDecision
-  }) => void
+  onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
 }) {
   const role = resolveCallRole({ callRole, name, mcpServer })
   const Icon = iconForCallRole(role, toolKind)

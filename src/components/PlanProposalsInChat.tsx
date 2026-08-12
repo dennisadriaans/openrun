@@ -4,15 +4,9 @@
  * Legacy planner runs without a workspaceId get a one-time picker fallback.
  */
 import { useEffect, useMemo, useState } from 'react'
-import {
-  PlanProposalList,
-  type ProposalInstallState,
-} from './PlanProposalCard'
+import { PlanProposalList, type ProposalInstallState } from './PlanProposalCard'
 import { WorkspacePicker } from './WorkspacePicker'
-import {
-  loadDismissedProposals,
-  persistDismissedProposals,
-} from '../lib/planProposalDismiss'
+import { loadDismissedProposals, persistDismissedProposals } from '../lib/planProposalDismiss'
 import type { PlanProposal } from '../lib/planProposals'
 import { useWorkspaces } from '../lib/queries'
 import { hasWorkspaceId } from '../lib/workspaceRef'
@@ -42,13 +36,9 @@ export function PlanProposalsInChat({
   const hasRunWorkspace = hasWorkspaceId(runWorkspaceId ?? '')
   const [projectId, setProjectId] = useState(runProjectId ?? '')
   const [workspaceId, setWorkspaceId] = useState(runWorkspaceId ?? '')
-  const [dismissed, setDismissed] = useState<Set<string>>(() =>
-    loadDismissedProposals(runId),
-  )
+  const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissedProposals(runId))
   const [installed, setInstalled] = useState<Record<string, ProposalInstallState>>({})
-  const { data: workspaces } = useWorkspaces(
-    hasRunWorkspace ? undefined : projectId || undefined,
-  )
+  const { data: workspaces } = useWorkspaces(hasRunWorkspace ? undefined : projectId || undefined)
 
   useEffect(() => {
     setDismissed(loadDismissedProposals(runId))
@@ -68,9 +58,7 @@ export function PlanProposalsInChat({
   const workspaceReady = hasRunWorkspace
     ? Boolean(runWorkspaceReady)
     : Boolean(selectedWorkspace && isWorkspaceReady(selectedWorkspace.status))
-  const workspaceStatus = hasRunWorkspace
-    ? runWorkspaceStatus
-    : selectedWorkspace?.status
+  const workspaceStatus = hasRunWorkspace ? runWorkspaceStatus : selectedWorkspace?.status
 
   const dismiss = (fp: string) => {
     setDismissed((prev) => {

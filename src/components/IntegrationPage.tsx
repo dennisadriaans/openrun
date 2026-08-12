@@ -32,12 +32,18 @@ export function IntegrationStatusBanner({
   return (
     <div
       className={`mb-4 flex items-center gap-2 rounded-md border px-3 py-2 text-ui-sm ${
-        tone === 'bad' ? 'border-danger text-danger' : 'border-[var(--border-quaternary)] text-tier-secondary'
+        tone === 'bad'
+          ? 'border-danger text-danger'
+          : 'border-[var(--border-quaternary)] text-tier-secondary'
       }`}
     >
       <span
         className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-          tone === 'good' ? 'bg-success' : tone === 'bad' ? 'bg-danger' : 'bg-[var(--border-strong)]'
+          tone === 'good'
+            ? 'bg-success'
+            : tone === 'bad'
+              ? 'bg-danger'
+              : 'bg-[var(--border-strong)]'
         }`}
       />
       <span>{text}</span>

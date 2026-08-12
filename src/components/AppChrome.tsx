@@ -1,14 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import { isIntegrationProviderId, providerPageTitle } from '../lib/integrations/catalog'
 import { ChevronRight, PanelLeft } from 'lucide-react'
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
 const SIDEBAR_KEY = 'agentops:sidebar'
 
@@ -74,9 +67,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  return (
-    <SidebarContext.Provider value={{ open, toggle }}>{children}</SidebarContext.Provider>
-  )
+  return <SidebarContext.Provider value={{ open, toggle }}>{children}</SidebarContext.Provider>
 }
 
 export function SidebarToggle({ className = '' }: { className?: string }) {
@@ -104,10 +95,7 @@ function crumbsForPath(pathname: string): Crumb[] {
   if (pathname.startsWith('/integrations/')) {
     const id = pathname.slice('/integrations/'.length)
     const title = isIntegrationProviderId(id) ? providerPageTitle(id) : 'Integration'
-    return [
-      { label: 'Integrations', to: '/integrations' },
-      { label: title },
-    ]
+    return [{ label: 'Integrations', to: '/integrations' }, { label: title }]
   }
   if (pathname === '/notifications') return [{ label: 'Notifications' }]
   if (pathname === '/runtimes') return [{ label: 'Runtimes' }]
@@ -116,25 +104,16 @@ function crumbsForPath(pathname: string): Crumb[] {
     return [{ label: 'Automations', to: '/tasks' }]
   }
   if (pathname === '/tasks/new') {
-    return [
-      { label: 'Automations', to: '/tasks' },
-      { label: 'New automation' },
-    ]
+    return [{ label: 'Automations', to: '/tasks' }, { label: 'New automation' }]
   }
   if (pathname.startsWith('/tasks/')) {
-    return [
-      { label: 'Automations', to: '/tasks' },
-      { label: 'Automation' },
-    ]
+    return [{ label: 'Automations', to: '/tasks' }, { label: 'Automation' }]
   }
   if (pathname === '/runs' || pathname === '/runs/') {
     return [{ label: 'Runs', to: '/runs' }]
   }
   if (pathname.startsWith('/runs/')) {
-    return [
-      { label: 'Runs', to: '/runs' },
-      { label: 'Run' },
-    ]
+    return [{ label: 'Runs', to: '/runs' }, { label: 'Run' }]
   }
   return [{ label: 'Automations', to: '/tasks' }]
 }
@@ -155,9 +134,7 @@ export function AppBreadcrumb() {
         const last = i === crumbs.length - 1
         return (
           <span key={`${crumb.label}-${i}`} className="flex min-w-0 items-center gap-1">
-            {i > 0 ? (
-              <ChevronRight className="size-3 shrink-0 text-tier-quaternary" />
-            ) : null}
+            {i > 0 ? <ChevronRight className="size-3 shrink-0 text-tier-quaternary" /> : null}
             {crumb.to && !last ? (
               <Link
                 to={crumb.to}
@@ -196,9 +173,7 @@ export function AppTopBar() {
     <header className="flex h-[var(--workspace-topbar-height,40px)] shrink-0 items-center gap-2 border-b border-border px-3">
       {!open ? <SidebarToggle /> : null}
       {showCrumbs ? <AppBreadcrumb /> : <span className="min-w-0 flex-1" />}
-      {actions ? (
-        <div className="flex shrink-0 items-center gap-1">{actions}</div>
-      ) : null}
+      {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
     </header>
   )
 }

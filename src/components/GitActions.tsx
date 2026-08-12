@@ -136,10 +136,14 @@ export function GitActions({
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-[var(--border-quaternary)] bg-transparent p-3">
-        <div className="mb-1.5 text-[11px] uppercase tracking-wide text-tier-tertiary">Workspace</div>
+        <div className="mb-1.5 text-[11px] uppercase tracking-wide text-tier-tertiary">
+          Workspace
+        </div>
         <Row icon={<GitBranch className="h-3.5 w-3.5" />}>
           <span className="text-tier-secondary">{repo.branch || 'detached'}</span>
-          {repo.head ? <span className="ml-1.5 mono text-ui-sm text-tier-quaternary">{repo.head}</span> : null}
+          {repo.head ? (
+            <span className="ml-1.5 mono text-ui-sm text-tier-quaternary">{repo.head}</span>
+          ) : null}
         </Row>
         <Row icon={<GitCommit className="h-3.5 w-3.5" />}>
           {hasChanges ? (
@@ -393,8 +397,8 @@ function GitActionDialogs({
             </Field>
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-tier-tertiary">
-            Opens a PR from <span className="mono text-tier-secondary">{repo.branch}</span> on GitHub via
-            the <span className="mono">gh</span> CLI. Commit and push your changes first.
+            Opens a PR from <span className="mono text-tier-secondary">{repo.branch}</span> on
+            GitHub via the <span className="mono">gh</span> CLI. Commit and push your changes first.
           </p>
           <Result error={openPr.isError ? errorText(openPr.error) : null} />
           <div className="mt-4 flex justify-end gap-2">
@@ -425,8 +429,8 @@ function GitActionDialogs({
       {dialog === 'discard' ? (
         <Modal title="Discard all changes" onClose={() => setDialog(null)}>
           <p className="text-[13.5px] leading-relaxed text-tier-secondary">
-            This resets the working tree to <span className="mono text-tier-secondary">HEAD</span> and
-            deletes untracked files in{' '}
+            This resets the working tree to <span className="mono text-tier-secondary">HEAD</span>{' '}
+            and deletes untracked files in{' '}
             <span className="mono text-tier-secondary">{repo.branch}</span>. All{' '}
             {totals.additions + totals.deletions} changed lines across {fileCount} file
             {fileCount === 1 ? '' : 's'} will be lost.
@@ -583,9 +587,7 @@ export function GitActionsMenu({
               <div className="mt-0.5">Working tree clean</div>
             )}
             {repo.hasUpstream && repo.ahead > 0 ? (
-              <div className="mt-0.5">
-                {repo.ahead} ahead of upstream
-              </div>
+              <div className="mt-0.5">{repo.ahead} ahead of upstream</div>
             ) : null}
             {baseBranch && baseBranch !== repo.branch ? (
               <div className="mt-0.5 truncate">started on {baseBranch}</div>
@@ -595,6 +597,7 @@ export function GitActionsMenu({
 
           {onViewChanges ? (
             <button
+              type="button"
               className={item}
               onClick={() => {
                 onViewChanges()
@@ -605,6 +608,7 @@ export function GitActionsMenu({
             </button>
           ) : null}
           <button
+            type="button"
             className={item}
             title={commitBlocked ?? 'Commit changes'}
             disabled={!canCommit(dirtyGate)}
@@ -612,10 +616,11 @@ export function GitActionsMenu({
           >
             <GitCommit className="h-3.5 w-3.5" /> Commit changes
           </button>
-          <button className={item} onClick={() => openDialog('branch')}>
+          <button type="button" className={item} onClick={() => openDialog('branch')}>
             <GitBranch className="h-3.5 w-3.5" /> New branch
           </button>
           <button
+            type="button"
             className={item}
             title={pushBlocked ?? 'Push branch'}
             disabled={push.isPending || !canPush(shipGate)}
@@ -632,6 +637,7 @@ export function GitActionsMenu({
             Push branch
           </button>
           <button
+            type="button"
             className={item}
             title={prBlocked ?? 'Create pull request'}
             disabled={!canCreatePullRequest(shipGate)}
@@ -641,6 +647,7 @@ export function GitActionsMenu({
           </button>
           <div className="my-1 h-px bg-border" />
           <button
+            type="button"
             className={`${item} text-[var(--danger)] hover:bg-[var(--danger)]/10`}
             title={discardBlocked ?? 'Discard all changes'}
             disabled={!canDiscard(dirtyGate)}

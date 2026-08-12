@@ -85,7 +85,9 @@ import {
 import { fileTypeKey, type FileTypeKey } from '../lib/fileType'
 
 type SimpleIcon = { title: string; path: string; hex: string }
-type Drawing = { icon: SimpleIcon } | { lucide: ComponentType<{ className?: string }>; title: string }
+type Drawing =
+  | { icon: SimpleIcon }
+  | { lucide: ComponentType<{ className?: string }>; title: string }
 
 const TABLE: Record<FileTypeKey, Drawing> = {
   angular: { icon: siAngular },

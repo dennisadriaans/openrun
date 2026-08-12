@@ -34,9 +34,7 @@ export function DiffStat({
     <span className={`inline-flex items-center gap-2 mono text-[11.5px] tabular-nums ${className}`}>
       {additions > 0 ? <span className="text-success">+{additions}</span> : null}
       {deletions > 0 ? <span className="text-danger">−{deletions}</span> : null}
-      {additions === 0 && deletions === 0 ? (
-        <span className="text-muted-foreground">—</span>
-      ) : null}
+      {additions === 0 && deletions === 0 ? <span className="text-muted-foreground">—</span> : null}
     </span>
   )
 }
@@ -74,6 +72,7 @@ export function FilesChanged({
         </p>
         {onReview ? (
           <button
+            type="button"
             onClick={onReview}
             className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
@@ -89,6 +88,7 @@ export function FilesChanged({
           const active = activePath === file.path
           return (
             <button
+              type="button"
               key={file.path}
               onClick={() => onSelect(file.path)}
               className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 ${
@@ -102,8 +102,7 @@ export function FilesChanged({
                 {dir ? <span className="text-muted-foreground">{dir}/</span> : null}
                 <span
                   className={`${active ? 'font-medium' : ''} ${
-                    statusTone[file.status] ||
-                    (active ? 'text-foreground' : 'text-foreground/82')
+                    statusTone[file.status] || (active ? 'text-foreground' : 'text-foreground/82')
                   }`}
                 >
                   {name}
@@ -112,11 +111,7 @@ export function FilesChanged({
               {file.binary ? (
                 <span className="pe-1 mono text-[11px] text-muted-foreground">bin</span>
               ) : (
-                <DiffStat
-                  additions={file.additions}
-                  deletions={file.deletions}
-                  className="pe-1"
-                />
+                <DiffStat additions={file.additions} deletions={file.deletions} className="pe-1" />
               )}
             </button>
           )
@@ -124,6 +119,7 @@ export function FilesChanged({
 
         {hidden > 0 ? (
           <button
+            type="button"
             onClick={() => setExpanded(true)}
             className="flex w-full items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
           >
@@ -134,6 +130,7 @@ export function FilesChanged({
 
         {expanded && files.length > COLLAPSED_COUNT ? (
           <button
+            type="button"
             onClick={() => setExpanded(false)}
             className="flex w-full items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
           >

@@ -12,26 +12,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AddProjectModal } from './AddProjectModal'
 import { EffortPicker, ModelPicker, RuntimeModePicker, RuntimePicker } from './ComposerControls'
-import {
-  Button,
-  Card,
-  EmptyState,
-  Field,
-  Modal,
-  StatusBadge,
-  inputClass,
-} from './ui'
+import { Button, Card, EmptyState, Field, Modal, StatusBadge, inputClass } from './ui'
 import type { ProjectWithMeta, WorkspaceWithMeta } from '../fns'
-import {
-  defaultEffort,
-  defaultModel,
-  findModel,
-  modelsForBin,
-} from '../lib/models'
-import {
-  DEFAULT_RUNTIME_MODE,
-  type RuntimeMode,
-} from '../lib/runtimeMode'
+import { defaultEffort, defaultModel, findModel, modelsForBin } from '../lib/models'
+import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { supportsSupervised } from '../lib/supervisedPolicy'
 import { pickDefaultRuntime } from '../lib/pickRuntime'
@@ -357,9 +341,7 @@ function WorkspaceRow({ workspace: w }: { workspace: WorkspaceWithMeta }) {
         ) : null}
       </div>
 
-      {showChat ? (
-        <StartChatModal workspace={w} onClose={() => setShowChat(false)} />
-      ) : null}
+      {showChat ? <StartChatModal workspace={w} onClose={() => setShowChat(false)} /> : null}
       {showArchive ? (
         <ArchiveWorkspaceModal workspace={w} onClose={() => setShowArchive(false)} />
       ) : null}
@@ -454,7 +436,9 @@ function StartChatModal({
                 onChange={changeRuntime}
               />
             ) : (
-              <span className="px-2.5 text-ui-base text-tier-quaternary">No runtimes configured</span>
+              <span className="px-2.5 text-ui-base text-tier-quaternary">
+                No runtimes configured
+              </span>
             )}
           </div>
         </Field>
@@ -463,12 +447,7 @@ function StartChatModal({
           <Field label="Model & reasoning">
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-[var(--bg-luminous-quaternary)] px-2 py-1.5">
               <ModelPicker models={models} model={model} onChange={changeModel} />
-              <EffortPicker
-                models={models}
-                model={model}
-                effort={effort}
-                onChange={changeEffort}
-              />
+              <EffortPicker models={models} model={model} effort={effort} onChange={changeEffort} />
               <RuntimeModePicker
                 mode={runtimeMode}
                 supportsSupervised={supportsSupervised({
@@ -708,9 +687,7 @@ function DeleteProjectModal({
             />
             <span className="text-ui-base text-tier-secondary">
               Also delete the cloned files from disk
-              <span className="ml-1.5 text-ui-sm text-tier-quaternary">
-                ({project.path})
-              </span>
+              <span className="ml-1.5 text-ui-sm text-tier-quaternary">({project.path})</span>
             </span>
           </label>
         ) : (

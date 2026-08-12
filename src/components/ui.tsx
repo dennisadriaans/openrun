@@ -33,6 +33,7 @@ export function Modal({
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <h3 className="text-ui-base text-foreground">{title}</h3>
           <button
+            type="button"
             onClick={onClose}
             aria-label="Close"
             className="rounded-md p-1 text-tier-quaternary transition-colors hover:bg-hover hover:text-foreground"
@@ -62,10 +63,7 @@ export function StatusDot({ status }: { status: string }) {
 export function StatusBadge({ status }: { status: string }) {
   const m = statusMeta(status)
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-ui-sm ${m.text}`}
-      title={m.label}
-    >
+    <span className={`inline-flex items-center gap-1.5 text-ui-sm ${m.text}`} title={m.label}>
       <StatusDot status={status} />
       {m.label}
     </span>
@@ -122,17 +120,9 @@ export function PageHeader({
   )
 }
 
-export function Card({
-  children,
-  className = '',
-}: {
-  children: ReactNode
-  className?: string
-}) {
+export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-[10px] border border-border bg-elevated ${className}`}>
-      {children}
-    </div>
+    <div className={`rounded-[10px] border border-border bg-elevated ${className}`}>{children}</div>
   )
 }
 

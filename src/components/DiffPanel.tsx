@@ -45,7 +45,9 @@ function CodeCell({ line, tokens }: { line: DiffLine | null; tokens?: HighlightT
   const parts = tokens?.length ? tokens : [{ text: line.content || ' ', className: '' }]
   return (
     <div className={`flex min-w-0 flex-1 ${lineTone[line.type]}`}>
-      <span className={`w-3.5 shrink-0 select-none mono text-[10px] leading-[18px] ${markerTone[line.type]}`}>
+      <span
+        className={`w-3.5 shrink-0 select-none mono text-[10px] leading-[18px] ${markerTone[line.type]}`}
+      >
         {marker[line.type]}
       </span>
       <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all mono text-[11px] leading-[18px] text-[var(--syntax-foreground)]">
@@ -318,7 +320,9 @@ export function DiffPanel({
               <button
                 type="button"
                 onClick={() => setMode(mode === 'split' ? 'unified' : 'split')}
-                aria-label={mode === 'split' ? 'Switch to unified diff view' : 'Switch to split diff view'}
+                aria-label={
+                  mode === 'split' ? 'Switch to unified diff view' : 'Switch to split diff view'
+                }
                 className="relative flex h-[26px] w-[26px] items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground outline-none transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground"
               >
                 {mode === 'split' ? (

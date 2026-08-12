@@ -26,12 +26,7 @@ import { createPortal } from 'react-dom'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
 import { DEFAULT_RUN_TIMEOUT_MS } from '../lib/runBudget'
 import { MAX_REPAIR_ATTEMPTS } from '../lib/verdict'
-import {
-  defaultEffort,
-  defaultModel,
-  findModel,
-  modelsForBin,
-} from '../lib/models'
+import { defaultEffort, defaultModel, findModel, modelsForBin } from '../lib/models'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import {
   useProjects,
@@ -56,10 +51,7 @@ import {
 import { pickDefaultRuntime } from '../lib/pickRuntime'
 import { pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
-import {
-  emptyTaskPromptMessage,
-  hasTaskPrompt,
-} from '../lib/taskPrompt'
+import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
 import { workspaceBlockedReason } from '../lib/runPrereqGate'
 import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
@@ -249,9 +241,7 @@ function ScheduleTriggerRow({
             <span className="text-ui-base text-foreground">{scheduleLeadIn(schedule)}</span>
             <span className="mono text-ui-sm text-tier-quaternary">{cron}</span>
             <span className="text-ui-base text-foreground">{tz}</span>
-            {nextRun ? (
-              <span className="text-ui-sm text-tier-quaternary">{nextRun}</span>
-            ) : null}
+            {nextRun ? <span className="text-ui-sm text-tier-quaternary">{nextRun}</span> : null}
           </>
         ) : (
           <>
@@ -263,9 +253,7 @@ function ScheduleTriggerRow({
                   label={WEEKDAYS.find((d) => d.dow === schedule.dow)?.label ?? 'Monday'}
                   value={String(schedule.dow)}
                   options={dayOptions}
-                  onChange={(value) =>
-                    setSchedule({ ...schedule, dow: Number(value) })
-                  }
+                  onChange={(value) => setSchedule({ ...schedule, dow: Number(value) })}
                 />
                 <span className="text-ui-base text-foreground">at</span>
               </>
@@ -279,9 +267,7 @@ function ScheduleTriggerRow({
                 label={`:${String(schedule.minute).padStart(2, '0')}`}
                 value={String(schedule.minute)}
                 options={minuteOptions}
-                onChange={(value) =>
-                  setSchedule({ kind: 'hourly', minute: Number(value) })
-                }
+                onChange={(value) => setSchedule({ kind: 'hourly', minute: Number(value) })}
               />
             ) : (
               <ChipSelect
@@ -289,9 +275,7 @@ function ScheduleTriggerRow({
                 label={formatTime(schedule.hour, schedule.minute)}
                 value={formatTime(schedule.hour, schedule.minute)}
                 options={
-                  timeOptions.some(
-                    (o) => o.value === formatTime(schedule.hour, schedule.minute),
-                  )
+                  timeOptions.some((o) => o.value === formatTime(schedule.hour, schedule.minute))
                     ? timeOptions
                     : [
                         {
@@ -313,9 +297,7 @@ function ScheduleTriggerRow({
             )}
 
             <span className="text-ui-base text-foreground">{tz}</span>
-            {nextRun ? (
-              <span className="text-ui-sm text-tier-quaternary">{nextRun}</span>
-            ) : null}
+            {nextRun ? <span className="text-ui-sm text-tier-quaternary">{nextRun}</span> : null}
           </>
         )}
       </div>
@@ -512,7 +494,9 @@ function TriggerAddMenu({
                 >
                   <Webhook className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
                   <span className="min-w-0 flex-1">Webhook</span>
-                  <span className="shrink-0 text-ui-sm text-tier-quaternary">GitHub · Jira · Linear</span>
+                  <span className="shrink-0 text-ui-sm text-tier-quaternary">
+                    GitHub · Jira · Linear
+                  </span>
                 </button>
               </div>
               {scheduleOpen ? (
@@ -737,7 +721,6 @@ function WebhookTriggerRow({
   )
 }
 
-
 function StepLabel({ n, children }: { n: number; children: ReactNode }) {
   return (
     <div className="mb-2 flex items-center gap-2 text-ui-sm text-tier-tertiary">
@@ -787,8 +770,8 @@ export function TaskForm({
       !initial?.webhookIntegrationId?.trim() &&
       !triggerSeed.showInvalid,
   )
-  const [webhookEnabled, setWebhookEnabled] = useState(
-    () => Boolean(initial?.webhookIntegrationId?.trim()),
+  const [webhookEnabled, setWebhookEnabled] = useState(() =>
+    Boolean(initial?.webhookIntegrationId?.trim()),
   )
   const [triggerDraft, setTriggerDraft] = useState(triggerSeed.triggerDraft)
   const [triggerError, setTriggerError] = useState<string | null>(() =>
@@ -844,8 +827,7 @@ export function TaskForm({
     // On the very first seed of an existing task, keep the model/effort it was
     // saved with (still in `model`/`effort` from initial) so editing never
     // silently swaps the picked model out from under the user.
-    const savedModel =
-      !alreadySeeded && !isNew ? findModel(models, model) : undefined
+    const savedModel = !alreadySeeded && !isNew ? findModel(models, model) : undefined
     const current = alreadySeeded ? findModel(models, model) : undefined
     const selected =
       savedModel ?? current ?? findModel(models, remembered.model) ?? defaultModel(models)
@@ -924,7 +906,7 @@ export function TaskForm({
       setPromptError(emptyTaskPromptMessage())
       return null
     }
-    if (v.enabled && (!runtime || !runtime.installed)) {
+    if (v.enabled && !runtime?.installed) {
       setWorkspaceError(null)
       setPromptError(null)
       // Same message as the form warning / Run now — refuse Active+save so the
@@ -1017,10 +999,7 @@ export function TaskForm({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui-base">
-          <ActiveToggle
-            checked={v.enabled}
-            onChange={(on) => set('enabled', on)}
-          />
+          <ActiveToggle checked={v.enabled} onChange={(on) => set('enabled', on)} />
 
           <span className="text-tier-quaternary">|</span>
 
@@ -1043,270 +1022,267 @@ export function TaskForm({
       ) : null}
 
       <div className="space-y-7">
-          <section>
-            <StepLabel n={1}>What the agent should do</StepLabel>
-            <div
-              className={`flex min-h-40 flex-col rounded-xl border bg-elevated p-1 ${
-                promptError ? 'border-rose-500/40' : 'border-border'
-              }`}
-            >
-              <textarea
-                className="min-h-28 flex-1 resize-y bg-transparent px-3.5 py-3 text-ui-base text-foreground outline-none placeholder:text-tier-quaternary"
-                value={v.prompt}
-                onChange={(e) => {
-                  set('prompt', e.target.value)
-                  if (promptError) setPromptError(null)
-                }}
-                aria-invalid={Boolean(promptError)}
-                aria-describedby={promptError ? 'prompt-required-error' : undefined}
-                placeholder="Describe the outcome, constraints, and what not to touch…"
-              />
-              {promptError ? (
-                <p
-                  id="prompt-required-error"
-                  className="px-3.5 pb-2 text-[12px] text-rose-300"
-                >
-                  {promptError}
-                </p>
+        <section>
+          <StepLabel n={1}>What the agent should do</StepLabel>
+          <div
+            className={`flex min-h-40 flex-col rounded-xl border bg-elevated p-1 ${
+              promptError ? 'border-rose-500/40' : 'border-border'
+            }`}
+          >
+            <textarea
+              className="min-h-28 flex-1 resize-y bg-transparent px-3.5 py-3 text-ui-base text-foreground outline-none placeholder:text-tier-quaternary"
+              value={v.prompt}
+              onChange={(e) => {
+                set('prompt', e.target.value)
+                if (promptError) setPromptError(null)
+              }}
+              aria-invalid={Boolean(promptError)}
+              aria-describedby={promptError ? 'prompt-required-error' : undefined}
+              placeholder="Describe the outcome, constraints, and what not to touch…"
+            />
+            {promptError ? (
+              <p id="prompt-required-error" className="px-3.5 pb-2 text-[12px] text-rose-300">
+                {promptError}
+              </p>
+            ) : null}
+            {v.prompt.length > 8_000 ? (
+              <p className="px-3.5 pb-1 text-[11px] text-amber-300/90">
+                Prompt is large ({v.prompt.length.toLocaleString()} chars) — consider trimming
+                pasted context to save tokens
+                {v.prompt.length > 32_000 ? ' and avoid ARG_MAX failures on argv-based CLIs' : ''}.
+              </p>
+            ) : null}
+            <div className="flex items-center gap-1 px-2 pb-2">
+              {models.length > 0 ? (
+                <>
+                  <ModelPicker models={models} model={model} onChange={changeModel} />
+                  <EffortPicker
+                    models={models}
+                    model={model}
+                    effort={effort}
+                    onChange={changeEffort}
+                  />
+                </>
+              ) : runtimes && runtimes.length > 0 ? (
+                <RuntimePicker
+                  runtimes={runtimes}
+                  runtimeId={v.runtimeId}
+                  align="start"
+                  onChange={changeRuntimeId}
+                />
               ) : null}
-              {v.prompt.length > 8_000 ? (
-                <p className="px-3.5 pb-1 text-[11px] text-amber-300/90">
-                  Prompt is large ({v.prompt.length.toLocaleString()} chars) — consider trimming
-                  pasted context to save tokens
-                  {v.prompt.length > 32_000 ? ' and avoid ARG_MAX failures on argv-based CLIs' : ''}.
-                </p>
-              ) : null}
-              <div className="flex items-center gap-1 px-2 pb-2">
-                {models.length > 0 ? (
-                  <>
-                    <ModelPicker models={models} model={model} onChange={changeModel} />
-                    <EffortPicker
-                      models={models}
-                      model={model}
-                      effort={effort}
-                      onChange={changeEffort}
-                    />
-                  </>
-                ) : runtimes && runtimes.length > 0 ? (
+              {runtimes && runtimes.length > 1 && models.length > 0 ? (
+                <div className="ml-auto">
                   <RuntimePicker
                     runtimes={runtimes}
                     runtimeId={v.runtimeId}
-                    align="start"
+                    align="end"
                     onChange={changeRuntimeId}
                   />
-                ) : null}
-                {runtimes && runtimes.length > 1 && models.length > 0 ? (
-                  <div className="ml-auto">
-                    <RuntimePicker
-                      runtimes={runtimes}
-                      runtimeId={v.runtimeId}
-                      align="end"
-                      onChange={changeRuntimeId}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            {runtime && !runtime.installed ? (
-              <p className="mt-2 text-[12px] text-rose-300">
-                {missingRuntimeBinaryMessage(runtime.bin)}
-              </p>
-            ) : null}
-          </section>
-
-          <section>
-            <StepLabel n={2}>When it should run</StepLabel>
-            <div className="space-y-1.5">
-              {v.cron ? (
-                <ScheduleTriggerRow
-                  cron={v.cron}
-                  onChange={(cron) => {
-                    set('cron', cron)
-                    setRunOnce(false)
-                    setTriggerError(null)
-                  }}
-                  onRemove={() => {
-                    set('cron', '')
-                    setAddingTrigger(false)
-                    setTriggerDraft('')
-                    setTriggerError(null)
-                  }}
-                />
+                </div>
               ) : null}
+            </div>
+          </div>
+          {runtime && !runtime.installed ? (
+            <p className="mt-2 text-[12px] text-rose-300">
+              {missingRuntimeBinaryMessage(runtime.bin)}
+            </p>
+          ) : null}
+        </section>
 
-              {runOnce && !v.cron ? (
-                <div className="flex items-center gap-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
-                  <Zap className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-ui-base text-foreground">Run once</div>
-                    <div className="text-ui-sm text-tier-quaternary">
-                      Manual — start it yourself with “Run now”.
-                    </div>
+        <section>
+          <StepLabel n={2}>When it should run</StepLabel>
+          <div className="space-y-1.5">
+            {v.cron ? (
+              <ScheduleTriggerRow
+                cron={v.cron}
+                onChange={(cron) => {
+                  set('cron', cron)
+                  setRunOnce(false)
+                  setTriggerError(null)
+                }}
+                onRemove={() => {
+                  set('cron', '')
+                  setAddingTrigger(false)
+                  setTriggerDraft('')
+                  setTriggerError(null)
+                }}
+              />
+            ) : null}
+
+            {runOnce && !v.cron ? (
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
+                <Zap className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-ui-base text-foreground">Run once</div>
+                  <div className="text-ui-sm text-tier-quaternary">
+                    Manual — start it yourself with “Run now”.
                   </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Remove trigger"
+                  onClick={() => setRunOnce(false)}
+                  className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : null}
+
+            {webhookEnabled ? (
+              <WebhookTriggerRow
+                integrationId={v.webhookIntegrationId ?? ''}
+                events={v.webhookEvents ?? []}
+                filters={v.webhookFilters ?? {}}
+                onIntegrationChange={(id) => {
+                  set('webhookIntegrationId', id)
+                  set('webhookEvents', [])
+                }}
+                onEventsChange={(events) => set('webhookEvents', events)}
+                onFiltersChange={(filters) => set('webhookFilters', filters)}
+                onRemove={() => {
+                  setWebhookEnabled(false)
+                  set('webhookIntegrationId', '')
+                  set('webhookEvents', [])
+                  set('webhookFilters', {})
+                }}
+              />
+            ) : null}
+
+            {addingTrigger && !v.cron ? (
+              <div className="space-y-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Code2 className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
+                  <input
+                    className={`${inputClass} mono text-[13px]`}
+                    value={triggerDraft}
+                    onChange={(e) => {
+                      setTriggerDraft(e.target.value)
+                      if (triggerError) setTriggerError(null)
+                    }}
+                    placeholder="0 9 * * 1-5"
+                    autoFocus
+                    aria-invalid={triggerError ? true : undefined}
+                    aria-describedby={triggerError ? 'cron-trigger-error' : undefined}
+                  />
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={!triggerDraft.trim()}
+                    onClick={() => {
+                      const next = triggerDraft.trim()
+                      if (!isValidCron(next)) {
+                        setTriggerError(invalidCronMessage(next))
+                        return
+                      }
+                      set('cron', next)
+                      setAddingTrigger(false)
+                      setTriggerDraft('')
+                      setTriggerError(null)
+                    }}
+                  >
+                    Add
+                  </Button>
                   <button
                     type="button"
-                    aria-label="Remove trigger"
-                    onClick={() => setRunOnce(false)}
+                    aria-label="Cancel custom trigger"
+                    onClick={() => {
+                      setAddingTrigger(false)
+                      setTriggerDraft('')
+                      setTriggerError(null)
+                    }}
                     className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              ) : null}
+                {triggerError ? (
+                  <p id="cron-trigger-error" className="text-[12px] text-rose-300">
+                    {triggerError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
-              {webhookEnabled ? (
-                <WebhookTriggerRow
-                  integrationId={v.webhookIntegrationId ?? ''}
-                  events={v.webhookEvents ?? []}
-                  filters={v.webhookFilters ?? {}}
-                  onIntegrationChange={(id) => {
-                    set('webhookIntegrationId', id)
-                    set('webhookEvents', [])
+            {!addingTrigger || v.cron || runOnce || webhookEnabled ? (
+              <div className="rounded-xl border border-border bg-elevated p-1">
+                <TriggerAddMenu
+                  onPickPreset={(cron) => {
+                    setRunOnce(false)
+                    set('cron', cron)
+                    setAddingTrigger(false)
+                    setTriggerDraft('')
+                    setTriggerError(null)
                   }}
-                  onEventsChange={(events) => set('webhookEvents', events)}
-                  onFiltersChange={(filters) => set('webhookFilters', filters)}
-                  onRemove={() => {
-                    setWebhookEnabled(false)
-                    set('webhookIntegrationId', '')
-                    set('webhookEvents', [])
-                    set('webhookFilters', {})
+                  onCustom={() => {
+                    setRunOnce(false)
+                    set('cron', '')
+                    setAddingTrigger(true)
+                    setTriggerError(null)
+                  }}
+                  onRunOnce={() => {
+                    set('cron', '')
+                    setAddingTrigger(false)
+                    setTriggerDraft('')
+                    setTriggerError(null)
+                    setRunOnce(true)
+                  }}
+                  onWebhook={() => {
+                    setRunOnce(false)
+                    setWebhookEnabled(true)
+                    setAddingTrigger(false)
+                    setTriggerError(null)
                   }}
                 />
-              ) : null}
-
-              {addingTrigger && !v.cron ? (
-                <div className="space-y-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Code2 className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
-                    <input
-                      className={`${inputClass} mono text-[13px]`}
-                      value={triggerDraft}
-                      onChange={(e) => {
-                        setTriggerDraft(e.target.value)
-                        if (triggerError) setTriggerError(null)
-                      }}
-                      placeholder="0 9 * * 1-5"
-                      autoFocus
-                      aria-invalid={triggerError ? true : undefined}
-                      aria-describedby={triggerError ? 'cron-trigger-error' : undefined}
-                    />
-                    <Button
-                      type="button"
-                      variant="primary"
-                      disabled={!triggerDraft.trim()}
-                      onClick={() => {
-                        const next = triggerDraft.trim()
-                        if (!isValidCron(next)) {
-                          setTriggerError(invalidCronMessage(next))
-                          return
-                        }
-                        set('cron', next)
-                        setAddingTrigger(false)
-                        setTriggerDraft('')
-                        setTriggerError(null)
-                      }}
-                    >
-                      Add
-                    </Button>
-                    <button
-                      type="button"
-                      aria-label="Cancel custom trigger"
-                      onClick={() => {
-                        setAddingTrigger(false)
-                        setTriggerDraft('')
-                        setTriggerError(null)
-                      }}
-                      className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  {triggerError ? (
-                    <p id="cron-trigger-error" className="text-[12px] text-rose-300">
-                      {triggerError}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {!addingTrigger || v.cron || runOnce || webhookEnabled ? (
-                <div className="rounded-xl border border-border bg-elevated p-1">
-                  <TriggerAddMenu
-                    onPickPreset={(cron) => {
-                      setRunOnce(false)
-                      set('cron', cron)
-                      setAddingTrigger(false)
-                      setTriggerDraft('')
-                      setTriggerError(null)
-                    }}
-                    onCustom={() => {
-                      setRunOnce(false)
-                      set('cron', '')
-                      setAddingTrigger(true)
-                      setTriggerError(null)
-                    }}
-                    onRunOnce={() => {
-                      set('cron', '')
-                      setAddingTrigger(false)
-                      setTriggerDraft('')
-                      setTriggerError(null)
-                      setRunOnce(true)
-                    }}
-                    onWebhook={() => {
-                      setRunOnce(false)
-                      setWebhookEnabled(true)
-                      setAddingTrigger(false)
-                      setTriggerError(null)
-                    }}
-                  />
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          <section>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <Button
-                type="button"
-                variant="ghost"
-                aria-expanded={showVerificationSettings}
-                onClick={() => setShowVerificationSettings((open) => !open)}
-              >
-                <Settings className="h-3.5 w-3.5" />
-                {showVerificationSettings ? 'Hide settings' : 'Settings'}
-              </Button>
-              {!showVerificationSettings ? (
-                <span className="text-ui-sm text-tier-quaternary">
-                  {verificationSummary(verifyEnabled, repairAttempts, timeoutMinutes)}
-                </span>
-              ) : null}
-            </div>
-            {showVerificationSettings ? (
-              <VerificationSection
-                verifyEnabled={verifyEnabled}
-                onVerifyEnabledChange={setVerifyEnabled}
-                repairAttempts={repairAttempts}
-                onRepairAttemptsChange={setRepairAttempts}
-                timeoutMinutes={timeoutMinutes}
-                onTimeoutMinutesChange={setTimeoutMinutes}
-              />
+              </div>
             ) : null}
-          </section>
+          </div>
+        </section>
 
-          {workspaceError ? (
-            <p
-              id="workspace-required-error"
-              className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300"
+        <section>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Button
+              type="button"
+              variant="ghost"
+              aria-expanded={showVerificationSettings}
+              onClick={() => setShowVerificationSettings((open) => !open)}
             >
-              {workspaceError}
-            </p>
+              <Settings className="h-3.5 w-3.5" />
+              {showVerificationSettings ? 'Hide settings' : 'Settings'}
+            </Button>
+            {!showVerificationSettings ? (
+              <span className="text-ui-sm text-tier-quaternary">
+                {verificationSummary(verifyEnabled, repairAttempts, timeoutMinutes)}
+              </span>
+            ) : null}
+          </div>
+          {showVerificationSettings ? (
+            <VerificationSection
+              verifyEnabled={verifyEnabled}
+              onVerifyEnabledChange={setVerifyEnabled}
+              repairAttempts={repairAttempts}
+              onRepairAttemptsChange={setRepairAttempts}
+              timeoutMinutes={timeoutMinutes}
+              onTimeoutMinutesChange={setTimeoutMinutes}
+            />
           ) : null}
+        </section>
 
-          {save.isError ? (
-            <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">
-              {save.error instanceof Error ? save.error.message : String(save.error)}
-            </p>
-          ) : null}
+        {workspaceError ? (
+          <p
+            id="workspace-required-error"
+            className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300"
+          >
+            {workspaceError}
+          </p>
+        ) : null}
+
+        {save.isError ? (
+          <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">
+            {save.error instanceof Error ? save.error.message : String(save.error)}
+          </p>
+        ) : null}
       </div>
     </form>
   )
@@ -1352,7 +1328,9 @@ function VerificationSection({
           checked={verifyEnabled}
           onChange={(e) => onVerifyEnabledChange(e.target.checked)}
         />
-        <span className="text-ui-base text-foreground">Run this project's checks when a run ends</span>
+        <span className="text-ui-base text-foreground">
+          Run this project's checks when a run ends
+        </span>
       </label>
       <p className="-mt-1 text-ui-sm text-tier-tertiary">
         Unattended turns only — checks never run on a message you type into the conversation.

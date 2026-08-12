@@ -23,7 +23,15 @@ import {
 type Mode = 'edit' | 'diff'
 
 /** Read-only merge view comparing saved content against the live buffer. */
-function DiffView({ original, modified, path }: { original: string; modified: string; path: string }) {
+function DiffView({
+  original,
+  modified,
+  path,
+}: {
+  original: string
+  modified: string
+  path: string
+}) {
   const host = useRef<HTMLDivElement>(null)
   const extensions = useMemo(
     () => [

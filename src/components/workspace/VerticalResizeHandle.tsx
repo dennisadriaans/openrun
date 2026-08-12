@@ -61,9 +61,7 @@ export function VerticalResizeHandle({
     >
       <div
         className={`h-10 w-0.5 rounded-full transition-colors ${
-          dragging
-            ? 'bg-muted-foreground/50'
-            : 'bg-transparent group-hover:bg-muted-foreground/40'
+          dragging ? 'bg-muted-foreground/50' : 'bg-transparent group-hover:bg-muted-foreground/40'
         }`}
       />
     </div>
