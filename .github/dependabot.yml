@@ -1,0 +1,31 @@
+version: 2
+
+updates:
+  # Grouped so a week of patch bumps arrives as one reviewable PR rather than
+  # twenty. Security advisories still open their own PR immediately.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      codemirror:
+        patterns:
+          - '@codemirror/*'
+          - '@lezer/*'
+          - '@uiw/react-codemirror'
+      tanstack:
+        patterns:
+          - '@tanstack/*'
+      types:
+        patterns:
+          - '@types/*'
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

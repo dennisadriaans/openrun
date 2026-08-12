@@ -1,0 +1,21 @@
+# Default owner for everything.
+*                       @dennisadriaans
+
+# Security-relevant surfaces: the access guard, the workspace path boundary,
+# webhook/Slack signature verification, and the mobile trust boundary.
+/src/lib/serverAccess.ts        @dennisadriaans
+/src/server/accessToken.ts      @dennisadriaans
+/src/server/files.ts            @dennisadriaans
+/src/server/integrations/       @dennisadriaans
+/src/server/mobile/             @dennisadriaans
+/src/server/slack/              @dennisadriaans
+/src/start.ts                   @dennisadriaans
+/scripts/start.ts               @dennisadriaans
+
+# Licensing and community health.
+/LICENSE                @dennisadriaans
+/NOTICE                 @dennisadriaans
+/CLA.md                 @dennisadriaans
+/COMMERCIAL-LICENSE.md  @dennisadriaans
+/SECURITY.md            @dennisadriaans
+/.github/               @dennisadriaans
