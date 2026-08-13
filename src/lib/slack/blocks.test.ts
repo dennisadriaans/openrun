@@ -87,6 +87,46 @@ test('base url trailing slashes do not produce a double slash in links', () => {
   assert.doesNotMatch(textOf(runsBlocks(runs, { baseUrl, now: NOW })), /3000\/\/runs/)
 })
 
+test('a run detail shows the runtime display label, not the opaque id', () => {
+  const blocks = runDetailBlocks(
+    {
+      id: 'run_aaa111',
+      ordinal: 1,
+      taskName: 'nightly docs',
+      status: 'running',
+      runtimeId: 'claude',
+      runtimeLabel: 'Claude Code',
+      startedAt: NOW - 120_000,
+      finishedAt: null,
+    },
+    { baseUrl, now: NOW },
+  )
+  const text = textOf(blocks)
+  assert.match(text, /via `Claude Code`/)
+  assert.doesNotMatch(text, /via `claude`/)
+})
+
+test('a run detail falls back to the runtime id when no label is set', () => {
+  const blocks = runDetailBlocks(
+    {
+      id: 'run_aaa111',
+      ordinal: 1,
+      taskName: 'nightly docs',
+      status: 'running',
+      runtimeId: 'claude',
+      startedAt: NOW - 120_000,
+      finishedAt: null,
+    },
+    { baseUrl, now: NOW },
+  )
+  assert.match(textOf(blocks), /via `claude`/)
+})
+
+test('a run detail omits via when neither label nor id is present', () => {
+  const blocks = runDetailBlocks(runs[0], { baseUrl, now: NOW })
+  assert.doesNotMatch(textOf(blocks), /via `/)
+})
+
 test('a run detail offers approve and deny only while one is pending', () => {
   const pending = buttonsOf(
     runDetailBlocks(runs[0], { baseUrl, hasPendingApproval: true, now: NOW }),

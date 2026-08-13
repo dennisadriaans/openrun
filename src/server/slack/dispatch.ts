@@ -74,6 +74,7 @@ async function runViews(c: Core, limit = RUN_WINDOW): Promise<RunView[]> {
     status: run.status,
     verdict: run.verdict || undefined,
     runtimeId: run.runtimeId,
+    runtimeLabel: run.runtimeLabel,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
   }))
@@ -478,6 +479,7 @@ function detailFor(
     status: run.status,
     verdict: run.verdict || undefined,
     runtimeId: run.runtimeId,
+    runtimeLabel: c.getRuntime(run.runtimeId)?.label,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
   }

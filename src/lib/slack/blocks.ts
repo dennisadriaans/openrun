@@ -18,6 +18,7 @@ import {
   statusEmoji,
   truncate,
 } from './format.ts'
+import { resolveRuntimeLabel } from '../runtimeLabel.ts'
 import { SLACK_HELP_LINES } from './commands.ts'
 import { SLACK_ACTIONS } from './types.ts'
 
@@ -30,7 +31,10 @@ export type RunView = {
   taskName: string
   status: string
   verdict?: string
+  /** Opaque runtime row id; prefer `runtimeLabel` for display. */
   runtimeId?: string
+  /** Display name from the runtime row (same as web run lists). */
+  runtimeLabel?: string
   startedAt: number | null
   finishedAt: number | null
   changedFiles?: number
@@ -206,10 +210,13 @@ export function runDetailBlocks(
   const name = escapeMrkdwn(run.taskName || run.id)
   const duration = durationLabel(run.startedAt, run.finishedAt, now)
 
+  const hasRuntime = Boolean((run.runtimeLabel ?? '').trim() || (run.runtimeId ?? '').trim())
   const facts = [
     `${statusEmoji(run.status, run.verdict)} *${run.status}*${run.verdict ? ` · ${run.verdict}` : ''}`,
     duration ? `took ${duration}` : '',
-    run.runtimeId ? `via \`${escapeMrkdwn(run.runtimeId)}\`` : '',
+    hasRuntime
+      ? `via \`${escapeMrkdwn(resolveRuntimeLabel(run.runtimeLabel, run.runtimeId))}\``
+      : '',
     typeof run.changedFiles === 'number' ? `${run.changedFiles} file(s) changed` : '',
   ].filter(Boolean)
 

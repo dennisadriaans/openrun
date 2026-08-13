@@ -48,6 +48,9 @@ function runRow(runId: string): RunRow | undefined {
 }
 
 function viewFor(run: RunRow, changedFiles?: number): RunView {
+  const runtime = getDb()
+    .prepare('SELECT label FROM runtimes WHERE id = ?')
+    .get(run.runtimeId) as { label: string } | undefined
   return {
     id: run.id,
     ordinal: 0,
@@ -55,6 +58,7 @@ function viewFor(run: RunRow, changedFiles?: number): RunView {
     status: run.status,
     verdict: run.verdict || undefined,
     runtimeId: run.runtimeId,
+    runtimeLabel: runtime?.label,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
     changedFiles,
