@@ -17,7 +17,7 @@ edition is running.
 You no longer risk publishing arbitrary command execution by accident. Open Run
 runs agent CLIs with your credentials, so anyone who can reach its HTTP server
 can run commands as you — it now binds `127.0.0.1` only, and **refuses to start**
-on a public interface unless you set an access token (`pnpm token`) or explicitly
+on a public interface unless you set an access token (`pnpm token:print`) or explicitly
 override it. When a token is configured it is required on every server function
 and API route through one global middleware, so no endpoint can be forgotten;
 signed webhook endpoints stay reachable because they authenticate by HMAC

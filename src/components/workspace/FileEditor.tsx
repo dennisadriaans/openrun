@@ -178,7 +178,7 @@ export function FileEditor({
         <button
           type="button"
           onClick={onClose}
-          title="Close file"
+          title="Close file — back to the tree"
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />

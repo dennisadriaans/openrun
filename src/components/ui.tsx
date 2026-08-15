@@ -159,7 +159,7 @@ export function ActiveToggle({
           }`}
         />
       </span>
-      <span className={checked ? 'text-tier-secondary' : 'text-tier-tertiary'}>
+      <span className={checked ? 'text-success' : 'text-tier-tertiary'}>
         {checked ? 'Active' : 'Inactive'}
       </span>
     </button>
