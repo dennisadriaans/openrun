@@ -10,7 +10,6 @@ import type {
   NotifierInput,
   PreviewCommandInput,
   RuntimeInput,
-  SlackSettingsInput,
   TaskInput,
   UpdateIntegrationInput,
 } from '../server/core'
@@ -434,33 +433,6 @@ export const removeDevice = createServerFn({ method: 'POST' })
     ;(await core()).deleteDevice(data.id)
     return { ok: true }
   })
-
-// --- Slack ------------------------------------------------------------------
-
-export const slackSettings = createServerFn({ method: 'GET' }).handler(async () =>
-  (await core()).getSlackSettingsPublic(),
-)
-
-export const slackStatus = createServerFn({ method: 'GET' }).handler(async () =>
-  (await core()).slackConnectionStatus(),
-)
-
-export const saveSlackSettings = createServerFn({ method: 'POST' })
-  .validator((d: SlackSettingsInput) => d)
-  .handler(async ({ data }) => (await core()).saveSlackSettings(data))
-
-export const testSlackConnection = createServerFn({ method: 'POST' }).handler(async () => {
-  try {
-    return await (await core()).testSlackConnection()
-  } catch (error) {
-    return {
-      ok: false,
-      teamName: '',
-      botUserId: '',
-      message: (error as Error).message,
-    }
-  }
-})
 
 // --- Cloud -----------------------------------------------------------------
 

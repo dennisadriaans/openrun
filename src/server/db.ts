@@ -278,38 +278,6 @@ export type NotificationDeliveryRow = {
   sentAt: number
 }
 
-/**
- * Binds a Slack thread to the run it is about.
- *
- * `threadTs` is Slack's parent message timestamp — unique per channel, not
- * globally, hence the composite key. Once a run has a thread, a bare reply in
- * it is that run's next turn.
- */
-export type SlackThreadRow = {
-  threadTs: string
-  channelId: string
-  runId: string
-  createdAt: number
-}
-
-/**
- * A turn typed from Slack while the run was still working.
- *
- * `sendFollowUp` refuses to resume a run that is mid-turn, but from a phone
- * "actually, skip the tests" is exactly what you want to say *while* it is
- * busy. Rather than making the user wait and retype, the message is parked
- * here and flushed when the run finalizes.
- */
-export type SlackPendingTurnRow = {
-  id: string
-  runId: string
-  text: string
-  channelId: string
-  threadTs: string
-  userId: string
-  createdAt: number
-}
-
 /** One check's outcome within one verification pass of a run. */
 export type CheckResultRow = {
   id: string
@@ -385,7 +353,7 @@ export function getDb(): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
-  // Slack bot/app tokens and webhook signing secrets are stored here in the
+  // Webhook signing secrets are stored here in the
   // clear, so file permissions are the only thing protecting them from other
   // accounts on the machine. Applied after open so the file exists, and to the
   // WAL sidecars too — they hold the same rows before a checkpoint.
@@ -738,34 +706,6 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_turn_events_message
       ON turn_events(messageId, seq ASC);
-  `)
-
-  // Slack control surface. Connection settings live in app_meta (a singleton
-  // connection, unlike integrations which are per-repo), so only the thread
-  // binding needs a table: it is what turns a plain reply in a Slack thread
-  // into the next turn of the run that thread is about.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS slack_threads (
-      threadTs TEXT NOT NULL,
-      channelId TEXT NOT NULL,
-      runId TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      PRIMARY KEY (channelId, threadTs)
-    );
-    CREATE INDEX IF NOT EXISTS idx_slack_threads_run
-      ON slack_threads(runId, createdAt DESC);
-
-    CREATE TABLE IF NOT EXISTS slack_pending_turns (
-      id TEXT PRIMARY KEY,
-      runId TEXT NOT NULL,
-      text TEXT NOT NULL,
-      channelId TEXT NOT NULL DEFAULT '',
-      threadTs TEXT NOT NULL DEFAULT '',
-      userId TEXT NOT NULL DEFAULT '',
-      createdAt INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_slack_pending_turns_run
-      ON slack_pending_turns(runId, createdAt ASC);
   `)
 }
 

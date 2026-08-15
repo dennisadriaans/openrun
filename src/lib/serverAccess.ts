@@ -233,11 +233,11 @@ export function tokensMatch(expected: string, provided: string | null | undefine
  * without the access token.
  *
  * Inbound webhooks are signed with a per-integration HMAC secret
- * (`server/integrations/crypto.ts`) and Slack signs its own requests. GitHub has
- * no way to add our header, so requiring the token here would simply break
- * every integration. These endpoints are not unauthenticated — they are
- * authenticated by signature instead.
+ * (`server/integrations/crypto.ts`). GitHub has no way to add our header, so
+ * requiring the token here would simply break every integration. These
+ * endpoints are not unauthenticated — they are authenticated by signature
+ * instead.
  */
 export function pathAuthenticatesItself(pathname: string): boolean {
-  return pathname.startsWith('/api/webhooks/') || pathname.startsWith('/api/slack/')
+  return pathname.startsWith('/api/webhooks/')
 }

@@ -2,13 +2,12 @@
 *                       @dennisadriaans
 
 # Security-relevant surfaces: the access guard, the workspace path boundary,
-# webhook/Slack signature verification, and the mobile trust boundary.
+# webhook signature verification, and the mobile trust boundary.
 /src/lib/serverAccess.ts        @dennisadriaans
 /src/server/accessToken.ts      @dennisadriaans
 /src/server/files.ts            @dennisadriaans
 /src/server/integrations/       @dennisadriaans
 /src/server/mobile/             @dennisadriaans
-/src/server/slack/              @dennisadriaans
 /src/start.ts                   @dennisadriaans
 /scripts/start.ts               @dennisadriaans
 

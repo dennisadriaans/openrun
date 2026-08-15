@@ -1,32 +1,7 @@
 import { BookOpen, Pencil } from 'lucide-react'
-import type { ReactNode, SVGProps } from 'react'
+import type { ReactNode } from 'react'
 import { siGithub, siJira, siLinear } from 'simple-icons'
 import { Switch } from './ui'
-
-type IconProps = SVGProps<SVGSVGElement>
-
-function SlackMark({ className, ...props }: IconProps) {
-  return (
-    <svg viewBox="0 0 54 54" className={className} aria-hidden="true" {...props}>
-      <path
-        fill="#36C5F0"
-        d="M19.712 31.954c0 2.706-2.199 4.905-4.905 4.905s-4.905-2.199-4.905-4.905 2.199-4.905 4.905-4.905h4.905v4.905zm2.456 0c0-2.706 2.199-4.905 4.905-4.905s4.905 2.199 4.905 4.905v12.262c0 2.706-2.199 4.905-4.905 4.905s-4.905-2.199-4.905-4.905V31.954z"
-      />
-      <path
-        fill="#2EB67D"
-        d="M27.073 19.712c-2.706 0-4.905-2.199-4.905-4.905s2.199-4.905 4.905-4.905 4.905 2.199 4.905 4.905v4.905h-4.905zm0 2.456c2.706 0 4.905 2.199 4.905 4.905s-2.199 4.905-4.905 4.905H14.81c-2.706 0-4.905-2.199-4.905-4.905s2.199-4.905 4.905-4.905h12.263z"
-      />
-      <path
-        fill="#ECB22E"
-        d="M34.334 27.073c0-2.706 2.199-4.905 4.905-4.905s4.905 2.199 4.905 4.905-2.199 4.905-4.905 4.905h-4.905v-4.905zm-2.456 0c0 2.706-2.199 4.905-4.905 4.905s-4.905-2.199-4.905-4.905V14.81c0-2.706 2.199-4.905 4.905-4.905s4.905 2.199 4.905 4.905v12.263z"
-      />
-      <path
-        fill="#E01E5A"
-        d="M27.073 34.334c2.706 0 4.905 2.199 4.905 4.905s-2.199 4.905-4.905 4.905-4.905-2.199-4.905-4.905v-4.905h4.905zm0-2.456c-2.706 0-4.905-2.199-4.905-4.905s2.199-4.905 4.905-4.905h12.262c2.706 0 4.905 2.199 4.905 4.905s-2.199 4.905-4.905 4.905H27.073z"
-      />
-    </svg>
-  )
-}
 
 function SimpleMark({
   title,
@@ -50,10 +25,9 @@ export function IntegrationBrandIcon({
   id,
   className = 'size-5',
 }: {
-  id: 'slack' | 'github' | 'jira' | 'linear'
+  id: 'github' | 'jira' | 'linear'
   className?: string
 }) {
-  if (id === 'slack') return <SlackMark className={className} />
   if (id === 'github') {
     return (
       <SimpleMark

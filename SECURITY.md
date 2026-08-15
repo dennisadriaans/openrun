@@ -74,14 +74,12 @@ to. There is no bug bounty.
   symlinks.
 - Forging a webhook so that an unauthenticated request starts a run
   (`src/server/integrations/`, HMAC verification in `crypto.ts`).
-- Bypassing the Slack allowlist (`src/lib/slack/`) so an unauthorised Slack user
-  can start, steer or approve a run.
 - Bypassing a supervised-mode approval (`src/lib/approvals.ts`,
   `src/lib/supervisedPolicy.ts`) so a tool call executes without the decision it
   required.
 - Argument injection into a spawned CLI via a runtime args template, prompt, or
   workspace name that escapes the intended argv.
-- Leaking stored secrets (Slack tokens, webhook secrets) to the client bundle,
+- Leaking stored secrets (webhook secrets) to the client bundle,
   to logs, or to a notification payload.
 - Any path that lets a *remote, unauthenticated* request cause code execution.
 
@@ -96,8 +94,8 @@ with a pointer here.
 - **`--dangerously-skip-permissions` being available.** It is opt-in per runtime,
   surfaced in the command preview, and requires acknowledgement before a schedule
   is armed. Its existence is a documented product decision.
-- **Secrets at rest in the local database.** Slack tokens and webhook secrets are
-  stored unencrypted in `~/.agentops` / `data/agentops.db`, protected by file
+- **Secrets at rest in the local database.** Webhook secrets are stored
+  unencrypted in `~/.agentops` / `data/agentops.db`, protected by file
   permissions (`0600`) and nothing else. Disk encryption is your operating
   system's job. Encryption-at-rest is on the roadmap; see
   [the known-gaps list](https://getopenrun.dev/docs/security#known-gaps).
@@ -114,12 +112,10 @@ with a pointer here.
 ## Hardening checklist for operators
 
 1. Leave the bind address at its default. Do not expose Open Run to a LAN or the
-   internet; if you need remote access, use the Slack control surface
-   ([Slack control](https://getopenrun.dev/docs/slack)), which dials **out** over Socket Mode and
-   requires no inbound port.
-2. Keep the Slack allowlist tight. It is default-deny (empty = nobody).
-3. Start with read-only prompts and a runtime that is *not* in full-access mode.
-4. Configure project checks so runs must prove themselves before you trust them.
-5. Use supervised mode for anything touching a repository you care about.
-6. Review `~/.agentops` permissions if you have ever copied the directory
+   internet. If you must reach it remotely, put it behind an authenticating
+   reverse proxy or a VPN rather than binding to a public address.
+2. Start with read-only prompts and a runtime that is *not* in full-access mode.
+3. Configure project checks so runs must prove themselves before you trust them.
+4. Use supervised mode for anything touching a repository you care about.
+5. Review `~/.agentops` permissions if you have ever copied the directory
    between machines.

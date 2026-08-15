@@ -1,5 +1,5 @@
 /**
- * GitHub / Jira / Linear — same install/detail template as Slack.
+ * GitHub / Jira / Linear — shared install/detail template.
  *
  * Install always creates a local endpoint. When a public URL and credentials
  * are present, we also register the webhook at the provider.

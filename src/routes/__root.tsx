@@ -7,16 +7,7 @@ import {
   useRouterState,
 } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  Bell,
-  ChevronsUpDown,
-  History,
-  ListChecks,
-  MessageSquare,
-  Smartphone,
-  User,
-  Webhook,
-} from 'lucide-react'
+import { Bell, ChevronsUpDown, History, ListChecks, Smartphone, User, Webhook } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import {
@@ -61,7 +52,6 @@ const NAV = [
 ]
 
 const USER_MENU = [
-  { to: '/slack', label: 'Slack', icon: MessageSquare },
   { to: '/devices', label: 'Devices', icon: Smartphone },
   { to: '/integrations', label: 'Integrations', icon: Webhook },
   { to: '/notifications', label: 'Notifications', icon: Bell },

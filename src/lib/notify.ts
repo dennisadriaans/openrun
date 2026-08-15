@@ -104,13 +104,12 @@ export function buildRunNotification(input: RunNotificationInput): RunNotificati
 // Destination payloads
 // ---------------------------------------------------------------------------
 
-export type WebhookShape = 'slack' | 'discord' | 'generic'
+export type WebhookShape = 'discord' | 'generic'
 
 /**
- * Guess what the receiving endpoint wants. Slack and Discord both reject the
- * other's body outright, and "post to Slack" is the overwhelmingly common case
- * for a local automation tool — worth detecting rather than making the user
- * pick from a dropdown.
+ * Guess what the receiving endpoint wants. Discord rejects a generic body
+ * outright, so it is worth detecting rather than making the user pick from a
+ * dropdown.
  */
 export function detectWebhookShape(url: string): WebhookShape {
   let host = ''
@@ -119,7 +118,6 @@ export function detectWebhookShape(url: string): WebhookShape {
   } catch {
     return 'generic'
   }
-  if (host.endsWith('slack.com')) return 'slack'
   if (host.endsWith('discord.com') || host.endsWith('discordapp.com')) return 'discord'
   return 'generic'
 }
@@ -133,7 +131,6 @@ export function webhookPayload(
   const link = `${baseUrl.replace(/\/+$/, '')}${notification.path}`
   const text = `${notification.title}\n${notification.body}\n${link}`
 
-  if (shape === 'slack') return { text }
   if (shape === 'discord') return { content: text }
   return {
     event: 'run.finished',

@@ -149,7 +149,7 @@ private repository; everything else happens here in the open.
 ## Support boundary
 
 - **Issues** are for bugs in Open Run and for roadmap work.
-- **Discussions** are for setup help — "my Slack app won't connect", "which
+- **Discussions** are for setup help — "my webhook won't fire", "which
   runtime should I use", "how do I structure this prompt".
 
 Please respect that split. It is the only way a small team keeps the issue

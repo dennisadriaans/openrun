@@ -697,47 +697,6 @@ export function useRemoveDevice() {
   })
 }
 
-// --- Slack ------------------------------------------------------------------
-
-export function useSlackSettings() {
-  return useQuery({
-    queryKey: ['slackSettings'],
-    queryFn: () => fns.slackSettings(),
-  })
-}
-
-/**
- * Connection state for the Slack page. The websocket reconnects on its own
- * with backoff, so this polls slowly rather than sitting on a stream.
- */
-export function useSlackStatus() {
-  return useQuery({
-    queryKey: ['slackStatus'],
-    queryFn: () => fns.slackStatus(),
-    refetchInterval: 10_000,
-  })
-}
-
-export function useSaveSlackSettings() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (data: Parameters<typeof fns.saveSlackSettings>[0]['data']) =>
-      fns.saveSlackSettings({ data }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['slackSettings'] })
-      qc.invalidateQueries({ queryKey: ['slackStatus'] })
-    },
-  })
-}
-
-export function useTestSlackConnection() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => fns.testSlackConnection(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['slackStatus'] }),
-  })
-}
-
 // --- Cloud ------------------------------------------------------------------
 
 export function useCloudStatus() {

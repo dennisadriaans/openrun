@@ -1,6 +1,6 @@
 /**
- * Shared shell for Slack and webhook provider pages — same width, header, and
- * status banner so install/detail does not fork per integration.
+ * Shared shell for webhook provider pages — same width, header, and status
+ * banner so install/detail does not fork per integration.
  */
 import type { ReactNode } from 'react'
 import { PageHeader } from './ui'

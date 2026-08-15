@@ -36,9 +36,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   back to the same agent session as a bounded repair turn.
 - You no longer lose a workspace to a wedged CLI — every run has a wall-clock
   budget and is stopped when it elapses.
-- You no longer find out about a broken 6am run by opening the app — Slack /
-  Discord / webhook / desktop notifiers fire when a run settles, by default only
-  when it needs attention.
+- You no longer find out about a broken 6am run by opening the app — Discord /
+  webhook / desktop notifiers fire when a run settles, by default only when it
+  needs attention.
 - You no longer silently lose a cron tick that lands while the previous run is
   still working — unattended fires queue for the workspace instead of throwing
   into a console log with no run row.

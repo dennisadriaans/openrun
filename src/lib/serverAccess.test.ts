@@ -221,8 +221,6 @@ test('a published bind is not host-checked — it has names we cannot enumerate'
 
 test('signed endpoints bypass the token, app endpoints do not', () => {
   assert.equal(pathAuthenticatesItself('/api/webhooks/abc123'), true)
-  assert.equal(pathAuthenticatesItself('/api/slack/events'), true)
-  assert.equal(pathAuthenticatesItself('/api/slack/interactions'), true)
 
   assert.equal(pathAuthenticatesItself('/api/activity/stream'), false)
   assert.equal(pathAuthenticatesItself('/api/runs/run_1/stream'), false)
@@ -232,5 +230,4 @@ test('signed endpoints bypass the token, app endpoints do not', () => {
   // Prefix confusion: a path that merely starts with the same letters is not
   // a webhook route and must still be checked.
   assert.equal(pathAuthenticatesItself('/api/webhooksomething'), false)
-  assert.equal(pathAuthenticatesItself('/api/slackers'), false)
 })

@@ -239,7 +239,7 @@ export function accessRefusalResponse(request: Request): Response | null {
     // Unparseable URL: fall through and require the token.
   }
 
-  // Signed webhook and Slack endpoints authenticate their callers themselves.
+  // Signed webhook endpoints authenticate their callers themselves.
   // They are also the endpoints a third party addresses by a tunnel hostname,
   // so they sit ahead of the Host check as well as the token check.
   if (pathAuthenticatesItself(pathname)) return null

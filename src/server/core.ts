@@ -65,7 +65,6 @@ import {
   type PreviewCommandResult,
 } from './commandPreview'
 import { getProject, getWorkspace, listWorkspaces, resolveWorkspacePath } from './workspaces'
-import { bootSlack, onSlackRunFinalized } from './slack'
 import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
 
@@ -103,17 +102,10 @@ setRunFinalizedHook((runId) => {
     // Non-git or missing cwd — the notification just reports zero.
   }
   notifyRunFinished(runId, changed)
-  // Announce to Slack and release any turn typed from a phone while this run
-  // was busy. Deferred internally so the follow-up it may send does not re-enter
-  // the executor inside its own close handler.
-  onSlackRunFinalized(runId, changed)
   // The workspace lock just came free — start whatever was waiting on it.
   if (run.workspaceId) drainWorkspace(run.workspaceId)
 })
 
-// Connect the Slack control surface (Socket Mode) if it is configured. Boots
-// after the scheduler so a run started from Slack finds a fully armed app.
-bootSlack()
 bootCloud()
 
 // Re-exported so src/fns reaches the whole workspaces API through this single
@@ -1316,45 +1308,6 @@ export { lanBaseUrls } from './mobile/lan'
 export { apnsConfigured } from './mobile/apns'
 export { mobileStatus } from './mobile/status'
 export type { DeviceRow, DevicePairingRow } from './db'
-
-// ---------------------------------------------------------------------------
-// Slack (control surface)
-//
-// Not an `IntegrationProvider`: GitHub / Jira / Linear push events *in* to
-// start automations, whereas Slack is a two-way remote control — it reads run
-// state and steers runs. Different shape, so it gets its own facade.
-// ---------------------------------------------------------------------------
-
-export {
-  publicSettings as getSlackSettingsPublic,
-  slackConnectionStatus,
-  type SlackSettingsInput,
-  type SlackSettingsPublic,
-} from './slack'
-export type { SlackConnectionStatus } from '../lib/slack/types'
-
-import {
-  applySlackSettings,
-  saveSlackSettings as saveSlackSettingsRow,
-  publicSettings as slackPublicSettings,
-  testSlackConnection as testSlackConnectionInner,
-  type SlackSettingsInput as SlackInput,
-  type SlackSettingsPublic as SlackPublic,
-  type SlackTestResult,
-} from './slack'
-
-export type { SlackTestResult }
-
-/** Save Slack settings, then reconnect so the change takes effect at once. */
-export async function saveSlackSettings(input: SlackInput): Promise<SlackPublic> {
-  const saved = saveSlackSettingsRow(input)
-  await applySlackSettings()
-  return slackPublicSettings(saved)
-}
-
-export async function testSlackConnection(): Promise<SlackTestResult> {
-  return testSlackConnectionInner()
-}
 
 // ---------------------------------------------------------------------------
 // Cloud control plane (optional). Local features never consult this.

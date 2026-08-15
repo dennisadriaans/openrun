@@ -18,7 +18,7 @@ import { createCsrfMiddleware, createMiddleware, createStart } from '@tanstack/r
 /**
  * Server functions are same-origin RPC, so a cross-site page must not be able
  * to drive them with the browser's ambient credentials. API routes are exempt
- * because the signed webhook / Slack / mobile surfaces authenticate themselves
+ * because the signed webhook / mobile surfaces authenticate themselves
  * (see `pathAuthenticatesItself()` and the mobile bearer token).
  */
 const csrfGuard = createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === 'serverFn' })

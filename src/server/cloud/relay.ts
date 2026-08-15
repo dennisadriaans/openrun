@@ -1,8 +1,8 @@
 /**
  * Outbound WebSocket to the control plane.
  *
- * The laptop dials out (same posture as Slack Socket Mode) so Jira can reach
- * this machine without a tunnel. Guarded on globalThis so Vite HMR cannot
+ * The laptop dials out so Jira can reach this machine without a tunnel.
+ * Guarded on globalThis so Vite HMR cannot
  * leave two sockets connected.
  */
 import type { CloudRelayStatus, RelayClientMessage } from '../../lib/cloud/types.ts'

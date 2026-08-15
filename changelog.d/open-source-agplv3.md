@@ -20,9 +20,9 @@ can run commands as you — it now binds `127.0.0.1` only, and **refuses to star
 on a public interface unless you set an access token (`pnpm token`) or explicitly
 override it. When a token is configured it is required on every server function
 and API route through one global middleware, so no endpoint can be forgotten;
-signed webhook and Slack endpoints stay reachable because they authenticate by
-HMAC instead. Slack tokens and webhook secrets in the local database, and the
-token file itself, are now written `0600` rather than inheriting your umask.
+signed webhook endpoints stay reachable because they authenticate by HMAC
+instead. Webhook secrets in the local database, and the token file itself, are
+now written `0600` rather than inheriting your umask.
 
 You no longer get a silent no-op from `pnpm start`. It pointed at a build output
 this project never produces, so it exited without ever listening; it now serves

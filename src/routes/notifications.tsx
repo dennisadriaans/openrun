@@ -297,20 +297,17 @@ function NotifierModal({
         <Field label="Name">
           <input
             className={inputClass}
-            placeholder={kind === 'webhook' ? 'Team Slack' : 'This machine'}
+            placeholder={kind === 'webhook' ? 'Team chat' : 'This machine'}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
         </Field>
 
         {kind === 'webhook' ? (
-          <Field
-            label="Webhook URL"
-            hint="Slack and Discord webhook bodies are detected from the host"
-          >
+          <Field label="Webhook URL" hint="Discord webhook bodies are detected from the host">
             <input
               className={`${inputClass} mono`}
-              placeholder="https://hooks.slack.com/services/…"
+              placeholder="https://example.com/hooks/…"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
             />

@@ -89,7 +89,7 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
   settles the bind address before the socket opens. Both apply the same tested rules from
   `lib/serverAccess.ts`. **Never add a per-route auth check** — a new server function is
   covered the moment it is written, and a second mechanism is how one endpoint gets
-  forgotten. Signed webhook / Slack routes are exempt via `pathAuthenticatesItself()`
+  forgotten. Signed webhook routes are exempt via `pathAuthenticatesItself()`
   because they authenticate by HMAC; that list is the only place exemptions live.
   The same middleware runs `hostHeaderRefusal()` **before** the token check: on a
   loopback bind, a request that addresses us by a non-loopback name is a rebound
@@ -110,15 +110,9 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
   `undefined` rather than assuming a backfill happened.
 - **`server/core.ts` is the only facade.** New server capability ⇒ export from `core.ts`,
   wrap in `fns/index.ts`, hook in `lib/queries.ts`. Don't let a route reach past it.
-  - `server/slack/dispatch.ts` is the one server module that reaches *back* into
-    `core.ts`, and it does so with a lazy `await import('../core')` — core boots the
-    scheduler and imports Slack, so a static import there is a cycle.
-- **Slack is a control surface, not an `IntegrationProvider`.** GitHub / Jira / Linear
-  push events *in* to start automations and normalize onto `CanonicalWebhookEvent`.
-  Slack is two-way — it reads run state and steers runs — so it has its own vocabulary
-  (`lib/slack/commands.ts` intents, Block Kit out) and its own facade. Don't bend it into
-  `verify`/`parse`. Its transport is **Socket Mode** (an outbound websocket) precisely so
-  a laptop behind NAT needs no tunnel; the HTTP routes are a fallback.
+  - A server module that needs to reach *back* into `core.ts` must do so with a lazy
+    `await import('../core')` — core boots the scheduler, so a static import there is
+    a cycle.
 - **Value imports in test-covered `lib/` modules carry an explicit `.ts` extension**
   (`from './cron.ts'`) — `--experimental-strip-types` has no bundler resolution. Type-only
   imports and untested modules may omit it. Match the file you're editing.
@@ -150,7 +144,6 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (GitHub / Jira / Linear) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx`, `routes/api/webhooks/$integrationId.ts` |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
-| Slack control surface (read + steer runs from a phone) | `server/slack/`, `lib/slack/`, `routes/slack.tsx`, `routes/api/slack/*` |
 | Runtime binary on PATH, args templates, transport | `server/runtimePath.ts`, `server/userPath.ts`, `lib/runtimeBinary.ts`, `lib/argsTemplate.ts`, `lib/runtimePresets.ts`, `lib/acpTransport.ts` |
 | Live updates | the modules in the live-path diagram above |
 | Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
@@ -168,7 +161,7 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 Routes: `index.tsx` redirects to Automations · `tasks.index.tsx` /
 `tasks.$taskId.tsx` / `tasks.new.tsx` automations · `runs.index.tsx` /
 `runs.$runId.tsx` / `runs.new.tsx` · `integrations.tsx` /
-`integrations.index.tsx` / `integrations.$provider.tsx` · `slack.tsx` · `notifications.tsx` ·
+`integrations.index.tsx` / `integrations.$provider.tsx` · `notifications.tsx` ·
 `devices.tsx` · `runtimes.tsx` · `planner.tsx`.
 Projects live in `components/ProjectsManager.tsx` (modal from the picker), not
 a standalone route.
