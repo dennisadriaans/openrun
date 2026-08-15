@@ -6,7 +6,7 @@ three files your prompt actually needs.
 ## What this is
 
 A **TanStack Start** proof-of-concept that plans and schedules **local coding-agent CLIs**
-(`claude`, `codex`, `grok`, `gemini`) as child
+(`claude`, `codex`, `grok`, `gemini`, `agy`) as child
 processes. No model APIs, no cloud, no keys — it drives the CLIs the user is already logged into.
 
 Each runtime has a **transport**: `cli` parses the binary's own JSON output, `acp` drives it

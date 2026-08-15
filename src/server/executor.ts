@@ -22,6 +22,7 @@ import {
   buildTurnCommand,
   extractSessionId,
   parseAssistantText,
+  eventKindFor,
   runtimeKind,
   supportsResume,
 } from './resume'
@@ -545,7 +546,7 @@ function spawnTurn(input: {
     budgetTimer = null
   }
 
-  const kind = runtimeKind(runtime.bin)
+  const kind = eventKindFor(runtimeKind(runtime.bin))
   const lineBuffer = new LineBuffer()
   // Plain / text output (planner Grok) is not JSONL — skip line→event parsing so
   // chat gets one assistant answer from stdout instead of a raw pill per line.
