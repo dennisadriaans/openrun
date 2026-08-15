@@ -35,7 +35,10 @@ import {
   useWorkspaces,
   useIntegrations,
   useIntegrationProviders,
+  useProjectBranches,
+  useCreateWorkspace,
 } from '../lib/queries'
+import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
 import {
   HOURLY_MINUTES,
   HOUR_TIMES,
@@ -57,7 +60,13 @@ import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { missingRuntimeBinaryMessage } from '../lib/runtimeBinary'
 import { AddProjectModal } from './AddProjectModal'
-import { EffortPicker, ModelPicker, ProjectPicker, RuntimePicker } from './ComposerControls'
+import {
+  EffortPicker,
+  ModelPicker,
+  ProjectPicker,
+  RuntimePicker,
+  BranchPicker,
+} from './ComposerControls'
 import { ActiveToggle, Button, inputClass } from './ui'
 
 const SCHEDULE_OPTIONS: Array<{
@@ -793,6 +802,8 @@ export function TaskForm({
 
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
+  const { data: gitBranches } = useProjectBranches(projectId || undefined)
+  const createWorkspace = useCreateWorkspace()
 
   useEffect(() => {
     if (!v.workspaceId || projectId) return
@@ -873,6 +884,43 @@ export function TaskForm({
     }
     const list = (allWorkspaces ?? []).filter((w) => w.projectId === pid)
     set('workspaceId', pickDefaultWorkspace(list)?.id ?? '')
+  }
+
+  const branchChoices = useMemo(
+    () =>
+      projectBranchChoices({
+        gitBranches: gitBranches ?? [],
+        workspaces: (projectWorkspaces ?? []).map((w) => ({
+          id: w.id,
+          branch: w.branch,
+          kind: w.kind,
+          status: w.status,
+          activeRunId: w.activeRunId,
+        })),
+      }),
+    [gitBranches, projectWorkspaces],
+  )
+
+  const selectBranch = async (id: string) => {
+    setWorkspaceError(null)
+    const pending = parsePendingGitBranchId(id)
+    if (!pending) {
+      set('workspaceId', id)
+      return
+    }
+    if (!projectId) return
+    const gitRow = (gitBranches ?? []).find((b) => b.name === pending)
+    try {
+      const ws = await createWorkspace.mutateAsync({
+        projectId,
+        branch: pending,
+        fromBranch: pending,
+        useExistingBranch: gitRow ? !gitRow.remote : true,
+      })
+      set('workspaceId', ws.id)
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   useEffect(() => {
@@ -1001,7 +1049,9 @@ export function TaskForm({
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui-base">
           <ActiveToggle checked={v.enabled} onChange={(on) => set('enabled', on)} />
 
-          <span className="text-tier-quaternary">|</span>
+          <span aria-hidden className="text-tier-quaternary">
+            |
+          </span>
 
           <ProjectPicker
             projects={projects ?? []}
@@ -1010,6 +1060,18 @@ export function TaskForm({
             aria-describedby={workspaceError ? 'workspace-required-error' : undefined}
             onChange={selectProject}
             onAddProject={() => setShowAddProject(true)}
+          />
+
+          <span aria-hidden className="text-tier-quaternary">
+            |
+          </span>
+
+          <BranchPicker
+            workspaces={branchChoices}
+            workspaceId={v.workspaceId}
+            disabled={!projectId || createWorkspace.isPending}
+            placeholder={createWorkspace.isPending ? 'Opening branch…' : 'Select branch'}
+            onChange={(id) => void selectBranch(id)}
           />
         </div>
       </header>

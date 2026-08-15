@@ -473,6 +473,7 @@ export type BranchOption = {
   status?: string
   /** Disables the entry and shows as the hint — e.g. a workspace still cloning. */
   blockedReason?: string | null
+  hint?: string
 }
 
 export function BranchPicker({
@@ -510,7 +511,9 @@ export function BranchPicker({
                 active={w.id === workspaceId}
                 disabled={Boolean(w.blockedReason)}
                 label={w.branch}
-                hint={w.blockedReason ?? (w.kind === 'main' ? 'main checkout' : undefined)}
+                hint={
+                  w.blockedReason ?? w.hint ?? (w.kind === 'main' ? 'main checkout' : undefined)
+                }
                 leading={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
                 onSelect={() => {
                   onChange(w.id)

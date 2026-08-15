@@ -408,6 +408,15 @@ export function useWorkspaces(projectId?: string, initialData?: fns.WorkspaceWit
   })
 }
 
+export function useProjectBranches(projectId?: string) {
+  return useQuery({
+    queryKey: ['projectBranches', projectId],
+    queryFn: () => fns.listProjectBranches({ data: { projectId: projectId! } }),
+    enabled: Boolean(projectId),
+    staleTime: 15_000,
+  })
+}
+
 export function useAddProject() {
   const qc = useQueryClient()
   return useMutation({
@@ -478,6 +487,7 @@ export function useArchiveWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspaces'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
+      qc.invalidateQueries({ queryKey: ['projectBranches'] })
     },
   })
 }

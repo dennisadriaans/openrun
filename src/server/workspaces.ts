@@ -44,6 +44,7 @@ import {
   type WorkspaceRow,
 } from './db'
 import * as git from './git'
+import type { GitBranchRow } from '../lib/gitBranches.ts'
 
 /**
  * Guess the verification checks for a freshly added repo from its
@@ -435,6 +436,12 @@ export function listWorkspaces(projectId?: string): WorkspaceWithMeta[] {
       : db.prepare('SELECT * FROM workspaces ORDER BY createdAt DESC').all()
   ) as WorkspaceRow[]
   return rows.map((ws) => toWorkspaceWithMeta(db, ws))
+}
+
+export function listProjectBranches(projectId: string): GitBranchRow[] {
+  const project = getProject(projectId)
+  if (!project || !existsSync(project.path) || !git.isRepo(project.path)) return []
+  return git.listRecentBranches(project.path)
 }
 
 export function getWorkspace(id: string): WorkspaceRow | undefined {

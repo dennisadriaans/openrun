@@ -305,6 +305,10 @@ export const listWorkspaces = createServerFn({ method: 'GET' })
   .validator((d: { projectId?: string }) => d)
   .handler(async ({ data }) => (await core()).listWorkspaces(data.projectId))
 
+export const listProjectBranches = createServerFn({ method: 'GET' })
+  .validator((d: { projectId: string }) => d)
+  .handler(async ({ data }) => (await core()).listProjectBranches(data.projectId))
+
 export const createWorkspace = createServerFn({ method: 'POST' })
   .validator(
     (d: { projectId: string; branch: string; fromBranch?: string; useExistingBranch?: boolean }) =>

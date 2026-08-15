@@ -116,6 +116,7 @@ export {
   getProject,
   getWorkspace,
   listLocalDirectories,
+  listProjectBranches,
   listProjects,
   listWorkspaces,
   resolveWorkspacePath,
