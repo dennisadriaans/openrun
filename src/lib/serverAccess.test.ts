@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  ACCESS_TOKEN_COOKIE,
+  accessCookieHeader,
   DEFAULT_HOST,
   hostHeaderRefusal,
   hostnameFromHostHeader,
   insecureHostWarning,
+  isDocumentRequest,
   isLoopbackHost,
   parseAllowedHosts,
   pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
+  unauthorizedMessage,
+  urlWithoutAccessToken,
 } from './serverAccess.ts'
 
 test('loopback addresses are recognized in every spelling', () => {
@@ -230,4 +235,55 @@ test('signed endpoints bypass the token, app endpoints do not', () => {
   // Prefix confusion: a path that merely starts with the same letters is not
   // a webhook route and must still be checked.
   assert.equal(pathAuthenticatesItself('/api/webhooksomething'), false)
+})
+
+test('the token cookie is scoped to the whole app and hidden from scripts', () => {
+  const cookie = accessCookieHeader('abc123', false)
+
+  assert.match(cookie, new RegExp(`^${ACCESS_TOKEN_COOKIE}=abc123;`))
+  assert.match(cookie, /Path=\//)
+  assert.match(cookie, /HttpOnly/)
+  assert.match(cookie, /SameSite=Lax/)
+  assert.match(cookie, /Max-Age=\d+/)
+
+  // No `Secure` over plain HTTP: loopback is http, and a Secure cookie there
+  // is one the browser silently refuses to store.
+  assert.doesNotMatch(cookie, /Secure/)
+  assert.match(accessCookieHeader('abc123', true), /; Secure$/)
+})
+
+test('a token with cookie-hostile characters survives the round trip', () => {
+  assert.match(accessCookieHeader('a b;c', false), /^agentops_token=a%20b%3Bc;/)
+})
+
+test('the token is stripped from a URL without disturbing the rest of it', () => {
+  assert.equal(
+    urlWithoutAccessToken('http://127.0.0.1:3000/runs/1?agentops_token=abc&tab=diff#top'),
+    '/runs/1?tab=diff#top',
+  )
+  assert.equal(urlWithoutAccessToken('http://127.0.0.1:3000/?agentops_token=abc'), '/')
+})
+
+test('a URL carrying no token needs no redirect', () => {
+  assert.equal(urlWithoutAccessToken('http://127.0.0.1:3000/runs/1?tab=diff'), null)
+  assert.equal(urlWithoutAccessToken('not a url'), null)
+})
+
+test('only a page load is redirected to a clean URL', () => {
+  assert.equal(isDocumentRequest('GET', 'text/html,application/xhtml+xml'), true)
+  assert.equal(isDocumentRequest('get', 'text/html'), true)
+
+  // An EventSource reconnect carries the same query parameter and must be
+  // answered rather than bounced — a 303 is not a stream.
+  assert.equal(isDocumentRequest('GET', 'text/event-stream'), false)
+  assert.equal(isDocumentRequest('POST', 'text/html'), false)
+  assert.equal(isDocumentRequest('GET', null), false)
+})
+
+test('the 401 tells the caller how to authenticate', () => {
+  const message = unauthorizedMessage()
+
+  assert.match(message, /pnpm token:print/)
+  assert.match(message, /agentops_token=/)
+  assert.match(message, /x-agentops-token/)
 })

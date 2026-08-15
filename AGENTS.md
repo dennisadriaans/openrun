@@ -25,7 +25,7 @@ pnpm dev             # dev server on :3000 (loopback)
 pnpm lint            # biome check (lint + format); pnpm lint:fix writes
 pnpm build           # production build into dist/
 pnpm start           # serve the build via scripts/start.ts (refuses an unsafe bind)
-pnpm token           # print / create the access token
+pnpm token:print     # print / create the access token (`pnpm token` is pnpm's own npm command)
 pnpm preview         # vite preview
 pnpm typecheck       # tsc --noEmit
 pnpm test            # unit tests

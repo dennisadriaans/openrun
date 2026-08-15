@@ -24,12 +24,17 @@ import { createCsrfMiddleware, createMiddleware, createStart } from '@tanstack/r
 const csrfGuard = createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === 'serverFn' })
 
 const accessGuard = createMiddleware({ type: 'request' }).server(async ({ request, next }) => {
-  const { accessRefusalResponse } = await import('./server/accessToken.ts')
+  const { accessDecision, withAccessCookie } = await import('./server/accessToken.ts')
 
-  const refusal = accessRefusalResponse(request)
-  if (refusal) return refusal
+  const decision = accessDecision(request)
+  if (decision.kind === 'respond') return decision.response
 
-  return next()
+  const result = await next()
+  if (!decision.setCookie) return result
+
+  // The request proved it holds the token; hand the browser a cookie so its
+  // own fetches and EventSource connections keep proving it.
+  return { ...result, response: withAccessCookie(result.response, decision.setCookie) }
 })
 
 export const startInstance = createStart(() => ({

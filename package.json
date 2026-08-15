@@ -26,7 +26,7 @@
     "generate-routes": "tsr generate",
     "build": "vite build",
     "start": "node --experimental-strip-types scripts/start.ts",
-    "token": "node --experimental-strip-types scripts/token.ts",
+    "token:print": "node --experimental-strip-types scripts/token.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src scripts",

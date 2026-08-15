@@ -30,6 +30,78 @@ export const ACCESS_TOKEN_QUERY_PARAM = 'agentops_token'
 /** Cookie the browser gets once, so the SPA does not append a token to every URL. */
 export const ACCESS_TOKEN_COOKIE = 'agentops_token'
 
+/**
+ * How long the browser keeps the token cookie.
+ *
+ * A year. The alternative is re-pasting a token into the address bar every
+ * session, and a secret handled that often is one handled carelessly.
+ */
+const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
+
+/**
+ * `Set-Cookie` value that hands the browser the token for every later request.
+ *
+ * This is the only channel the SPA itself can use: `EventSource` cannot set a
+ * header, and server-function calls do not build their own URLs, so without
+ * the cookie a configured token locks the app out of its own server.
+ *
+ * `HttpOnly` because nothing in the client bundle reads it — same-origin
+ * `fetch` and `EventSource` attach it themselves. `Lax` rather than `Strict`
+ * so a normal navigation to the app still carries it; cross-site *writes* are
+ * stopped by the CSRF middleware, not by this cookie.
+ */
+export function accessCookieHeader(token: string, secure: boolean): string {
+  const attributes = [
+    `${ACCESS_TOKEN_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${ACCESS_COOKIE_MAX_AGE_SECONDS}`,
+  ]
+  if (secure) attributes.push('Secure')
+  return attributes.join('; ')
+}
+
+/**
+ * The same URL with the token query parameter stripped, or `null` if it had none.
+ *
+ * Returned path-relative on purpose: the `Host` header is attacker-influenced,
+ * and a `Location` we rebuilt from it would echo it straight back.
+ */
+export function urlWithoutAccessToken(rawUrl: string): string | null {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return null
+  }
+
+  if (!url.searchParams.has(ACCESS_TOKEN_QUERY_PARAM)) return null
+  url.searchParams.delete(ACCESS_TOKEN_QUERY_PARAM)
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
+/**
+ * Is this the browser asking for a page, rather than the app asking for data?
+ *
+ * Only a page load is redirected to a clean URL. An `EventSource` reconnect
+ * carries the same query parameter and has to be answered, not bounced.
+ */
+export function isDocumentRequest(method: string, accept: string | null | undefined): boolean {
+  if (method.toUpperCase() !== 'GET') return false
+  return (accept ?? '').includes('text/html')
+}
+
+/** What an unauthenticated caller is told, including how to authenticate. */
+export function unauthorizedMessage(): string {
+  return (
+    'Unauthorized: missing or invalid Open Run access token. ' +
+    'Run `pnpm token:print` to print it, then load ' +
+    `/?${ACCESS_TOKEN_QUERY_PARAM}=<token> once to sign this browser in, ` +
+    `or send the token as the \`${ACCESS_TOKEN_HEADER}\` header.`
+  )
+}
+
 export type ServerAccessConfig = {
   /** Interface the server binds, e.g. `127.0.0.1` or `0.0.0.0`. */
   host: string
