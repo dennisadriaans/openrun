@@ -109,6 +109,17 @@ export const runTaskNow = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => (await core()).runTaskNow(data.id))
 
+export const listNativeSessions = createServerFn({ method: 'GET' })
+  .validator(
+    (d: {
+      workspaceId: string
+      kind?: 'claude' | 'codex' | 'grok' | 'antigravity'
+      offset?: number
+      limit?: number
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).listNativeSessions(data))
+
 // --- Runs ------------------------------------------------------------------
 
 export const listRuns = createServerFn({ method: 'GET' })

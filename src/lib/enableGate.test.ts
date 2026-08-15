@@ -4,6 +4,7 @@ import { invalidCronMessage } from './cron.ts'
 import { canEnableTask, enableBlockedReason } from './enableGate.ts'
 import { missingRuntimeBinaryMessage } from './runtimeBinary.ts'
 import { emptyTaskPromptMessage } from './taskPrompt.ts'
+import { missingNativeSessionMessage } from './nativeSessions.ts'
 import { missingWorkspaceMessage } from './workspaceRef.ts'
 import { workspaceNotReadyMessage } from './workspaceReady.ts'
 
@@ -96,8 +97,19 @@ describe('enableBlockedReason', () => {
     )
   })
 
-  it('flags an empty prompt last', () => {
+  it('flags an empty prompt before a missing native chat', () => {
     assert.equal(enableBlockedReason({ ...healthy, promptValid: false }), emptyTaskPromptMessage())
     assert.equal(canEnableTask({ ...healthy, promptValid: false }), false)
+  })
+
+  it('flags a missing native Claude chat last', () => {
+    assert.equal(
+      enableBlockedReason({
+        ...healthy,
+        resumeSessionId: 'sess-1',
+        resumeSessionValid: false,
+      }),
+      missingNativeSessionMessage(),
+    )
   })
 })

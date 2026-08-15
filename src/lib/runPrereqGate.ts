@@ -6,6 +6,7 @@
  */
 import { missingRuntimeBinaryMessage } from './runtimeBinary.ts'
 import { emptyTaskPromptMessage } from './taskPrompt.ts'
+import { missingNativeSessionMessage } from './nativeSessions.ts'
 import { missingWorkspaceMessage } from './workspaceRef.ts'
 import { workspaceNotReadyMessage } from './workspaceReady.ts'
 
@@ -20,6 +21,13 @@ export type RunPrereqInput = {
   runtimeBin?: string
   /** False when the stored prompt is empty / whitespace-only. */
   promptValid: boolean
+  /** Native CLI session id to resume; empty means a new conversation. */
+  resumeSessionId?: string
+  /**
+   * False when resumeSessionId is set but the chat is gone from disk (or the
+   * runtime cannot resume native chats). Ignored when no id is bound.
+   */
+  resumeSessionValid?: boolean
 }
 
 /** Workspace existence + ready only (save form — PATH is warned elsewhere). */
@@ -52,5 +60,8 @@ export function runPrereqBlockedReason(input: RunPrereqInput): string | null {
     return missingRuntimeBinaryMessage(input.runtimeBin ?? '')
   }
   if (!input.promptValid) return emptyTaskPromptMessage()
+  if ((input.resumeSessionId ?? '').trim() && input.resumeSessionValid === false) {
+    return missingNativeSessionMessage()
+  }
   return null
 }

@@ -30,6 +30,24 @@ export function useTask(id: string) {
   })
 }
 
+export function useNativeSessions(input: { workspaceId: string }, opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['nativeSessions', input.workspaceId],
+    queryFn: () => fns.listNativeSessions({ data: { workspaceId: input.workspaceId } }),
+    enabled: (opts?.enabled ?? true) && !!input.workspaceId,
+    staleTime: 15_000,
+  })
+}
+
+export function loadNativeSessionPage(input: {
+  workspaceId: string
+  kind: 'claude' | 'codex' | 'grok' | 'antigravity'
+  offset: number
+  limit?: number
+}) {
+  return fns.listNativeSessions({ data: input })
+}
+
 export function useRuntimes() {
   return useQuery({ queryKey: ['runtimes'], queryFn: () => fns.listRuntimes() })
 }
@@ -468,6 +486,7 @@ export function useCreateWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspaces'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
+      qc.invalidateQueries({ queryKey: ['projectBranches'] })
     },
   })
 }
@@ -487,7 +506,6 @@ export function useArchiveWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspaces'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
-      qc.invalidateQueries({ queryKey: ['projectBranches'] })
     },
   })
 }

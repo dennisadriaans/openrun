@@ -80,6 +80,18 @@ export type TaskRow = {
   maxRepairAttempts: number
   /** Per-run wall-clock budget in ms. 0 = the app default. */
   timeoutMs: number
+  /**
+   * Native CLI session to resume on the first turn instead of minting
+   * a new UUID. Empty = start a new conversation (the default).
+   */
+  resumeSessionId: string
+  /** Picker title captured at save, used as the run stub. */
+  resumeSessionLabel: string
+  /**
+   * 1 = disable the automation after the next successful scheduled fire, so a
+   * wall-clock "once at 03:01" does not repeat every night.
+   */
+  fireOnce: number
   createdAt: number
   updatedAt: number
   lastRunAt: number | null
@@ -528,6 +540,10 @@ function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'verdict', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'repairAttempts', 'INTEGER NOT NULL DEFAULT 0')
   addColumn(db, 'runs', 'timedOut', 'INTEGER NOT NULL DEFAULT 0')
+
+  addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'tasks', 'fireOnce', 'INTEGER NOT NULL DEFAULT 0')
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS check_results (

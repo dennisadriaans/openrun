@@ -28,6 +28,8 @@ export function nextRunDetailLabel(input: {
   runtimeInstalled?: boolean
   /** When false, the stored prompt is empty / whitespace-only. */
   promptValid?: boolean
+  /** When true, the schedule disables itself after the next successful fire. */
+  fireOnce?: boolean
   /** Pre-formatted relative time when a next fire exists; ignored otherwise. */
   relativeNext?: string | null
 }): string {
@@ -38,7 +40,9 @@ export function nextRunDetailLabel(input: {
   if (input.workspaceReady === false) return "won't fire — workspace not ready"
   if (input.runtimeInstalled === false) return "won't fire — runtime not on PATH"
   if (input.promptValid === false) return "won't fire — empty prompt"
-  return input.relativeNext?.trim() || '—'
+  const next = input.relativeNext?.trim() || '—'
+  if (input.fireOnce && next !== '—') return `${next} · then pause`
+  return next
 }
 
 /**
