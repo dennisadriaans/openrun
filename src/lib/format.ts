@@ -61,6 +61,20 @@ export function formatChatTimestampTooltip(ts: number | null | undefined): strin
   return `${time}, ${day}${ordinalSuffix(day)} ${month} ${date.getFullYear()}`
 }
 
+/**
+ * Whole-second elapsed label for a turn that is still running — the transcript
+ * repaints it every second, so tenths would only flicker.
+ */
+export function elapsedLabel(start: number, now: number = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - start) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  if (minutes < 60) return `${minutes}m ${String(rest).padStart(2, '0')}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+
 export function duration(start: number, end: number | null): string {
   const ms = (end ?? Date.now()) - start
   if (ms < 1000) return `${ms}ms`

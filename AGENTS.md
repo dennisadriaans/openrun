@@ -143,6 +143,7 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
 | Projects, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts` |
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |
+| How a diff line looks (git panel **and** chat edit hunks) | `components/DiffRows.tsx`; tokens from `lib/highlight.ts`; agent-supplied hunks via `lib/lineDiff.ts` |
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (GitHub / Jira / Linear) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx`, `routes/api/webhooks/$integrationId.ts` |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
@@ -150,6 +151,8 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | Live updates | the modules in the live-path diagram above |
 | Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
 | Chat transcript / composer pickers | `components/Chat.tsx`, `components/ComposerControls.tsx` |
+| Assistant prose: markdown, code fences, file chips | `components/chat/ChatMarkdown.tsx`; `lib/codeLanguage.ts`, `lib/filePathToken.ts`; `.chat-markdown` / `.chat-code` in `styles.css` |
+| Transcript rows: tool calls, sub-agents, the working line | `components/chat/` — `ToolCall.tsx`, `SubagentCall.tsx`, `EditDiff.tsx`, `WorkingIndicator.tsx`; label from `lib/turnActivity.ts` |
 | Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
 | Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
 | Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` |

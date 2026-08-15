@@ -9,61 +9,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronRight, Columns2, Copy, List, Maximize2, Minimize2, Rows2, X } from 'lucide-react'
 import type { DiffFile } from '../server/git'
-import { parseUnifiedDiff, toSplitRows, type DiffHunk, type DiffLine } from '../lib/diff'
-import { highlightHunk, type HighlightToken } from '../lib/highlight'
+import { parseUnifiedDiff, toSplitRows, type DiffHunk } from '../lib/diff'
+import { highlightHunk } from '../lib/highlight'
 import { useFileDiff } from '../lib/queries'
+import { CodeCell, LineNumber } from './DiffRows'
 import { FileTypeIcon } from './FileTypeIcon'
 
 type ViewMode = 'split' | 'unified'
-
-const lineTone: Record<DiffLine['type'], string> = {
-  add: 'bg-[var(--diffs-bg-addition-override)]',
-  delete: 'bg-[var(--diffs-bg-deletion-override)]',
-  context: '',
-}
-
-const markerTone: Record<DiffLine['type'], string> = {
-  add: 'text-[var(--added)]',
-  delete: 'text-[var(--removed)]',
-  context: 'text-text-300',
-}
-
-const marker: Record<DiffLine['type'], string> = { add: '+', delete: '−', context: ' ' }
-
-function LineNumber({ value }: { value: number | null }) {
-  return (
-    <span className="w-10 shrink-0 select-none px-1.5 text-right mono text-[10px] leading-[18px] text-muted-foreground">
-      {value ?? ''}
-    </span>
-  )
-}
-
-function CodeCell({ line, tokens }: { line: DiffLine | null; tokens?: HighlightToken[] }) {
-  if (!line) {
-    return <div className="flex-1 bg-[var(--bg-luminous-quaternary)]" />
-  }
-  const parts = tokens?.length ? tokens : [{ text: line.content || ' ', className: '' }]
-  return (
-    <div className={`flex min-w-0 flex-1 ${lineTone[line.type]}`}>
-      <span
-        className={`w-3.5 shrink-0 select-none mono text-[10px] leading-[18px] ${markerTone[line.type]}`}
-      >
-        {marker[line.type]}
-      </span>
-      <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all mono text-[11px] leading-[18px] text-[var(--syntax-foreground)]">
-        {parts.map((part, i) =>
-          part.className ? (
-            <span key={i} className={part.className}>
-              {part.text}
-            </span>
-          ) : (
-            <span key={i}>{part.text || ' '}</span>
-          ),
-        )}
-      </pre>
-    </div>
-  )
-}
 
 function UnifiedHunk({ hunk, path }: { hunk: DiffHunk; path: string }) {
   const tokens = useMemo(() => highlightHunk(hunk, path), [hunk, path])
