@@ -16,13 +16,8 @@ import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
-import {
-  defaultEffort,
-  defaultModel,
-  findModel,
-  modelsForBin,
-  type ModelOption,
-} from '../lib/models'
+import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
+import { cachedModelsForBin, warmModelCatalogs } from './modelCatalog'
 import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
@@ -85,6 +80,7 @@ if (!bootSafety.__agentopsSafetyBooted) {
   installProcessShutdownHooks()
 }
 bootScheduler()
+warmModelCatalogs()
 
 /**
  * Everything that has to happen once a run settles. Registered here rather
@@ -143,11 +139,21 @@ function id(prefix: string) {
 // Runtimes
 // ---------------------------------------------------------------------------
 
-export function listRuntimes(): RuntimeRow[] {
+/**
+ * A runtime plus the models its installed binary currently offers. Carried on
+ * the runtime rather than fetched separately so every model picker in the app
+ * (new run, automation form, project defaults) gets the live catalog from a
+ * request it was already making.
+ */
+export type RuntimeWithModels = RuntimeRow & { models: ModelOption[] }
+
+export function listRuntimes(): RuntimeWithModels[] {
   const rows = getDb()
     .prepare('SELECT * FROM runtimes ORDER BY createdAt ASC')
     .all() as RuntimeRow[]
-  return rows.sort(compareRuntimesForDisplay)
+  return rows
+    .sort(compareRuntimesForDisplay)
+    .map((r) => ({ ...r, models: cachedModelsForBin(r.bin) }))
 }
 
 export function getRuntime(runtimeId: string): RuntimeRow | undefined {
@@ -757,7 +763,7 @@ export function getConversation(runId: string) {
   const workspaceWithMeta = workspace ? (siblings.find((w) => w.id === workspace.id) ?? null) : null
   const project = workspace ? (getProject(workspace.projectId) ?? null) : null
 
-  const catalog = runtime ? modelsForBin(runtime.bin) : []
+  const catalog = runtime ? cachedModelsForBin(runtime.bin) : []
   const matchedModel = findModel(catalog, run.model)
   const selectedModel = matchedModel ?? defaultModel(catalog)
 

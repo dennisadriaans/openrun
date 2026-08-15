@@ -131,6 +131,8 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | --- | --- |
 | Run/turn lifecycle, spawning a CLI, streaming stdout | `server/executor.ts` |
 | Per-CLI differences: headless invocation, session id, resume, model/effort flags | `server/resume.ts`, `lib/models.ts` |
+| Which models a picker offers | `server/modelCatalog.ts` (cache + refresh), `lib/modelDiscovery.ts` (per-CLI parsers); `lib/models.ts` is only the fallback seed |
+| Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `lib/models.ts`; stored as `hiddenModels` in `lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |
 | CLI stdout → chat events | `lib/agentEvents/` — one adapter per CLI (`claude.ts`, `codex.ts`, `grok.ts`, `acp.ts`); `server/turnEvents.ts` is the server-side re-export |
 | The event vocabulary itself (ACP subset) | `lib/acp.ts` (+ `lib/acpConformance.ts` guard), shapes in `lib/turnEvents.ts` |
 | ACP transport: driving an agent over JSON-RPC | `server/acpTurn.ts`, `lib/acpTransport.ts` |

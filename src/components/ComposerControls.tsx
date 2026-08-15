@@ -8,6 +8,8 @@ import { createPortal } from 'react-dom'
 import {
   Check,
   ChevronDown,
+  Eye,
+  EyeOff,
   FolderGit2,
   GitBranch,
   Lock,
@@ -19,9 +21,13 @@ import {
   defaultEffort,
   effortLabel,
   findModel,
+  hiddenModelsIn,
   modelKindForBin,
+  toggleHiddenModel,
+  visibleModels,
   type ModelOption,
 } from '../lib/models'
+import { usePickerPrefs } from '../lib/pickerPrefs'
 import {
   DEFAULT_RUNTIME_MODE,
   RUNTIME_MODES,
@@ -214,6 +220,60 @@ function MenuItem({
   )
 }
 
+/**
+ * A model row with its own hide / unhide control.
+ *
+ * Separate from {@link MenuItem} because the toggle has to be a real button
+ * beside the row rather than inside it — nesting buttons is invalid, and the
+ * two need different click targets so hiding a model never selects it.
+ */
+function ModelMenuItem({
+  model,
+  active,
+  hidden,
+  onSelect,
+  onToggleHidden,
+}: {
+  model: ModelOption
+  active: boolean
+  hidden: boolean
+  onSelect: () => void
+  onToggleHidden: () => void
+}) {
+  return (
+    <div className="group/model relative flex items-center">
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onSelect}
+        className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2 pr-9 pl-2.5 text-left text-ui-base transition-colors ${
+          active
+            ? 'bg-hover text-foreground'
+            : 'text-foreground/85 hover:bg-hover hover:text-foreground'
+        } ${hidden ? 'opacity-50' : ''}`}
+      >
+        <span className="shrink-0 text-tier-secondary">
+          <ProviderIcon kind={model.provider} className="h-3.5 w-3.5 shrink-0" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{model.name}</span>
+          <span className="block truncate text-ui-sm text-tier-quaternary">{model.slug}</span>
+        </span>
+        {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
+      </button>
+      <button
+        type="button"
+        title={hidden ? `Show ${model.name} again` : `Hide ${model.name} from this list`}
+        aria-label={hidden ? `Show ${model.name}` : `Hide ${model.name}`}
+        onClick={onToggleHidden}
+        className="absolute right-1 rounded-md p-1.5 text-tier-quaternary opacity-0 transition-colors group-hover/model:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
+      >
+        {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  )
+}
+
 function modeIcon(mode: RuntimeMode) {
   if (mode === 'approval-required') return <Lock className="h-3.5 w-3.5 shrink-0" />
   if (mode === 'auto-accept-edits') return <PenLine className="h-3.5 w-3.5 shrink-0" />
@@ -231,8 +291,15 @@ export function ModelPicker({
   disabled?: boolean
   onChange: (slug: string) => void
 }) {
+  const { prefs, remember } = usePickerPrefs()
+  const [showHidden, setShowHidden] = useState(false)
+
   if (models.length === 0) return null
   const selected = findModel(models, model) ?? models[0]!
+  const shown = visibleModels(models, prefs.hiddenModels, selected.slug)
+  const hidden = hiddenModelsIn(models, prefs.hiddenModels, selected.slug)
+  const toggleHidden = (slug: string) =>
+    remember({ hiddenModels: toggleHiddenModel(prefs.hiddenModels, slug) })
 
   return (
     <FooterMenu
@@ -241,21 +308,33 @@ export function ModelPicker({
       disabled={disabled}
       leading={<ProviderIcon kind={selected.provider} className="h-3.5 w-3.5 shrink-0" />}
     >
-      {(close) =>
-        models.map((m) => (
-          <MenuItem
-            key={m.slug}
-            active={m.slug === selected.slug}
-            label={m.name}
-            hint={m.slug}
-            leading={<ProviderIcon kind={m.provider} className="h-3.5 w-3.5 shrink-0" />}
-            onSelect={() => {
-              onChange(m.slug)
-              close()
-            }}
-          />
-        ))
-      }
+      {(close) => (
+        <>
+          {(showHidden ? models : shown).map((m) => (
+            <ModelMenuItem
+              key={m.slug}
+              model={m}
+              active={m.slug === selected.slug}
+              hidden={hidden.some((h) => h.slug === m.slug)}
+              onSelect={() => {
+                onChange(m.slug)
+                close()
+              }}
+              onToggleHidden={() => toggleHidden(m.slug)}
+            />
+          ))}
+          {hidden.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowHidden((v) => !v)}
+              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2 pb-1 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary"
+            >
+              {showHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {showHidden ? 'Hide hidden models' : `${hidden.length} hidden`}
+            </button>
+          ) : null}
+        </>
+      )}
     </FooterMenu>
   )
 }

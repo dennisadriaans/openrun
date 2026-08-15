@@ -706,6 +706,16 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_turn_events_message
       ON turn_events(messageId, seq ASC);
+    -- Models the installed CLIs actually offer, discovered in the background so
+    -- the composer never pays for it. The fingerprint identifies the binary the
+    -- rows came from; a mismatch is what schedules the next refresh. Pure
+    -- cache: safe to delete, rebuilt on the next boot.
+    CREATE TABLE IF NOT EXISTS model_catalog (
+      kind TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      models TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
   `)
 }
 
