@@ -21,167 +21,18 @@ import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
 import { PlanProposalsInChat } from './PlanProposalsInChat'
 import { looksLikePlanProposalArray, parsePlanProposals } from '../lib/planProposals'
-import { ApprovalEvent, CallEvent, PlanEvent, ThoughtEvent } from './chat/index'
-
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = []
-  const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g
-  let last = 0
-  let i = 0
-
-  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
-    if (match.index > last) nodes.push(text.slice(last, match.index))
-    const token = match[0]
-    const key = `${keyPrefix}-i${i++}`
-    if (token.startsWith('`')) {
-      nodes.push(
-        <code
-          key={key}
-          className="rounded bg-secondary px-1 py-0.5 mono text-[12px] text-foreground"
-        >
-          {token.slice(1, -1)}
-        </code>,
-      )
-    } else if (token.startsWith('**')) {
-      nodes.push(
-        <strong key={key} className="font-semibold text-foreground">
-          {token.slice(2, -2)}
-        </strong>,
-      )
-    } else {
-      nodes.push(
-        <em key={key} className="italic">
-          {token.slice(1, -1)}
-        </em>,
-      )
-    }
-    last = match.index + token.length
-  }
-  if (last < text.length) nodes.push(text.slice(last))
-  return nodes
-}
-
-function Markdown({ text }: { text: string }) {
-  const trimmed = text.trim()
-  if (
-    (trimmed.startsWith('{') || trimmed.startsWith('[')) &&
-    (() => {
-      try {
-        JSON.parse(trimmed)
-        return true
-      } catch {
-        return false
-      }
-    })()
-  ) {
-    return (
-      <pre className="scroll-thin my-2.5 overflow-x-auto rounded-lg border border-border bg-secondary p-3 mono text-[12px] leading-relaxed text-foreground">
-        <div className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">json</div>
-        {trimmed}
-      </pre>
-    )
-  }
-
-  const blocks: ReactNode[] = []
-  const lines = text.split('\n')
-  let listBuffer: string[] = []
-  let codeBuffer: string[] = []
-  let inCode = false
-  let codeLang = ''
-
-  const flushList = () => {
-    if (listBuffer.length === 0) return
-    const items = listBuffer
-    listBuffer = []
-    blocks.push(
-      <ul key={`ul-${blocks.length}`} className="my-2.5 space-y-1 pl-5">
-        {items.map((item, i) => (
-          <li key={i} className="list-disc text-sm leading-relaxed text-foreground">
-            {renderInline(item, `li-${blocks.length}-${i}`)}
-          </li>
-        ))}
-      </ul>,
-    )
-  }
-
-  for (const line of lines) {
-    if (line.trim().startsWith('```')) {
-      if (inCode) {
-        const code = codeBuffer.join('\n')
-        codeBuffer = []
-        inCode = false
-        blocks.push(
-          <pre
-            key={`code-${blocks.length}`}
-            className="scroll-thin my-2.5 overflow-x-auto rounded-lg border border-border bg-secondary p-3 mono text-[12px] leading-relaxed text-foreground"
-          >
-            {codeLang ? (
-              <div className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {codeLang}
-              </div>
-            ) : null}
-            {code}
-          </pre>,
-        )
-      } else {
-        flushList()
-        inCode = true
-        codeLang = line.trim().slice(3).trim()
-      }
-      continue
-    }
-
-    if (inCode) {
-      codeBuffer.push(line)
-      continue
-    }
-
-    const listMatch = line.match(/^\s*[-*]\s+(.*)$/) ?? line.match(/^\s*\d+\.\s+(.*)$/)
-    if (listMatch) {
-      listBuffer.push(listMatch[1]!)
-      continue
-    }
-    flushList()
-
-    const heading = line.match(/^(#{1,4})\s+(.*)$/)
-    if (heading) {
-      const level = heading[1]!.length
-      blocks.push(
-        <div
-          key={`h-${blocks.length}`}
-          className={`mt-5 mb-2 font-semibold text-foreground ${
-            level <= 2 ? 'text-lg' : level === 3 ? 'text-base' : 'text-sm'
-          }`}
-        >
-          {renderInline(heading[2]!, `h-${blocks.length}`)}
-        </div>,
-      )
-      continue
-    }
-
-    if (line.trim() === '') continue
-
-    blocks.push(
-      <p key={`p-${blocks.length}`} className="my-2.5 text-sm leading-relaxed text-foreground">
-        {renderInline(line, `p-${blocks.length}`)}
-      </p>,
-    )
-  }
-
-  flushList()
-  if (codeBuffer.length > 0) {
-    blocks.push(
-      <pre
-        key={`code-${blocks.length}`}
-        className="scroll-thin my-2.5 overflow-x-auto rounded-lg border border-border bg-secondary p-3 mono text-[12px] text-foreground"
-      >
-        {codeBuffer.join('\n')}
-      </pre>,
-    )
-  }
-
-  return <div className="min-w-0 break-words">{blocks}</div>
-}
+import {
+  ApprovalEvent,
+  CallEvent,
+  ChatMarkdown,
+  PlanEvent,
+  ThoughtEvent,
+  TurnFold,
+  WorkGroup,
+  WorkingIndicator,
+} from './chat/index'
+import { latestActivityLabel } from '../lib/turnActivity'
+import { foldedRows, planTurnFold, type TurnFoldStage, type TurnRowKind } from '../lib/turnFold'
 
 function isJsonlNoiseLine(line: string): boolean {
   const t = line.trim()
@@ -257,15 +108,18 @@ function eventPayload(ev: TurnEventRow): TurnEventPayload {
   }
 }
 
+type TranscriptRow = { id: string; kind: TurnRowKind; node: ReactNode }
+
 /**
- * Turn-event transcript.
+ * Turn-event transcript rows.
  *
  * Tool / MCP / skill / sub-agent calls render through `components/chat`
  * (`CallEvent` + `.chat-event--*` CSS). Pairing a start with its result is
  * only needed to attach the output — appearance comes from `callRole` /
- * ACP fields on the event itself.
+ * ACP fields on the event itself. Each row is tagged `text` (the agent's own
+ * prose) or `work` so `planTurnFold` can hide the work of a settled turn.
  */
-function TurnEvents({
+function turnRows({
   events,
   answering,
   onAnswer,
@@ -275,8 +129,9 @@ function TurnEvents({
   answering?: boolean
   onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile?: (path: string) => void
-}) {
-  const nodes: ReactNode[] = []
+}): TranscriptRow[] {
+  const rows: TranscriptRow[] = []
+  const push = (id: string, kind: TurnRowKind, node: ReactNode) => rows.push({ id, kind, node })
   let lastAssistant = ''
   const openCalls = new Map<string, TurnEventPayload>()
   const consumedResults = new Set<string>()
@@ -300,23 +155,26 @@ function TurnEvents({
     if (ev.kind === 'assistant' && payload.text) {
       if (payload.text.trim() === lastAssistant.trim()) continue
       lastAssistant = payload.text
-      nodes.push(
-        <div key={ev.id} className="min-w-0">
-          <Markdown text={payload.text} />
+      push(
+        ev.id,
+        'text',
+        <div className="min-w-0">
+          <ChatMarkdown text={payload.text} {...(onSelectFile ? { onSelectFile } : {})} />
         </div>,
       )
     } else if (ev.kind === 'thought' && payload.text) {
-      nodes.push(<ThoughtEvent key={ev.id} text={payload.text} />)
+      push(ev.id, 'work', <ThoughtEvent text={payload.text} />)
     } else if (ev.kind === 'plan' && payload.plan && payload.plan.length > 0) {
-      nodes.push(<PlanEvent key={ev.id} plan={payload.plan} />)
+      push(ev.id, 'work', <PlanEvent plan={payload.plan} />)
     } else if (ev.kind === 'tool_start') {
       const callId = payload.toolCallId
       if (callId) openCalls.set(callId, payload)
       const paired = callId ? resultByCallId.get(callId) : undefined
       if (paired) consumedResults.add(paired.id)
-      nodes.push(
+      push(
+        ev.id,
+        'work',
         <CallEvent
-          key={ev.id}
           name={payload.name}
           title={payload.title}
           callRole={payload.callRole ?? paired?.payload.callRole}
@@ -337,9 +195,10 @@ function TurnEvents({
       if (consumedResults.has(ev.id)) continue
       const callId = payload.toolCallId
       const opened = callId ? openCalls.get(callId) : undefined
-      nodes.push(
+      push(
+        ev.id,
+        'work',
         <CallEvent
-          key={ev.id}
           name={payload.name || opened?.name}
           title={payload.title || opened?.title}
           callRole={payload.callRole ?? opened?.callRole}
@@ -353,9 +212,10 @@ function TurnEvents({
         />,
       )
     } else if (ev.kind === 'error') {
-      nodes.push(
+      push(
+        ev.id,
+        'work',
         <div
-          key={ev.id}
           className="chat-event chat-event--error my-1.5 text-sm text-danger"
           data-chat-event="error"
         >
@@ -364,9 +224,10 @@ function TurnEvents({
       )
     } else if (ev.kind === 'approval_request') {
       const requestId = payload.requestId || ''
-      nodes.push(
+      push(
+        ev.id,
+        'work',
         <ApprovalEvent
-          key={ev.id}
           title={payload.title || payload.name || 'tool'}
           name={payload.name}
           callRole={payload.callRole}
@@ -380,8 +241,10 @@ function TurnEvents({
         />,
       )
     } else if (ev.kind === 'approval_resolved') {
-      nodes.push(
-        <div key={ev.id} className="my-1.5 text-sm text-tier-tertiary">
+      push(
+        ev.id,
+        'work',
+        <div className="my-1.5 text-sm text-tier-tertiary">
           Approval {payload.decision ?? 'resolved'}
           {payload.reason ? ` — ${payload.reason}` : ''}
         </div>,
@@ -397,9 +260,10 @@ function TurnEvents({
         rawLines.push(nextText)
         i += 1
       }
-      nodes.push(
+      push(
+        ev.id,
+        'work',
         <pre
-          key={ev.id}
           className="chat-event chat-event--raw scroll-thin my-1.5 max-h-80 overflow-auto rounded-lg border border-border bg-chrome/80 p-2.5 mono text-[11px] text-muted-foreground"
           data-chat-event="raw"
         >
@@ -412,15 +276,42 @@ function TurnEvents({
       payload.result.trim() &&
       payload.result.trim() !== lastAssistant.trim()
     ) {
-      nodes.push(
-        <div key={ev.id} className="min-w-0">
-          <Markdown text={payload.result} />
+      push(
+        ev.id,
+        'text',
+        <div className="min-w-0">
+          <ChatMarkdown text={payload.result} {...(onSelectFile ? { onSelectFile } : {})} />
         </div>,
       )
     }
   }
 
-  return <div className="space-y-1">{nodes}</div>
+  return rows
+}
+
+/**
+ * Draws transcript rows, batching each run of consecutive tool rows so a long
+ * stretch of them collapses behind one "+N previous tool calls" toggle.
+ */
+function TranscriptRows({ rows }: { rows: TranscriptRow[] }) {
+  const groups: { id: string; kind: TurnRowKind; rows: TranscriptRow[] }[] = []
+  for (const row of rows) {
+    const last = groups.at(-1)
+    if (row.kind === 'work' && last?.kind === 'work') last.rows.push(row)
+    else groups.push({ id: row.id, kind: row.kind, rows: [row] })
+  }
+
+  return (
+    <div className="space-y-1">
+      {groups.map((group) =>
+        group.kind === 'work' ? (
+          <WorkGroup key={group.id} rows={group.rows} />
+        ) : (
+          <div key={group.id}>{group.rows[0]?.node}</div>
+        ),
+      )}
+    </div>
+  )
 }
 
 function MessageMeta({
@@ -514,6 +405,7 @@ const AssistantMessage = memo(function AssistantMessage({
   installProjectName?: string | null
   installWorkspaceLabel?: string | null
 }) {
+  const [foldStage, setFoldStage] = useState<TurnFoldStage>('closed')
   const running = message.status === 'running'
   const hasEvents = message.events.length > 0
   // Planner / plain CLI dumps used to store one `raw` event per line while
@@ -536,39 +428,60 @@ const AssistantMessage = memo(function AssistantMessage({
       ? parsePlanProposals(message.content)
       : []
   const showPlanCards = planProposals.length > 0 && Boolean(runtimeId)
+  const activityLabel = running ? latestActivityLabel(message.events) : undefined
+  // A turn whose events are all tool calls still has an answer — it just lives
+  // on the message rather than in an `assistant` event (older rows, and CLIs
+  // that only report their reply once, at the end).
+  const eventsCarryText = message.events.some((e) => {
+    if (e.kind === 'assistant') return Boolean(eventPayload(e).text?.trim())
+    if (e.kind === 'turn_done') return Boolean(eventPayload(e).result?.trim())
+    return false
+  })
+  const showContentAfterEvents =
+    showEvents && !running && !eventsCarryText && Boolean(message.content.trim())
+
+  const rows = showEvents
+    ? turnRows({
+        events: message.events,
+        answering,
+        ...(onAnswer ? { onAnswer } : {}),
+        onSelectFile,
+      })
+    : []
+  const fold = planTurnFold(rows, !running)
+  const { visible: visibleRows, moreCount } = foldedRows(rows, fold, foldStage)
 
   return (
     <div className="group/assistant space-y-3">
       <div className="relative min-w-0 px-1 py-0.5">
-        {running && !showEvents && !message.content ? (
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30" />
-              <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:200ms]" />
-              <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:400ms]" />
-            </span>
-            <span>Working…</span>
-          </div>
-        ) : null}
-
         {showEvents ? (
           <>
-            {running ? (
-              <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground/70 tabular-nums">
-                <span className="inline-flex items-center gap-[3px]">
-                  <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30" />
-                  <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:200ms]" />
-                  <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:400ms]" />
-                </span>
-                <span>Working…</span>
+            {fold.foldable ? (
+              <TurnFold
+                startedAt={message.createdAt}
+                finishedAt={message.finishedAt}
+                cancelled={message.status === 'cancelled'}
+                expanded={foldStage !== 'closed'}
+                onToggle={() => setFoldStage(foldStage === 'closed' ? 'partial' : 'closed')}
+              />
+            ) : null}
+            {moreCount > 0 && foldStage !== 'closed' ? (
+              <button
+                type="button"
+                aria-expanded={foldStage === 'all'}
+                onClick={() => setFoldStage(foldStage === 'all' ? 'partial' : 'all')}
+                className="mb-2 block cursor-pointer rounded-md px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {foldStage === 'all' ? 'Hide' : 'Load'} {moreCount} earlier{' '}
+                {moreCount === 1 ? 'step' : 'steps'}
+              </button>
+            ) : null}
+            <TranscriptRows rows={visibleRows} />
+            {showContentAfterEvents ? (
+              <div className="mt-2">
+                <ChatMarkdown text={message.content} onSelectFile={onSelectFile} />
               </div>
             ) : null}
-            <TurnEvents
-              events={message.events}
-              answering={answering}
-              onAnswer={onAnswer}
-              onSelectFile={onSelectFile}
-            />
           </>
         ) : showPlanCards && runtimeId ? (
           <PlanProposalsInChat
@@ -583,9 +496,16 @@ const AssistantMessage = memo(function AssistantMessage({
             workspaceLabel={installWorkspaceLabel}
           />
         ) : !running && message.content ? (
-          <Markdown text={message.content} />
+          <ChatMarkdown text={message.content} onSelectFile={onSelectFile} />
         ) : !running ? (
           <div className="text-sm text-muted-foreground/50">(empty response)</div>
+        ) : null}
+
+        {running ? (
+          <WorkingIndicator
+            startedAt={message.createdAt}
+            {...(activityLabel ? { step: activityLabel } : {})}
+          />
         ) : null}
 
         {running && !showEvents && message.stdout && !looksLikeJsonlStdout(message.stdout) ? (
@@ -953,7 +873,11 @@ export function Chat({
           style={{ paddingBottom: composerHeight + 16 }}
         >
           {messages.map((message) =>
-            message.role === 'user' ? (
+            message.role === 'system' ? (
+              <p key={message.id} className="text-ui-sm text-tier-quaternary">
+                {message.content}
+              </p>
+            ) : message.role === 'user' ? (
               <UserMessage key={message.id} message={message} />
             ) : (
               <AssistantMessage

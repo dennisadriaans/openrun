@@ -10,6 +10,8 @@
  * hold up a run or throw into the executor's close handler.
  */
 import { spawn } from 'node:child_process'
+import { isFailingOutcome, latestPass } from '../lib/checkPass.ts'
+import { openrunEnv } from '../lib/openrunEnv.ts'
 import {
   assertWebhookUrl,
   buildRunNotification,
@@ -20,7 +22,6 @@ import {
   type NotifierKind,
   type RunNotification,
 } from '../lib/notify.ts'
-import { isFailingOutcome, latestPass } from '../lib/checkPass.ts'
 import { parseVerdict, type RunVerdict } from '../lib/verdict.ts'
 import {
   getDb,
@@ -32,7 +33,7 @@ import {
 
 /** Where the app is reachable, for the links inside notifications. */
 function appBaseUrl(): string {
-  return process.env.AGENTOPS_BASE_URL || 'http://localhost:3000'
+  return openrunEnv('BASE_URL') || 'http://localhost:3000'
 }
 
 const DELIVERY_TIMEOUT_MS = 10_000

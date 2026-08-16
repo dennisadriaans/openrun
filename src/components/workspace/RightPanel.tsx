@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { FolderTree, GitCompare, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { DiffPanel } from '../DiffPanel'
 import { ChecksPanel } from '../ChecksPanel'
@@ -59,7 +59,20 @@ export function RightPanel({
   // Path opened for editing from the browse tree, kept separate from
   // `selectedPath` so opening a diff and editing a file don't fight.
   const [editingPath, setEditingPath] = useState<string | null>(null)
+  // Held here, not in FileTree: the tree unmounts while the editor is open, so
+  // closing a file would otherwise drop the reader back at a collapsed root.
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set())
+  // Survives closing the editor, so the tree still marks where the reader was.
+  const [lastBrowsedPath, setLastBrowsedPath] = useState<string | null>(null)
   const changedPaths = useMemo(() => new Set(files.map((f) => f.path)), [files])
+
+  const toggleDir = useCallback((dir: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(dir)) next.add(dir)
+      return next
+    })
+  }, [])
 
   const viewChanges = () => {
     setFilesView('changed')
@@ -191,9 +204,14 @@ export function RightPanel({
         {filesView === 'browse' ? (
           <FileTree
             runId={runId}
-            selectedPath={editingPath}
-            onSelect={setEditingPath}
+            selectedPath={lastBrowsedPath}
+            onSelect={(path) => {
+              setLastBrowsedPath(path)
+              setEditingPath(path)
+            }}
             changedPaths={changedPaths}
+            expandedDirs={expandedDirs}
+            onToggleDir={toggleDir}
           />
         ) : filesView === 'checks' ? (
           checkResults.length > 0 ? (

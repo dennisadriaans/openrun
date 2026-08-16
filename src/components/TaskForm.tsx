@@ -24,9 +24,16 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
+import { NATIVE_RESUME_DEFAULT_PROMPT, nativeResumeKindFor } from '../lib/nativeSessions'
 import { DEFAULT_RUN_TIMEOUT_MS } from '../lib/runBudget'
 import { MAX_REPAIR_ATTEMPTS } from '../lib/verdict'
-import { defaultEffort, defaultModel, findModel, modelsForBin } from '../lib/models'
+import {
+  defaultEffort,
+  defaultModel,
+  findModel,
+  modelsForRuntime,
+  visibleModels,
+} from '../lib/models'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import {
   useProjects,
@@ -35,12 +42,17 @@ import {
   useWorkspaces,
   useIntegrations,
   useIntegrationProviders,
+  useNativeSessions,
+  useProjectBranches,
+  useCreateWorkspace,
 } from '../lib/queries'
+import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
 import {
   HOURLY_MINUTES,
   HOUR_TIMES,
   WEEKDAYS,
   buildCron,
+  defaultOnceAtCron,
   formatNextRunLabel,
   formatTime,
   formatTimezoneOffset,
@@ -57,7 +69,14 @@ import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { missingRuntimeBinaryMessage } from '../lib/runtimeBinary'
 import { AddProjectModal } from './AddProjectModal'
-import { EffortPicker, ModelPicker, ProjectPicker, RuntimePicker } from './ComposerControls'
+import {
+  EffortPicker,
+  ModelPicker,
+  ProjectPicker,
+  RuntimePicker,
+  BranchPicker,
+} from './ComposerControls'
+import { NativeSessionMenu } from './NativeSessionMenu'
 import { ActiveToggle, Button, inputClass } from './ui'
 
 const SCHEDULE_OPTIONS: Array<{
@@ -204,16 +223,19 @@ function ChipSelect({
 
 function ScheduleTriggerRow({
   cron,
+  fireOnce,
   onChange,
   onRemove,
 }: {
   cron: string
+  fireOnce?: boolean
   onChange: (cron: string) => void
   onRemove: () => void
 }) {
   const schedule = useMemo(() => parseSchedule(cron), [cron])
   const tz = useMemo(() => formatTimezoneOffset(), [])
   const nextRun = useMemo(() => formatNextRunLabel(cron), [cron])
+  const onceAt = Boolean(fireOnce && schedule.kind === 'daily')
 
   const setSchedule = (next: ParsedSchedule) => onChange(buildCron(next))
 
@@ -232,16 +254,59 @@ function ScheduleTriggerRow({
     label: d.label,
   }))
 
+  const onceHourOptions = Array.from({ length: 24 }, (_, hour) => ({
+    value: String(hour),
+    label: String(hour).padStart(2, '0'),
+  }))
+  const onceMinuteOptions = Array.from({ length: 60 }, (_, minute) => ({
+    value: String(minute),
+    label: String(minute).padStart(2, '0'),
+  }))
+
   return (
     <div className="flex items-center gap-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
       <Clock className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1.5">
-        {schedule.kind === 'custom' ? (
+        {onceAt && schedule.kind === 'daily' ? (
+          <>
+            <span className="text-ui-base text-foreground">Once at</span>
+            <ChipSelect
+              ariaLabel="Hour"
+              label={String(schedule.hour).padStart(2, '0')}
+              value={String(schedule.hour)}
+              options={onceHourOptions}
+              onChange={(value) =>
+                setSchedule({ kind: 'daily', hour: Number(value), minute: schedule.minute })
+              }
+            />
+            <span className="text-ui-base text-tier-quaternary">:</span>
+            <ChipSelect
+              ariaLabel="Minute"
+              label={String(schedule.minute).padStart(2, '0')}
+              value={String(schedule.minute)}
+              options={onceMinuteOptions}
+              onChange={(value) =>
+                setSchedule({ kind: 'daily', hour: schedule.hour, minute: Number(value) })
+              }
+            />
+            <span className="text-ui-base text-foreground">{tz}</span>
+            {nextRun ? (
+              <span className="text-ui-sm text-tier-quaternary">{nextRun} · then pause</span>
+            ) : (
+              <span className="text-ui-sm text-tier-quaternary">then pause</span>
+            )}
+          </>
+        ) : schedule.kind === 'custom' ? (
           <>
             <span className="text-ui-base text-foreground">{scheduleLeadIn(schedule)}</span>
             <span className="mono text-ui-sm text-tier-quaternary">{cron}</span>
             <span className="text-ui-base text-foreground">{tz}</span>
-            {nextRun ? <span className="text-ui-sm text-tier-quaternary">{nextRun}</span> : null}
+            {nextRun ? (
+              <span className="text-ui-sm text-tier-quaternary">
+                {nextRun}
+                {fireOnce ? ' · then pause' : ''}
+              </span>
+            ) : null}
           </>
         ) : (
           <>
@@ -297,7 +362,12 @@ function ScheduleTriggerRow({
             )}
 
             <span className="text-ui-base text-foreground">{tz}</span>
-            {nextRun ? <span className="text-ui-sm text-tier-quaternary">{nextRun}</span> : null}
+            {nextRun ? (
+              <span className="text-ui-sm text-tier-quaternary">
+                {nextRun}
+                {fireOnce ? ' · then pause' : ''}
+              </span>
+            ) : null}
           </>
         )}
       </div>
@@ -316,11 +386,13 @@ function ScheduleTriggerRow({
 function TriggerAddMenu({
   onPickPreset,
   onCustom,
+  onOnceAt,
   onRunOnce,
   onWebhook,
 }: {
   onPickPreset: (cron: string) => void
   onCustom: () => void
+  onOnceAt: () => void
   onRunOnce: () => void
   onWebhook: () => void
 }) {
@@ -474,6 +546,20 @@ function TriggerAddMenu({
                   onMouseEnter={deferCloseSchedule}
                   onClick={() => {
                     closeAll()
+                    onOnceAt()
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base text-foreground/85 transition-colors hover:bg-hover hover:text-foreground"
+                >
+                  <Clock className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
+                  <span className="min-w-0 flex-1">Once at…</span>
+                  <span className="shrink-0 text-ui-sm text-tier-quaternary">then pause</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onMouseEnter={deferCloseSchedule}
+                  onClick={() => {
+                    closeAll()
                     onRunOnce()
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base text-foreground/85 transition-colors hover:bg-hover hover:text-foreground"
@@ -564,6 +650,9 @@ export type TaskFormValues = {
   maxRepairAttempts?: number
   /** Wall-clock budget in ms; 0 = the app default. */
   timeoutMs?: number
+  resumeSessionId?: string
+  resumeSessionLabel?: string
+  fireOnce?: number
 }
 
 const empty: TaskFormValues = {
@@ -581,6 +670,9 @@ const empty: TaskFormValues = {
   verifyEnabled: 1,
   maxRepairAttempts: 1,
   timeoutMs: 0,
+  resumeSessionId: '',
+  resumeSessionLabel: '',
+  fireOnce: 0,
 }
 
 function WebhookTriggerRow({
@@ -790,9 +882,12 @@ export function TaskForm({
   const [promptError, setPromptError] = useState<string | null>(null)
   const [showAddProject, setShowAddProject] = useState(false)
   const [showVerificationSettings, setShowVerificationSettings] = useState(false)
+  const [nativeError, setNativeError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
+  const { data: gitBranches } = useProjectBranches(projectId || undefined)
+  const createWorkspace = useCreateWorkspace()
 
   useEffect(() => {
     if (!v.workspaceId || projectId) return
@@ -810,7 +905,19 @@ export function TaskForm({
   }, [runtimes, v.runtimeId, isNew, prefs.runtimeId])
 
   const runtime = runtimes?.find((r) => r.id === v.runtimeId) ?? runtimes?.[0]
-  const models = useMemo(() => (runtime ? modelsForBin(runtime.bin) : []), [runtime])
+  const models = useMemo(() => (runtime ? modelsForRuntime(runtime) : []), [runtime])
+  const nativeQuery = useNativeSessions(
+    { workspaceId: v.workspaceId },
+    { enabled: hasWorkspaceId(v.workspaceId) },
+  )
+  const workspaceForNativeRef = useRef(v.workspaceId)
+  useEffect(() => {
+    if (workspaceForNativeRef.current === v.workspaceId) return
+    workspaceForNativeRef.current = v.workspaceId
+    setV((prev) =>
+      prev.resumeSessionId ? { ...prev, resumeSessionId: '', resumeSessionLabel: '' } : prev,
+    )
+  }, [v.workspaceId])
 
   // Re-seed model/effort whenever the active runtime's catalog changes, pulling
   // the last-used choice for that runtime before falling back to the default.
@@ -830,7 +937,10 @@ export function TaskForm({
     const savedModel = !alreadySeeded && !isNew ? findModel(models, model) : undefined
     const current = alreadySeeded ? findModel(models, model) : undefined
     const selected =
-      savedModel ?? current ?? findModel(models, remembered.model) ?? defaultModel(models)
+      savedModel ??
+      current ??
+      findModel(models, remembered.model) ??
+      defaultModel(visibleModels(models, prefs.hiddenModels))
     if (!selected) return
     if (selected.slug !== model) setModel(selected.slug)
     if (savedModel) {
@@ -847,7 +957,18 @@ export function TaskForm({
 
   const changeRuntimeId = (id: string) => {
     seededRuntimeRef.current = null
-    set('runtimeId', id)
+    setV((prev) => {
+      const nextRuntime = runtimes?.find((r) => r.id === id)
+      const prevKind = nativeResumeKindFor(runtimes?.find((r) => r.id === prev.runtimeId) ?? {})
+      const nextKind = nativeResumeKindFor(nextRuntime ?? {})
+      const keepNative = nextKind !== null && nextKind === prevKind
+      return {
+        ...prev,
+        runtimeId: id,
+        resumeSessionId: keepNative ? prev.resumeSessionId : '',
+        resumeSessionLabel: keepNative ? prev.resumeSessionLabel : '',
+      }
+    })
     remember({ runtimeId: id })
   }
   const changeModel = (slug: string) => {
@@ -873,6 +994,43 @@ export function TaskForm({
     }
     const list = (allWorkspaces ?? []).filter((w) => w.projectId === pid)
     set('workspaceId', pickDefaultWorkspace(list)?.id ?? '')
+  }
+
+  const branchChoices = useMemo(
+    () =>
+      projectBranchChoices({
+        gitBranches: gitBranches ?? [],
+        workspaces: (projectWorkspaces ?? []).map((w) => ({
+          id: w.id,
+          branch: w.branch,
+          kind: w.kind,
+          status: w.status,
+          activeRunId: w.activeRunId,
+        })),
+      }),
+    [gitBranches, projectWorkspaces],
+  )
+
+  const selectBranch = async (id: string) => {
+    setWorkspaceError(null)
+    const pending = parsePendingGitBranchId(id)
+    if (!pending) {
+      set('workspaceId', id)
+      return
+    }
+    if (!projectId) return
+    const gitRow = (gitBranches ?? []).find((b) => b.name === pending)
+    try {
+      const ws = await createWorkspace.mutateAsync({
+        projectId,
+        branch: pending,
+        fromBranch: pending,
+        useExistingBranch: gitRow ? !gitRow.remote : true,
+      })
+      set('workspaceId', ws.id)
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   useEffect(() => {
@@ -906,6 +1064,10 @@ export function TaskForm({
       setPromptError(emptyTaskPromptMessage())
       return null
     }
+    if ((v.resumeSessionId ?? '').trim() && !nativeResumeKindFor(runtime ?? {})) {
+      setNativeError('Pick a CLI chat to resume, or switch to a new conversation.')
+      return null
+    }
     if (v.enabled && !runtime?.installed) {
       setWorkspaceError(null)
       setPromptError(null)
@@ -920,6 +1082,7 @@ export function TaskForm({
     }
     setWorkspaceError(null)
     setPromptError(null)
+    setNativeError(null)
     const name = v.name.trim() || 'Untitled'
     const saved = await save.mutateAsync({
       id: v.id,
@@ -939,6 +1102,9 @@ export function TaskForm({
       verifyEnabled: verifyEnabled,
       maxRepairAttempts: repairAttempts,
       timeoutMinutes: timeoutMinutes,
+      resumeSessionId: v.resumeSessionId ?? '',
+      resumeSessionLabel: v.resumeSessionLabel ?? '',
+      fireOnce: Boolean(v.fireOnce) && Boolean(cron),
     })
     return { id: saved.id, name }
   }
@@ -1001,7 +1167,9 @@ export function TaskForm({
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui-base">
           <ActiveToggle checked={v.enabled} onChange={(on) => set('enabled', on)} />
 
-          <span className="text-tier-quaternary">|</span>
+          <span aria-hidden className="text-tier-quaternary">
+            |
+          </span>
 
           <ProjectPicker
             projects={projects ?? []}
@@ -1011,7 +1179,58 @@ export function TaskForm({
             onChange={selectProject}
             onAddProject={() => setShowAddProject(true)}
           />
+
+          <span aria-hidden className="text-tier-quaternary">
+            |
+          </span>
+
+          <BranchPicker
+            workspaces={branchChoices}
+            workspaceId={v.workspaceId}
+            disabled={!projectId || createWorkspace.isPending}
+            placeholder={createWorkspace.isPending ? 'Opening branch…' : 'Select branch'}
+            onChange={(id) => void selectBranch(id)}
+          />
+
+          <span aria-hidden className="text-tier-quaternary">
+            |
+          </span>
+
+          <NativeSessionMenu
+            workspaceId={v.workspaceId}
+            groups={nativeQuery.data?.groups ?? []}
+            loading={nativeQuery.isFetching}
+            error={nativeQuery.data?.error}
+            selectedId={v.resumeSessionId ?? ''}
+            selectedLabel={v.resumeSessionLabel ?? ''}
+            disabled={!hasWorkspaceId(v.workspaceId)}
+            disabledReason={!projectId ? 'Select a project first' : 'Select a branch first'}
+            onSelectNew={() => {
+              setNativeError(null)
+              setV((prev) => ({ ...prev, resumeSessionId: '', resumeSessionLabel: '' }))
+            }}
+            onSelect={(session, group) => {
+              setNativeError(null)
+              seededRuntimeRef.current = null
+              setV((prev) => ({
+                ...prev,
+                runtimeId: group.runtimeId,
+                resumeSessionId: session.sessionId,
+                resumeSessionLabel: session.title,
+                prompt: hasTaskPrompt(prev.prompt) ? prev.prompt : NATIVE_RESUME_DEFAULT_PROMPT,
+                fireOnce: prev.cron.trim() ? 1 : prev.fireOnce,
+              }))
+              remember({ runtimeId: group.runtimeId })
+            }}
+          />
         </div>
+        {nativeError ? <p className="mt-2 text-[12px] text-rose-300">{nativeError}</p> : null}
+        {(v.resumeSessionId ?? '').trim() ? (
+          <p className="mt-1 text-ui-sm text-tier-quaternary">
+            Continues that chat unattended with skip-permissions, even if it was a supervised
+            session. Open Run must be running at fire time.
+          </p>
+        ) : null}
       </header>
 
       {showAddProject ? (
@@ -1096,6 +1315,7 @@ export function TaskForm({
             {v.cron ? (
               <ScheduleTriggerRow
                 cron={v.cron}
+                fireOnce={Boolean(v.fireOnce)}
                 onChange={(cron) => {
                   set('cron', cron)
                   setRunOnce(false)
@@ -1103,6 +1323,7 @@ export function TaskForm({
                 }}
                 onRemove={() => {
                   set('cron', '')
+                  set('fireOnce', 0)
                   setAddingTrigger(false)
                   setTriggerDraft('')
                   setTriggerError(null)
@@ -1211,6 +1432,7 @@ export function TaskForm({
                   onPickPreset={(cron) => {
                     setRunOnce(false)
                     set('cron', cron)
+                    set('fireOnce', (v.resumeSessionId ?? '').trim() ? 1 : 0)
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)
@@ -1218,11 +1440,21 @@ export function TaskForm({
                   onCustom={() => {
                     setRunOnce(false)
                     set('cron', '')
+                    set('fireOnce', (v.resumeSessionId ?? '').trim() ? 1 : 0)
                     setAddingTrigger(true)
+                    setTriggerError(null)
+                  }}
+                  onOnceAt={() => {
+                    setRunOnce(false)
+                    set('cron', defaultOnceAtCron())
+                    set('fireOnce', 1)
+                    setAddingTrigger(false)
+                    setTriggerDraft('')
                     setTriggerError(null)
                   }}
                   onRunOnce={() => {
                     set('cron', '')
+                    set('fireOnce', 0)
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)

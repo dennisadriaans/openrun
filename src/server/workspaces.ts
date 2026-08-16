@@ -8,7 +8,7 @@
  * working tree instead of fighting other runs (or the user's editor) over the
  * same files.
  *
- * Worktrees always live under `~/.agentops/worktrees/<projectSlug>/<branch>`,
+ * Worktrees always live under `~/.openrun/worktrees/<projectSlug>/<branch>`,
  * never inside the project's own repo directory. That keeps them out of the
  * agent's own file listings when it `ls`s the repo root, keeps `git status` in
  * the user's primary checkout clean, and means archiving a workspace can never
@@ -35,7 +35,7 @@ import {
 import { assertFolderName } from '../lib/folderName'
 import { assertWorkspaceReady } from '../lib/workspaceReady'
 import {
-  agentopsHome,
+  openrunHome,
   forgetDeletedProjectPath,
   getDb,
   rememberDeletedProjectPath,
@@ -44,6 +44,7 @@ import {
   type WorkspaceRow,
 } from './db'
 import * as git from './git'
+import type { GitBranchRow } from '../lib/gitBranches.ts'
 
 /**
  * Guess the verification checks for a freshly added repo from its
@@ -280,7 +281,7 @@ export function addProject(input: AddProjectInput): ProjectRow {
   if (!url) throw new Error('A URL is required to clone a project')
 
   const slug = slugFromUrl(url)
-  const dest = uniqueDestPath(path.join(agentopsHome(), 'repos', slug))
+  const dest = uniqueDestPath(path.join(openrunHome(), 'repos', slug))
   forgetDeletedProjectPath(dest)
   git.cloneRepo({ url, dest })
 
@@ -390,7 +391,7 @@ export function deleteProject(id: string, deleteFiles: boolean): void {
 
   // NEVER delete a registered (managed=0) project's directory — the user owns
   // that repo and it may hold work this app knows nothing about. Only a
-  // managed clone (one this app created under ~/.agentops/repos) may have its
+  // managed clone (one this app created under ~/.openrun/repos) may have its
   // files removed, and only when the caller explicitly opted in.
   if (project.managed === 1 && deleteFiles && existsSync(project.path)) {
     rmSync(project.path, { recursive: true, force: true })
@@ -437,6 +438,12 @@ export function listWorkspaces(projectId?: string): WorkspaceWithMeta[] {
   return rows.map((ws) => toWorkspaceWithMeta(db, ws))
 }
 
+export function listProjectBranches(projectId: string): GitBranchRow[] {
+  const project = getProject(projectId)
+  if (!project || !existsSync(project.path) || !git.isRepo(project.path)) return []
+  return git.listRecentBranches(project.path)
+}
+
 export function getWorkspace(id: string): WorkspaceRow | undefined {
   return getDb().prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as
     | WorkspaceRow
@@ -457,7 +464,7 @@ export function createWorkspace(input: {
   if (!branch) throw new Error('A branch name is required')
 
   const wsPath = uniqueDestPath(
-    path.join(agentopsHome(), 'worktrees', project.slug, slugify(branch)),
+    path.join(openrunHome(), 'worktrees', project.slug, slugify(branch)),
   )
 
   // Insert as 'creating' BEFORE touching git so the UI has a row to show

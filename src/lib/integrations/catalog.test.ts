@@ -11,7 +11,6 @@ test('isIntegrationProviderId accepts catalog ids only', () => {
   for (const id of INTEGRATION_PROVIDER_IDS) {
     assert.equal(isIntegrationProviderId(id), true)
   }
-  assert.equal(isIntegrationProviderId('slack'), false)
   assert.equal(isIntegrationProviderId('github-issues'), false)
   assert.equal(isIntegrationProviderId(''), false)
 })

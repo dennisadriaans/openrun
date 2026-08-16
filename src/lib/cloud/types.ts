@@ -20,23 +20,28 @@ export type CloudStatus = {
   userId: string | null
   machineId: string
   relay: CloudRelayStatus
+  /** True once the user chose to keep running without an account. */
+  onboardingSkipped: boolean
 }
 
 export type CloudSessionStored = CloudSessionPublic & {
   accessToken: string
   refreshToken: string
+  /** Epoch ms; 0 when the control plane did not report one. */
+  accessExpiresAt: number
 }
 
+/** Identity is established by the ticket during the upgrade; this only asks
+ * the relay to flush anything queued while the machine was offline. */
 export type RelayHello = {
   type: 'hello'
   machineId: string
-  accessToken: string
 }
 
 export type RelayHelloOk = {
   type: 'hello_ok'
   userId: string
-  email: string
+  machineId: string
 }
 
 export type RelayHelloErr = {

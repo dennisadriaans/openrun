@@ -52,9 +52,17 @@ export function highlightLines(code: string, path: string): HighlightToken[][] {
  * each get tokens from their own reconstructed source.
  */
 export function highlightHunk(hunk: DiffHunk, path: string): Map<DiffLine, HighlightToken[]> {
+  return highlightDiffLines(hunk.lines, path)
+}
+
+/** Same as `highlightHunk` for rows that never came from a unified diff. */
+export function highlightDiffLines(
+  lines: DiffLine[],
+  path: string,
+): Map<DiffLine, HighlightToken[]> {
   const map = new Map<DiffLine, HighlightToken[]>()
-  const oldSide = hunk.lines.filter((line) => line.type !== 'add')
-  const newSide = hunk.lines.filter((line) => line.type !== 'delete')
+  const oldSide = lines.filter((line) => line.type !== 'add')
+  const newSide = lines.filter((line) => line.type !== 'delete')
 
   const oldTokens = highlightLines(oldSide.map((line) => line.content).join('\n'), path)
   const newTokens = highlightLines(newSide.map((line) => line.content).join('\n'), path)

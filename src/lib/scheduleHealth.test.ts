@@ -133,6 +133,23 @@ describe('nextRunDetailLabel', () => {
     )
   })
 
+  it('notes that a fire-once schedule pauses after the next run', () => {
+    assert.equal(
+      nextRunDetailLabel({
+        enabled: true,
+        cron: '1 3 * * *',
+        cronValid: true,
+        workspaceValid: true,
+        workspaceReady: true,
+        runtimeInstalled: true,
+        promptValid: true,
+        fireOnce: true,
+        relativeNext: 'in 3h',
+      }),
+      'in 3h · then pause',
+    )
+  })
+
   it('falls back to an em dash when next time is missing', () => {
     assert.equal(
       nextRunDetailLabel({

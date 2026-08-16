@@ -18,6 +18,16 @@ export function formatTime(hour: number, minute: number): string {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
+/** Cron for the next local hour, used as the Once-at default. */
+export function defaultOnceAtCron(from = new Date()): string {
+  const next = new Date(from.getTime())
+  next.setSeconds(0, 0)
+  next.setMilliseconds(0)
+  next.setMinutes(0)
+  next.setHours(next.getHours() + 1)
+  return `${next.getMinutes()} ${next.getHours()} * * *`
+}
+
 /** Local timezone label like `GMT+2` / `GMT-5`. */
 export function formatTimezoneOffset(date = new Date()): string {
   const offsetMin = -date.getTimezoneOffset()

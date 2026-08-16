@@ -10,7 +10,6 @@ import type {
   NotifierInput,
   PreviewCommandInput,
   RuntimeInput,
-  SlackSettingsInput,
   TaskInput,
   UpdateIntegrationInput,
 } from '../server/core'
@@ -109,6 +108,17 @@ export const removeTask = createServerFn({ method: 'POST' })
 export const runTaskNow = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => (await core()).runTaskNow(data.id))
+
+export const listNativeSessions = createServerFn({ method: 'GET' })
+  .validator(
+    (d: {
+      workspaceId: string
+      kind?: 'claude' | 'codex' | 'grok' | 'antigravity'
+      offset?: number
+      limit?: number
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).listNativeSessions(data))
 
 // --- Runs ------------------------------------------------------------------
 
@@ -306,6 +316,10 @@ export const listWorkspaces = createServerFn({ method: 'GET' })
   .validator((d: { projectId?: string }) => d)
   .handler(async ({ data }) => (await core()).listWorkspaces(data.projectId))
 
+export const listProjectBranches = createServerFn({ method: 'GET' })
+  .validator((d: { projectId: string }) => d)
+  .handler(async ({ data }) => (await core()).listProjectBranches(data.projectId))
+
 export const createWorkspace = createServerFn({ method: 'POST' })
   .validator(
     (d: { projectId: string; branch: string; fromBranch?: string; useExistingBranch?: boolean }) =>
@@ -435,33 +449,6 @@ export const removeDevice = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
-// --- Slack ------------------------------------------------------------------
-
-export const slackSettings = createServerFn({ method: 'GET' }).handler(async () =>
-  (await core()).getSlackSettingsPublic(),
-)
-
-export const slackStatus = createServerFn({ method: 'GET' }).handler(async () =>
-  (await core()).slackConnectionStatus(),
-)
-
-export const saveSlackSettings = createServerFn({ method: 'POST' })
-  .validator((d: SlackSettingsInput) => d)
-  .handler(async ({ data }) => (await core()).saveSlackSettings(data))
-
-export const testSlackConnection = createServerFn({ method: 'POST' }).handler(async () => {
-  try {
-    return await (await core()).testSlackConnection()
-  } catch (error) {
-    return {
-      ok: false,
-      teamName: '',
-      botUserId: '',
-      message: (error as Error).message,
-    }
-  }
-})
-
 // --- Cloud -----------------------------------------------------------------
 
 export const cloudStatus = createServerFn({ method: 'GET' }).handler(async () =>
@@ -480,6 +467,10 @@ export const completeCloudLogin = createServerFn({ method: 'POST' })
     await c.afterSignIn()
     return { email: session.email, userId: session.userId }
   })
+
+export const skipCloudOnboarding = createServerFn({ method: 'POST' }).handler(async () =>
+  (await core()).skipCloudOnboarding(),
+)
 
 export const signOutCloud = createServerFn({ method: 'POST' }).handler(async () => {
   await (await core()).signOutAndDisconnect()

@@ -62,11 +62,23 @@ export function ProviderIcon({
   if (kind === 'claude') return <ClaudeIcon className={className} />
   if (kind === 'codex') return <OpenAIIcon className={className} />
   if (kind === 'grok') return <GrokIcon className={className} />
+  if (kind === 'antigravity') return <AntigravityIcon className={className} />
   return (
     <span
       className={`inline-flex items-center justify-center rounded-sm bg-secondary text-[9px] font-semibold text-muted-foreground ${className}`}
     >
       AI
     </span>
+  )
+}
+
+export function AntigravityIcon({ className, ...props }: IconProps) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12 2 9.9 8.1 3 10.2l6.9 2.1L12 22l2.1-9.7 6.9-2.1-6.9-2.1L12 2Z"
+      />
+    </svg>
   )
 }

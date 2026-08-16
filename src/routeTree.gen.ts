@@ -15,7 +15,7 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PlannerRouteImport } from './routes/planner'
 import { Route as RuntimesRouteImport } from './routes/runtimes'
-import { Route as SlackRouteImport } from './routes/slack'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as CloudCallbackRouteImport } from './routes/cloud.callback'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsProviderRouteImport } from './routes/integrations.$provider'
@@ -30,8 +30,6 @@ import { Route as ApiMobileDashboardRouteImport } from './routes/api/mobile/dash
 import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
 import { Route as ApiMobilePairRouteImport } from './routes/api/mobile/pair'
 import { Route as ApiMobileUnpairRouteImport } from './routes/api/mobile/unpair'
-import { Route as ApiSlackEventsRouteImport } from './routes/api/slack/events'
-import { Route as ApiSlackInteractionsRouteImport } from './routes/api/slack/interactions'
 import { Route as ApiWebhooksIntegrationIdRouteImport } from './routes/api/webhooks/$integrationId'
 import { Route as ApiMobileActivityStreamRouteImport } from './routes/api/mobile/activity.stream'
 import { Route as ApiMobilePushRegisterRouteImport } from './routes/api/mobile/push.register'
@@ -81,9 +79,9 @@ const RuntimesRoute = RuntimesRouteImport.update({
   path: '/runtimes',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SlackRoute = SlackRouteImport.update({
-  id: '/slack',
-  path: '/slack',
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CloudCallbackRoute = CloudCallbackRouteImport.update({
@@ -154,16 +152,6 @@ const ApiMobilePairRoute = ApiMobilePairRouteImport.update({
 const ApiMobileUnpairRoute = ApiMobileUnpairRouteImport.update({
   id: '/api/mobile/unpair',
   path: '/api/mobile/unpair',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiSlackEventsRoute = ApiSlackEventsRouteImport.update({
-  id: '/api/slack/events',
-  path: '/api/slack/events',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiSlackInteractionsRoute = ApiSlackInteractionsRouteImport.update({
-  id: '/api/slack/interactions',
-  path: '/api/slack/interactions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiWebhooksIntegrationIdRoute =
@@ -272,7 +260,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
-  '/slack': typeof SlackRoute
+  '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -287,8 +275,6 @@ export interface FileRoutesByFullPath {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
-  '/api/slack/events': typeof ApiSlackEventsRoute
-  '/api/slack/interactions': typeof ApiSlackInteractionsRoute
   '/api/webhooks/$integrationId': typeof ApiWebhooksIntegrationIdRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
@@ -314,7 +300,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
-  '/slack': typeof SlackRoute
+  '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -329,8 +315,6 @@ export interface FileRoutesByTo {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
-  '/api/slack/events': typeof ApiSlackEventsRoute
-  '/api/slack/interactions': typeof ApiSlackInteractionsRoute
   '/api/webhooks/$integrationId': typeof ApiWebhooksIntegrationIdRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
@@ -358,7 +342,7 @@ export interface FileRoutesById {
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
-  '/slack': typeof SlackRoute
+  '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -373,8 +357,6 @@ export interface FileRoutesById {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
-  '/api/slack/events': typeof ApiSlackEventsRoute
-  '/api/slack/interactions': typeof ApiSlackInteractionsRoute
   '/api/webhooks/$integrationId': typeof ApiWebhooksIntegrationIdRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
@@ -403,7 +385,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/planner'
     | '/runtimes'
-    | '/slack'
+    | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
     | '/runs/$runId'
@@ -418,8 +400,6 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
-    | '/api/slack/events'
-    | '/api/slack/interactions'
     | '/api/webhooks/$integrationId'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
@@ -445,7 +425,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/planner'
     | '/runtimes'
-    | '/slack'
+    | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
     | '/runs/$runId'
@@ -460,8 +440,6 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
-    | '/api/slack/events'
-    | '/api/slack/interactions'
     | '/api/webhooks/$integrationId'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
@@ -488,7 +466,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/planner'
     | '/runtimes'
-    | '/slack'
+    | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
     | '/runs/$runId'
@@ -503,8 +481,6 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
-    | '/api/slack/events'
-    | '/api/slack/interactions'
     | '/api/webhooks/$integrationId'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
@@ -532,7 +508,7 @@ export interface RootRouteChildren {
   NotificationsRoute: typeof NotificationsRoute
   PlannerRoute: typeof PlannerRoute
   RuntimesRoute: typeof RuntimesRoute
-  SlackRoute: typeof SlackRoute
+  WelcomeRoute: typeof WelcomeRoute
   CloudCallbackRoute: typeof CloudCallbackRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   RunsNewRoute: typeof RunsNewRoute
@@ -545,8 +521,6 @@ export interface RootRouteChildren {
   ApiMobileMeRoute: typeof ApiMobileMeRoute
   ApiMobilePairRoute: typeof ApiMobilePairRoute
   ApiMobileUnpairRoute: typeof ApiMobileUnpairRoute
-  ApiSlackEventsRoute: typeof ApiSlackEventsRoute
-  ApiSlackInteractionsRoute: typeof ApiSlackInteractionsRoute
   ApiWebhooksIntegrationIdRoute: typeof ApiWebhooksIntegrationIdRoute
   ApiMobileActivityStreamRoute: typeof ApiMobileActivityStreamRoute
   ApiMobilePushRegisterRoute: typeof ApiMobilePushRegisterRoute
@@ -609,11 +583,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RuntimesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/slack': {
-      id: '/slack'
-      path: '/slack'
-      fullPath: '/slack'
-      preLoaderRoute: typeof SlackRouteImport
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cloud/callback': {
@@ -712,20 +686,6 @@ declare module '@tanstack/react-router' {
       path: '/api/mobile/unpair'
       fullPath: '/api/mobile/unpair'
       preLoaderRoute: typeof ApiMobileUnpairRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/slack/events': {
-      id: '/api/slack/events'
-      path: '/api/slack/events'
-      fullPath: '/api/slack/events'
-      preLoaderRoute: typeof ApiSlackEventsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/slack/interactions': {
-      id: '/api/slack/interactions'
-      path: '/api/slack/interactions'
-      fullPath: '/api/slack/interactions'
-      preLoaderRoute: typeof ApiSlackInteractionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/webhooks/$integrationId': {
@@ -906,7 +866,7 @@ const rootRouteChildren: RootRouteChildren = {
   NotificationsRoute: NotificationsRoute,
   PlannerRoute: PlannerRoute,
   RuntimesRoute: RuntimesRoute,
-  SlackRoute: SlackRoute,
+  WelcomeRoute: WelcomeRoute,
   CloudCallbackRoute: CloudCallbackRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   RunsNewRoute: RunsNewRoute,
@@ -919,8 +879,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileMeRoute: ApiMobileMeRoute,
   ApiMobilePairRoute: ApiMobilePairRoute,
   ApiMobileUnpairRoute: ApiMobileUnpairRoute,
-  ApiSlackEventsRoute: ApiSlackEventsRoute,
-  ApiSlackInteractionsRoute: ApiSlackInteractionsRoute,
   ApiWebhooksIntegrationIdRoute: ApiWebhooksIntegrationIdRoute,
   ApiMobileActivityStreamRoute: ApiMobileActivityStreamRoute,
   ApiMobilePushRegisterRoute: ApiMobilePushRegisterRoute,

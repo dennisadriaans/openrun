@@ -16,7 +16,7 @@ code that does not compile or after doing nothing at all.
   as a repair turn, bounded per automation (hard cap 3).
 - Every run has a wall-clock budget; a wedged CLI used to hold the workspace
   lock until the app restarted.
-- **Notifications** (Slack / Discord / generic webhook / desktop) fire when a
+- **Notifications** (Discord / generic webhook / desktop) fire when a
   run settles — by default only when it needs attention.
 - Unattended fires (cron, webhook) that land on a busy workspace are **queued**
   instead of being dropped into a console log with no run row.

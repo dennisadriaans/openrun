@@ -108,8 +108,7 @@ describe('buildRunNotification', () => {
 })
 
 describe('detectWebhookShape', () => {
-  it('detects Slack and Discord incoming webhooks', () => {
-    assert.equal(detectWebhookShape('https://hooks.slack.com/services/T/B/X'), 'slack')
+  it('detects Discord incoming webhooks', () => {
     assert.equal(detectWebhookShape('https://discord.com/api/webhooks/1/abc'), 'discord')
     assert.equal(detectWebhookShape('https://discordapp.com/api/webhooks/1/abc'), 'discord')
   })
@@ -123,19 +122,18 @@ describe('detectWebhookShape', () => {
 describe('webhookPayload', () => {
   const n = buildRunNotification(input)
 
-  it('sends Slack a `text` field and Discord a `content` field', () => {
-    assert.ok(typeof webhookPayload(n, 'slack', 'http://localhost:3000').text === 'string')
+  it('sends Discord a `content` field', () => {
     assert.ok(typeof webhookPayload(n, 'discord', 'http://localhost:3000').content === 'string')
   })
 
   it('includes an absolute run link', () => {
-    const body = webhookPayload(n, 'slack', 'http://localhost:3000') as { text: string }
-    assert.match(body.text, /http:\/\/localhost:3000\/runs\/run_abc/)
+    const body = webhookPayload(n, 'discord', 'http://localhost:3000') as { content: string }
+    assert.match(body.content, /http:\/\/localhost:3000\/runs\/run_abc/)
   })
 
   it('does not double the slash when the base URL has a trailing one', () => {
-    const body = webhookPayload(n, 'slack', 'http://localhost:3000/') as { text: string }
-    assert.doesNotMatch(body.text, /3000\/\/runs/)
+    const body = webhookPayload(n, 'discord', 'http://localhost:3000/') as { content: string }
+    assert.doesNotMatch(body.content, /3000\/\/runs/)
   })
 
   it('gives a generic endpoint structured fields, not just prose', () => {
@@ -164,7 +162,7 @@ describe('assertWebhookUrl', () => {
 
 describe('resolveNotifierName', () => {
   it('prefers a non-blank JOIN name', () => {
-    assert.equal(resolveNotifierName(' Team Slack ', 'n_1'), 'Team Slack')
+    assert.equal(resolveNotifierName(' Team Chat ', 'n_1'), 'Team Chat')
   })
 
   it('falls back to the notifier id when the name is blank', () => {

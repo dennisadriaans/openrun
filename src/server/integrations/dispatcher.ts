@@ -114,6 +114,8 @@ function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
     model: task.model,
     effort: task.effort,
     timeoutMs: task.timeoutMs,
+    resumeSessionId: task.resumeSessionId,
+    resumeSessionLabel: task.resumeSessionLabel,
   })
 }
 

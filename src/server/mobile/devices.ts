@@ -5,7 +5,7 @@
  * Credentials here are `randomBytes`, deliberately *not* the app's
  * `${prefix}_${Date.now()}${Math.random()}` id helper — that helper is fine for
  * row ids and hopeless as a secret. Only hashes are persisted, so a copy of
- * `agentops.db` yields no working credential.
+ * `openrun.db` yields no working credential.
  */
 import { createHash, randomBytes } from 'node:crypto'
 
