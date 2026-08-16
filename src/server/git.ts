@@ -20,6 +20,7 @@ import {
   ghNotInstalledMessage,
   missingOriginRemoteMessage,
 } from '../lib/gitActionGate.ts'
+import { parseGitForEachRef, type GitBranchRow } from '../lib/gitBranches.ts'
 
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
 
@@ -659,6 +660,18 @@ export function detectDefaultBranch(repoPath: string): string {
   const current = git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (current.ok && current.stdout.trim()) return current.stdout.trim()
   return 'main'
+}
+
+export function listRecentBranches(repoPath: string, limit?: number): GitBranchRow[] {
+  const res = git(repoPath, [
+    'for-each-ref',
+    '--sort=-committerdate',
+    '--format=%(committerdate:unix)%09%(refname)%09%(HEAD)',
+    'refs/heads',
+    'refs/remotes',
+  ])
+  if (!res.ok) return []
+  return parseGitForEachRef(res.stdout, limit)
 }
 
 export function remoteUrl(repoPath: string): string {

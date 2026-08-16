@@ -2,30 +2,30 @@
  * Persist the Open Run control-plane session and machine id.
  *
  * Vendor tokens (Jira, …) never land here — only the Open Run access/refresh
- * pair issued by the Worker. Files are 0600 under ~/.agentops.
+ * pair issued by the Worker. Files are 0600 under ~/.openrun.
  */
 import { randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CloudSessionStored } from '../../lib/cloud/types.ts'
-import { agentopsHome } from '../db.ts'
+import { openrunHome } from '../db.ts'
 
 const OWNER_ONLY = 0o600
 
 export function cloudSessionPath(): string {
-  return join(agentopsHome(), 'cloud-session')
+  return join(openrunHome(), 'cloud-session')
 }
 
 export function machineIdPath(): string {
-  return join(agentopsHome(), 'machine-id')
+  return join(openrunHome(), 'machine-id')
 }
 
 export function cloudPkcePath(): string {
-  return join(agentopsHome(), 'cloud-pkce')
+  return join(openrunHome(), 'cloud-pkce')
 }
 
 function ensureHome(): void {
-  const home = agentopsHome()
+  const home = openrunHome()
   if (!existsSync(home)) mkdirSync(home, { recursive: true, mode: 0o700 })
 }
 
@@ -63,6 +63,8 @@ export function readCloudSession(): CloudSessionStored | null {
     return {
       accessToken: parsed.accessToken,
       refreshToken: parsed.refreshToken,
+      accessExpiresAt:
+        typeof parsed.accessExpiresAt === 'number' ? parsed.accessExpiresAt : 0,
       userId: parsed.userId,
       email: parsed.email,
       machineId: parsed.machineId,
@@ -119,4 +121,32 @@ export function readPkcePending(): PkcePending | null {
 export function clearPkcePending(): void {
   const file = cloudPkcePath()
   if (existsSync(file)) unlinkSync(file)
+}
+
+export type OnboardingState = {
+  /** Set when the user picked "continue without an account". */
+  skipped: boolean
+  seenAt: number
+}
+
+export function onboardingPath(): string {
+  return join(openrunHome(), 'onboarding')
+}
+
+export function readOnboarding(): OnboardingState {
+  const file = onboardingPath()
+  if (!existsSync(file)) return { skipped: false, seenAt: 0 }
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<OnboardingState>
+    return {
+      skipped: parsed.skipped === true,
+      seenAt: typeof parsed.seenAt === 'number' ? parsed.seenAt : 0,
+    }
+  } catch {
+    return { skipped: false, seenAt: 0 }
+  }
+}
+
+export function writeOnboarding(state: OnboardingState): void {
+  writeSecretFile(onboardingPath(), `${JSON.stringify(state)}\n`)
 }

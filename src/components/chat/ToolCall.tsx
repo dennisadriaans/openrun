@@ -7,7 +7,7 @@
  * Expand a row for command output, the edit hunk, or the result.
  */
 import { useState, type ReactNode } from 'react'
-import { ChevronRight, type LucideIcon } from 'lucide-react'
+import { Check, ChevronDown, type LucideIcon } from 'lucide-react'
 import {
   isSettledToolStatus,
   type ToolCallLocation,
@@ -19,12 +19,13 @@ import {
   displayPath,
   toolCallView,
   type DisplayPath,
-  type ToolCallEditHunk,
   type ToolCallTarget,
   type ToolCallView,
 } from '../../lib/toolCallView'
 import { FileTypeIcon } from '../FileTypeIcon'
 import { ChatEventSection } from './ChatEventShell'
+import { EditDiff } from './EditDiff'
+import { SubagentCall } from './SubagentCall'
 import { eyebrowForCallRole, iconForCallRole, iconForToolKind } from './chatEventIcons'
 
 function clip(text: string, maxLines = 16, maxChars = 4000): string {
@@ -111,41 +112,11 @@ function ToolCallGlyph({ role, view }: { role: ToolCallRole; view: ToolCallView 
     const Icon = iconForCallRole(role, view.kind)
     return <Icon className="chat-tool__icon size-3.5 shrink-0" />
   }
-  if (view.target.type === 'path') {
+  if (view.kind !== 'execute' && view.target.type === 'path') {
     return <FileTypeIcon path={view.target.path.path} className="chat-tool__icon size-3.5" />
-  }
-  if (view.kind === 'execute') {
-    return <FileTypeIcon path="run.bash" className="chat-tool__icon size-3.5" />
   }
   const Icon: LucideIcon = iconForToolKind(view.kind)
   return <Icon className="chat-tool__icon size-3.5 shrink-0" />
-}
-
-function MiniDiff({ hunks }: { hunks: ToolCallEditHunk[] }) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      {hunks.map((hunk, i) => (
-        <div key={i} className={i > 0 ? 'border-t border-border' : ''}>
-          {hunk.oldString ? (
-            <pre className="scroll-thin max-h-40 overflow-auto bg-[var(--diffs-bg-deletion-override)] px-2.5 py-1.5 mono text-[11px] leading-relaxed text-[var(--removed)]">
-              {clip(hunk.oldString)
-                .split('\n')
-                .map((line) => `− ${line}`)
-                .join('\n')}
-            </pre>
-          ) : null}
-          {hunk.newString ? (
-            <pre className="scroll-thin max-h-40 overflow-auto bg-[var(--diffs-bg-addition-override)] px-2.5 py-1.5 mono text-[11px] leading-relaxed text-[var(--added)]">
-              {clip(hunk.newString)
-                .split('\n')
-                .map((line) => `+ ${line}`)
-                .join('\n')}
-            </pre>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  )
 }
 
 function ResultPre({ children }: { children: string }) {
@@ -239,7 +210,14 @@ function ToolCallBody({
       </div>,
     )
   } else if (view.hunks.length > 0) {
-    sections.push(<MiniDiff key="diff" hunks={view.hunks} />)
+    sections.push(
+      <EditDiff
+        key="diff"
+        hunks={view.hunks}
+        {...(view.target.type === 'path' ? { path: view.target.path.path } : {})}
+        {...(onSelectFile ? { onSelectFile } : {})}
+      />,
+    )
     if (showResult) {
       sections.push(
         <ChatEventSection key="result" label="Result">
@@ -313,6 +291,18 @@ export function ToolCall({
 }) {
   const [open, setOpen] = useState(false)
   const role = resolveCallRole({ callRole, name, toolInput: input, mcpServer })
+  if (role === 'subagent') {
+    return (
+      <SubagentCall
+        {...(name ? { name } : {})}
+        {...(title ? { title } : {})}
+        {...(status ? { status } : {})}
+        input={input}
+        result={result}
+        {...(onSelectFile ? { onSelectFile } : {})}
+      />
+    )
+  }
   const view = toolCallView({
     name,
     title,
@@ -362,11 +352,6 @@ export function ToolCall({
           aria-expanded={expandable ? open : undefined}
           className={`flex shrink-0 items-center gap-2 ${expandable ? '' : 'cursor-default'}`}
         >
-          <ChevronRight
-            className={`chat-tool__chevron size-3 shrink-0 transition-transform ${
-              expandable ? 'opacity-50' : 'opacity-0'
-            } ${open ? 'rotate-90' : ''}`}
-          />
           <ToolCallGlyph role={role} view={view} />
           {eyebrow ? <span className="chat-event__eyebrow">{eyebrow}</span> : null}
           {role === 'tool' ? <span className="chat-tool__verb">{view.verb}</span> : null}
@@ -392,6 +377,14 @@ export function ToolCall({
             {headerTarget}
           </button>
         )}
+        {expandable ? (
+          <ChevronDown
+            className={`chat-tool__chevron size-3 shrink-0 opacity-50 transition-transform duration-200 ${
+              open ? 'rotate-180' : ''
+            }`}
+            aria-hidden="true"
+          />
+        ) : null}
         {running ? (
           <span
             className="live-dot h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
@@ -399,6 +392,8 @@ export function ToolCall({
           />
         ) : failed ? (
           <span className="shrink-0 text-ui-xs text-danger">failed</span>
+        ) : status !== undefined ? (
+          <Check className="size-3 shrink-0 text-muted-foreground/45" aria-label="completed" />
         ) : null}
       </div>
       {open && expandable ? (

@@ -14,7 +14,13 @@ import { AddProjectModal } from './AddProjectModal'
 import { EffortPicker, ModelPicker, RuntimeModePicker, RuntimePicker } from './ComposerControls'
 import { Button, Card, EmptyState, Field, Modal, StatusBadge, inputClass } from './ui'
 import type { ProjectWithMeta, WorkspaceWithMeta } from '../fns'
-import { defaultEffort, defaultModel, findModel, modelsForBin } from '../lib/models'
+import {
+  defaultEffort,
+  defaultModel,
+  findModel,
+  modelsForRuntime,
+  visibleModels,
+} from '../lib/models'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { supportsSupervised } from '../lib/supervisedPolicy'
@@ -376,7 +382,7 @@ function StartChatModal({
 
   const selectedRuntime = runtimes?.find((r) => r.id === runtimeId)
   const models = useMemo(
-    () => (selectedRuntime ? modelsForBin(selectedRuntime.bin) : []),
+    () => (selectedRuntime ? modelsForRuntime(selectedRuntime) : []),
     [selectedRuntime],
   )
 
@@ -384,7 +390,8 @@ function StartChatModal({
   // the catalog default when there's no valid remembered slug.
   useEffect(() => {
     const remembered = pickerPrefForRuntime(prefs, runtimeId)
-    const seeded = findModel(models, remembered.model) ?? defaultModel(models)
+    const seeded =
+      findModel(models, remembered.model) ?? defaultModel(visibleModels(models, prefs.hiddenModels))
     setModel(seeded?.slug ?? '')
     setEffort(remembered.effort || defaultEffort(seeded))
     // Re-seed only when the catalog (i.e. runtime) changes.

@@ -6,7 +6,6 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, Folder, FolderOpen, Loader2 } from 'lucide-react'
-import { useState } from 'react'
 import * as fns from '../../fns'
 import type { FileEntry } from '../../server/files'
 import { FileTypeIcon } from '../FileTypeIcon'
@@ -27,6 +26,8 @@ function Entry({
   selectedPath,
   onSelect,
   changedPaths,
+  expandedDirs,
+  onToggleDir,
 }: {
   entry: FileEntry
   runId: string
@@ -34,8 +35,10 @@ function Entry({
   selectedPath: string | null
   onSelect: (path: string) => void
   changedPaths: Set<string>
+  expandedDirs: Set<string>
+  onToggleDir: (dir: string) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const expanded = expandedDirs.has(entry.path)
   const isDir = entry.kind === 'directory'
   const isSelected = !isDir && selectedPath === entry.path
   const isChanged = changedPaths.has(entry.path)
@@ -48,7 +51,7 @@ function Entry({
       <button
         type="button"
         style={indent}
-        onClick={() => (isDir ? setExpanded((v) => !v) : onSelect(entry.path))}
+        onClick={() => (isDir ? onToggleDir(entry.path) : onSelect(entry.path))}
         title={entry.path}
         className={`flex w-full items-center gap-1.5 py-[3px] pr-2 text-left text-[12.5px] transition-colors ${
           isSelected
@@ -90,6 +93,8 @@ function Entry({
           selectedPath={selectedPath}
           onSelect={onSelect}
           changedPaths={changedPaths}
+          expandedDirs={expandedDirs}
+          onToggleDir={onToggleDir}
         />
       ) : null}
     </>
@@ -103,6 +108,8 @@ function DirectoryChildren({
   selectedPath,
   onSelect,
   changedPaths,
+  expandedDirs,
+  onToggleDir,
 }: {
   runId: string
   dir: string
@@ -110,6 +117,8 @@ function DirectoryChildren({
   selectedPath: string | null
   onSelect: (path: string) => void
   changedPaths: Set<string>
+  expandedDirs: Set<string>
+  onToggleDir: (dir: string) => void
 }) {
   const { data, isLoading, isError } = useDirectory(runId, dir, true)
 
@@ -157,6 +166,8 @@ function DirectoryChildren({
           selectedPath={selectedPath}
           onSelect={onSelect}
           changedPaths={changedPaths}
+          expandedDirs={expandedDirs}
+          onToggleDir={onToggleDir}
         />
       ))}
     </>
@@ -168,12 +179,17 @@ export function FileTree({
   selectedPath,
   onSelect,
   changedPaths,
+  expandedDirs,
+  onToggleDir,
 }: {
   runId: string
   selectedPath: string | null
   onSelect: (path: string) => void
   /** Paths with uncommitted changes, highlighted in the tree. */
   changedPaths?: Set<string>
+  /** Owned by the parent so expansion survives the tree unmounting behind the editor. */
+  expandedDirs: Set<string>
+  onToggleDir: (dir: string) => void
 }) {
   return (
     <div className="py-1">
@@ -184,6 +200,8 @@ export function FileTree({
         selectedPath={selectedPath}
         onSelect={onSelect}
         changedPaths={changedPaths ?? new Set()}
+        expandedDirs={expandedDirs}
+        onToggleDir={onToggleDir}
       />
     </div>
   )

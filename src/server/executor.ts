@@ -22,6 +22,7 @@ import {
   buildTurnCommand,
   extractSessionId,
   parseAssistantText,
+  eventKindFor,
   runtimeKind,
   supportsResume,
 } from './resume'
@@ -56,6 +57,13 @@ import { startAcpTurn } from './acpTurn'
 import { withPrCapability } from '../lib/prCapability'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
+import { nativeSessionExists } from './nativeSessions'
+import {
+  missingNativeSessionMessage,
+  nativeResumeKindFor,
+  nativeResumeNotSupportedMessage,
+  resumedNativeChatStub,
+} from '../lib/nativeSessions.ts'
 import { checksForWorkspace, clearCheckPass, runCheckPass } from './checks'
 import { RUN_KILL_GRACE_MS, resolveRunTimeoutMs, runTimedOutMessage } from '../lib/runBudget'
 import {
@@ -172,6 +180,13 @@ export type StartRunInput = {
    * but the CLI keeps `cwd` and the worktree is not locked. Default true.
    */
   lockWorkspace?: boolean
+  /**
+   * Resume this native CLI session on the opening turn instead of minting a
+   * new UUID. Empty / omitted = start a new conversation.
+   */
+  resumeSessionId?: string
+  /** Picker title for the system stub on an adopted native chat. */
+  resumeSessionLabel?: string
 }
 
 /**
@@ -200,11 +215,25 @@ export function startRun(input: StartRunInput): string {
   // Claude and Grok let us choose the session id up front, which avoids having
   // to parse it back out of the output before the user can send a follow-up.
   // ACP hands us a session id from `session/new`, so we must not invent one.
+  // A native resume reuses the Claude Code UUID and treats the opening turn as
+  // a follow-up (`--resume`) so the TUI chat continues instead of a new one.
   const kind = runtimeKind(input.runtime.bin)
-  const sessionId =
-    !isAcpTransport(input.runtime.transport) && (kind === 'claude' || kind === 'grok')
+  const resumeSessionId = input.resumeSessionId?.trim() ?? ''
+  const resumeKind = nativeResumeKindFor(input.runtime)
+  if (resumeSessionId) {
+    if (!resumeKind) {
+      throw new Error(nativeResumeNotSupportedMessage())
+    }
+    if (!nativeSessionExists(cwd, resumeKind, resumeSessionId)) {
+      throw new Error(missingNativeSessionMessage(resumeKind))
+    }
+  }
+  const sessionId = resumeSessionId
+    ? resumeSessionId
+    : !isAcpTransport(input.runtime.transport) && (kind === 'claude' || kind === 'grok')
       ? randomUUID()
       : ''
+  const isFollowUp = resumeSessionId.length > 0
 
   const model = input.model?.trim() ?? ''
   const effort = input.effort?.trim() ?? ''
@@ -238,13 +267,16 @@ export function startRun(input: StartRunInput): string {
     prompt: cliPrompt,
     cwd,
     sessionId,
-    isFollowUp: false,
+    isFollowUp,
     model,
     effort,
     runtimeMode,
     // Planner only needs plain JSON text — don't force stream-json/--json.
     machineReadable: input.trigger !== 'planner',
   })
+  if (isFollowUp && !turn.canResume) {
+    throw new Error(`The "${input.runtime.label}" runtime does not support resuming a conversation`)
+  }
 
   db.prepare(
     `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
@@ -269,6 +301,19 @@ export function startRun(input: StartRunInput): string {
 
   if (input.taskId) {
     db.prepare('UPDATE tasks SET lastRunAt = ? WHERE id = ?').run(now, input.taskId)
+  }
+
+  if (resumeSessionId) {
+    db.prepare(
+      `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
+       VALUES (?, ?, 'system', ?, '', '', 'success', NULL, '', ?, ?)`,
+    ).run(
+      randomId('msg'),
+      runId,
+      resumedNativeChatStub(resumeKind ?? 'claude', input.resumeSessionLabel ?? ''),
+      now - 1,
+      now - 1,
+    )
   }
 
   publishActivityLive({ type: 'run_changed', runId, status: 'running' })
@@ -545,7 +590,7 @@ function spawnTurn(input: {
     budgetTimer = null
   }
 
-  const kind = runtimeKind(runtime.bin)
+  const kind = eventKindFor(runtimeKind(runtime.bin))
   const lineBuffer = new LineBuffer()
   // Plain / text output (planner Grok) is not JSONL — skip line→event parsing so
   // chat gets one assistant answer from stdout instead of a raw pill per line.
@@ -1719,5 +1764,7 @@ export function runTask(
     model: task.model,
     effort: task.effort,
     timeoutMs: task.timeoutMs,
+    resumeSessionId: task.resumeSessionId,
+    resumeSessionLabel: task.resumeSessionLabel,
   })
 }

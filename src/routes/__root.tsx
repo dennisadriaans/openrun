@@ -4,19 +4,11 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
+  useNavigate,
   useRouterState,
 } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  Bell,
-  ChevronsUpDown,
-  History,
-  ListChecks,
-  MessageSquare,
-  Smartphone,
-  User,
-  Webhook,
-} from 'lucide-react'
+import { Bell, ChevronsUpDown, History, ListChecks, Smartphone, User, Webhook } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import {
@@ -61,7 +53,6 @@ const NAV = [
 ]
 
 const USER_MENU = [
-  { to: '/slack', label: 'Slack', icon: MessageSquare },
   { to: '/devices', label: 'Devices', icon: Smartphone },
   { to: '/integrations', label: 'Integrations', icon: Webhook },
   { to: '/notifications', label: 'Notifications', icon: Bell },
@@ -317,7 +308,25 @@ function Sidebar() {
   )
 }
 
+/** Routes that must render before the account gate has an answer. */
+function isUngatedPath(pathname: string): boolean {
+  return pathname === '/welcome' || pathname.startsWith('/cloud/')
+}
+
 function AppLayout() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const navigate = useNavigate()
+  const { data: cloud, isPending } = useCloudStatus()
+
+  const ungated = isUngatedPath(pathname)
+  const needsWelcome = !isPending && Boolean(cloud) && !cloud!.signedIn && !cloud!.onboardingSkipped
+
+  useEffect(() => {
+    if (needsWelcome && !ungated) void navigate({ to: '/welcome', replace: true })
+  }, [needsWelcome, ungated, navigate])
+
+  if (ungated) return <Outlet />
+
   return (
     <SidebarProvider>
       <TopBarActionsProvider>

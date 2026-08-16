@@ -4,7 +4,7 @@
 import type { CloudStatus } from '../../lib/cloud/types.ts'
 import { configuredCloudUrl } from './login.ts'
 import { cloudRelayStatus } from './relay.ts'
-import { readCloudSession, readMachineId } from './session.ts'
+import { readCloudSession, readMachineId, readOnboarding } from './session.ts'
 
 export function getCloudStatus(): CloudStatus {
   const session = readCloudSession()
@@ -15,5 +15,6 @@ export function getCloudStatus(): CloudStatus {
     userId: session?.userId ?? null,
     machineId: session?.machineId || readMachineId(),
     relay: cloudRelayStatus(),
+    onboardingSkipped: readOnboarding().skipped,
   }
 }

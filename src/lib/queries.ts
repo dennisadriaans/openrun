@@ -30,6 +30,24 @@ export function useTask(id: string) {
   })
 }
 
+export function useNativeSessions(input: { workspaceId: string }, opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['nativeSessions', input.workspaceId],
+    queryFn: () => fns.listNativeSessions({ data: { workspaceId: input.workspaceId } }),
+    enabled: (opts?.enabled ?? true) && !!input.workspaceId,
+    staleTime: 15_000,
+  })
+}
+
+export function loadNativeSessionPage(input: {
+  workspaceId: string
+  kind: 'claude' | 'codex' | 'grok' | 'antigravity'
+  offset: number
+  limit?: number
+}) {
+  return fns.listNativeSessions({ data: input })
+}
+
 export function useRuntimes() {
   return useQuery({ queryKey: ['runtimes'], queryFn: () => fns.listRuntimes() })
 }
@@ -408,6 +426,15 @@ export function useWorkspaces(projectId?: string, initialData?: fns.WorkspaceWit
   })
 }
 
+export function useProjectBranches(projectId?: string) {
+  return useQuery({
+    queryKey: ['projectBranches', projectId],
+    queryFn: () => fns.listProjectBranches({ data: { projectId: projectId! } }),
+    enabled: Boolean(projectId),
+    staleTime: 15_000,
+  })
+}
+
 export function useAddProject() {
   const qc = useQueryClient()
   return useMutation({
@@ -459,6 +486,7 @@ export function useCreateWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspaces'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
+      qc.invalidateQueries({ queryKey: ['projectBranches'] })
     },
   })
 }
@@ -697,47 +725,6 @@ export function useRemoveDevice() {
   })
 }
 
-// --- Slack ------------------------------------------------------------------
-
-export function useSlackSettings() {
-  return useQuery({
-    queryKey: ['slackSettings'],
-    queryFn: () => fns.slackSettings(),
-  })
-}
-
-/**
- * Connection state for the Slack page. The websocket reconnects on its own
- * with backoff, so this polls slowly rather than sitting on a stream.
- */
-export function useSlackStatus() {
-  return useQuery({
-    queryKey: ['slackStatus'],
-    queryFn: () => fns.slackStatus(),
-    refetchInterval: 10_000,
-  })
-}
-
-export function useSaveSlackSettings() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (data: Parameters<typeof fns.saveSlackSettings>[0]['data']) =>
-      fns.saveSlackSettings({ data }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['slackSettings'] })
-      qc.invalidateQueries({ queryKey: ['slackStatus'] })
-    },
-  })
-}
-
-export function useTestSlackConnection() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => fns.testSlackConnection(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['slackStatus'] }),
-  })
-}
-
 // --- Cloud ------------------------------------------------------------------
 
 export function useCloudStatus() {
@@ -758,6 +745,14 @@ export function useCompleteCloudLogin() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: { code: string; state: string }) => fns.completeCloudLogin({ data }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cloudStatus'] }),
+  })
+}
+
+export function useSkipCloudOnboarding() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => fns.skipCloudOnboarding(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cloudStatus'] }),
   })
 }

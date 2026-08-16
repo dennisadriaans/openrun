@@ -16,17 +16,23 @@ import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
-import {
-  defaultEffort,
-  defaultModel,
-  findModel,
-  modelsForBin,
-  type ModelOption,
-} from '../lib/models'
+import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
+import { cachedModelsForBin, warmModelCatalogs } from './modelCatalog'
 import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
+import {
+  isNativeResumeKind,
+  missingNativeSessionMessage,
+  nativeResumeKindFor,
+  nativeResumeNotSupportedMessage,
+  nativeSessionKindLabel,
+  NATIVE_SESSION_PAGE_SIZE,
+  paginateNativeSessions,
+  type NativeSessionGroup,
+  type NativeSessionKind,
+} from '../lib/nativeSessions.ts'
 import {
   getDb,
   type CheckResultRow,
@@ -65,7 +71,7 @@ import {
   type PreviewCommandResult,
 } from './commandPreview'
 import { getProject, getWorkspace, listWorkspaces, resolveWorkspacePath } from './workspaces'
-import { bootSlack, onSlackRunFinalized } from './slack'
+import { listNativeSessionsForKind, nativeSessionExists } from './nativeSessions'
 import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
 
@@ -86,6 +92,7 @@ if (!bootSafety.__agentopsSafetyBooted) {
   installProcessShutdownHooks()
 }
 bootScheduler()
+warmModelCatalogs()
 
 /**
  * Everything that has to happen once a run settles. Registered here rather
@@ -103,17 +110,10 @@ setRunFinalizedHook((runId) => {
     // Non-git or missing cwd — the notification just reports zero.
   }
   notifyRunFinished(runId, changed)
-  // Announce to Slack and release any turn typed from a phone while this run
-  // was busy. Deferred internally so the follow-up it may send does not re-enter
-  // the executor inside its own close handler.
-  onSlackRunFinalized(runId, changed)
   // The workspace lock just came free — start whatever was waiting on it.
   if (run.workspaceId) drainWorkspace(run.workspaceId)
 })
 
-// Connect the Slack control surface (Socket Mode) if it is configured. Boots
-// after the scheduler so a run started from Slack finds a fully armed app.
-bootSlack()
 bootCloud()
 
 // Re-exported so src/fns reaches the whole workspaces API through this single
@@ -128,6 +128,7 @@ export {
   getProject,
   getWorkspace,
   listLocalDirectories,
+  listProjectBranches,
   listProjects,
   listWorkspaces,
   resolveWorkspacePath,
@@ -151,11 +152,21 @@ function id(prefix: string) {
 // Runtimes
 // ---------------------------------------------------------------------------
 
-export function listRuntimes(): RuntimeRow[] {
+/**
+ * A runtime plus the models its installed binary currently offers. Carried on
+ * the runtime rather than fetched separately so every model picker in the app
+ * (new run, automation form, project defaults) gets the live catalog from a
+ * request it was already making.
+ */
+export type RuntimeWithModels = RuntimeRow & { models: ModelOption[] }
+
+export function listRuntimes(): RuntimeWithModels[] {
   const rows = getDb()
     .prepare('SELECT * FROM runtimes ORDER BY createdAt ASC')
     .all() as RuntimeRow[]
-  return rows.sort(compareRuntimesForDisplay)
+  return rows
+    .sort(compareRuntimesForDisplay)
+    .map((r) => ({ ...r, models: cachedModelsForBin(r.bin) }))
 }
 
 export function getRuntime(runtimeId: string): RuntimeRow | undefined {
@@ -252,6 +263,42 @@ function assertTaskRuntimeOnPath(runtimeId: string): void {
   assertRuntimeOnPath(runtime.bin)
 }
 
+function nativeSessionValidForTask(task: {
+  resumeSessionId: string
+  cwd: string
+  workspaceId: string
+  runtimeId: string
+}): boolean {
+  const id = task.resumeSessionId.trim()
+  if (!id) return true
+  const runtime = getRuntime(task.runtimeId)
+  const kind = nativeResumeKindFor(runtime ?? {})
+  if (!kind) return false
+  let cwd = task.cwd.trim()
+  if (!cwd && hasWorkspaceId(task.workspaceId)) {
+    try {
+      cwd = resolveWorkspacePath(task.workspaceId)
+    } catch {
+      return false
+    }
+  }
+  if (!cwd) return false
+  return nativeSessionExists(cwd, kind, id)
+}
+
+function assertNativeResume(input: {
+  resumeSessionId: string
+  runtimeId: string
+  cwd: string
+}): void {
+  const id = input.resumeSessionId.trim()
+  if (!id) return
+  const runtime = getRuntime(input.runtimeId)
+  const kind = nativeResumeKindFor(runtime ?? {})
+  if (!kind) throw new Error(nativeResumeNotSupportedMessage())
+  if (!nativeSessionExists(input.cwd, kind, id)) throw new Error(missingNativeSessionMessage(kind))
+}
+
 // ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
@@ -287,6 +334,11 @@ export type TaskWithMeta = TaskRow & {
    * would spawn a CLI with nothing to do.
    */
   promptValid: boolean
+  /**
+   * False when resumeSessionId is set but the native chat is gone or the
+   * runtime cannot resume native chats. True when no native session is bound.
+   */
+  resumeSessionValid: boolean
   /** Number of verification checks configured on this task's project. */
   checkCount: number
   /** Fires parked because the workspace was busy when they came due. */
@@ -305,6 +357,7 @@ function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWith
   const runtimeBin = runtime?.bin?.trim() ?? ''
   const runtimeInstalled = runtime ? checkRuntimeInstalled(runtime.bin).installed : false
   const promptOk = hasTaskPrompt(task.prompt)
+  const resumeOk = nativeSessionValidForTask(task)
   const project = workspace ? getProject(workspace.projectId) : undefined
   return {
     ...task,
@@ -315,7 +368,7 @@ function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWith
     queuedCount: (queueDepths ?? queueDepthByTask())[task.id] ?? 0,
     runtimeLabel: resolveRuntimeLabel(runtime?.label, task.runtimeId),
     nextRunAt:
-      task.enabled && cronOk && workspaceReadyOk && runtimeInstalled && promptOk
+      task.enabled && cronOk && workspaceReadyOk && runtimeInstalled && promptOk && resumeOk
         ? nextRun(task.cron)
         : null,
     cronValid: cronOk,
@@ -325,6 +378,7 @@ function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWith
     runtimeInstalled,
     runtimeBin,
     promptValid: promptOk,
+    resumeSessionValid: resumeOk,
   }
 }
 
@@ -332,6 +386,69 @@ export function listTasks(): TaskWithMeta[] {
   const rows = getDb().prepare('SELECT * FROM tasks ORDER BY createdAt DESC').all() as TaskRow[]
   const depths = queueDepthByTask()
   return rows.map((row) => decorate(row, depths))
+}
+
+function nativeResumeRuntimes(): Array<{
+  kind: NativeSessionKind
+  label: string
+  bin: string
+  runtimeId: string
+}> {
+  const seen = new Set<NativeSessionKind>()
+  const out: Array<{
+    kind: NativeSessionKind
+    label: string
+    bin: string
+    runtimeId: string
+  }> = []
+  for (const runtime of listRuntimes()) {
+    if (!checkRuntimeInstalled(runtime.bin).installed) continue
+    const kind = nativeResumeKindFor(runtime)
+    if (!kind || seen.has(kind)) continue
+    seen.add(kind)
+    out.push({
+      kind,
+      label: runtime.label.trim() || nativeSessionKindLabel(kind),
+      bin: runtime.bin,
+      runtimeId: runtime.id,
+    })
+  }
+  return out
+}
+
+export function listNativeSessions(input: {
+  workspaceId: string
+  kind?: NativeSessionKind
+  offset?: number
+  limit?: number
+}): { groups: NativeSessionGroup[]; error?: string } {
+  const limit = input.limit && input.limit > 0 ? input.limit : NATIVE_SESSION_PAGE_SIZE
+  const offset = input.offset && input.offset > 0 ? input.offset : 0
+  const requested =
+    input.kind && isNativeResumeKind(input.kind)
+      ? nativeResumeRuntimes().filter((row) => row.kind === input.kind)
+      : nativeResumeRuntimes()
+
+  try {
+    const workspaceId = assertWorkspaceId(input.workspaceId)
+    const workspace = getWorkspace(workspaceId)
+    assertWorkspaceReady(workspace?.status)
+    const cwd = resolveWorkspacePath(workspaceId)
+    const groups: NativeSessionGroup[] = requested.map((row) => {
+      const page = paginateNativeSessions(listNativeSessionsForKind(cwd, row.kind), offset, limit)
+      return {
+        kind: row.kind,
+        label: row.label,
+        bin: row.bin,
+        runtimeId: row.runtimeId,
+        sessions: page.items,
+        hasMore: page.hasMore,
+      }
+    })
+    return { groups }
+  } catch (err) {
+    return { groups: [], error: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 export function getTask(taskId: string): TaskWithMeta | undefined {
@@ -369,6 +486,12 @@ export type TaskInput = {
   maxRepairAttempts?: number
   /** Wall-clock budget in minutes; 0 / omitted = the app default. */
   timeoutMinutes?: number
+  /** Native CLI session id to resume; empty clears. */
+  resumeSessionId?: string
+  /** Picker title captured with resumeSessionId. */
+  resumeSessionLabel?: string
+  /** Disable after the next successful scheduled fire. */
+  fireOnce?: boolean
 }
 
 export function upsertTask(input: TaskInput): TaskWithMeta {
@@ -443,9 +566,22 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
       ? assertRunTimeoutMinutes(input.timeoutMinutes)
       : (existingRow?.timeoutMs ?? 0)
 
+  const resumeSessionId =
+    input.resumeSessionId !== undefined
+      ? input.resumeSessionId.trim()
+      : (existingRow?.resumeSessionId ?? '')
+  const resumeSessionLabel =
+    input.resumeSessionLabel !== undefined
+      ? input.resumeSessionLabel.trim()
+      : (existingRow?.resumeSessionLabel ?? '')
+  const fireOnce =
+    input.fireOnce !== undefined ? (input.fireOnce ? 1 : 0) : (existingRow?.fireOnce ?? 0)
+
+  if (input.enabled) assertNativeResume({ resumeSessionId, runtimeId: input.runtimeId, cwd })
+
   db.prepare(
-    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, createdAt, updatedAt, lastRunAt)
-     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @createdAt, @updatedAt, NULL)
+    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, createdAt, updatedAt, lastRunAt)
+     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @createdAt, @updatedAt, NULL)
      ON CONFLICT(id) DO UPDATE SET
        name=@name, description=@description, runtimeId=@runtimeId, prompt=@prompt,
        cwd=@cwd, workspaceId=@workspaceId, cron=@cron, enabled=@enabled,
@@ -453,6 +589,8 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
        webhookIntegrationId=@webhookIntegrationId, webhookEvents=@webhookEvents,
        webhookFilters=@webhookFilters, verifyEnabled=@verifyEnabled,
        maxRepairAttempts=@maxRepairAttempts, timeoutMs=@timeoutMs,
+       resumeSessionId=@resumeSessionId, resumeSessionLabel=@resumeSessionLabel,
+       fireOnce=@fireOnce,
        updatedAt=@updatedAt`,
   ).run({
     id: tid,
@@ -472,6 +610,9 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     verifyEnabled,
     maxRepairAttempts,
     timeoutMs,
+    resumeSessionId,
+    resumeSessionLabel,
+    fireOnce,
     createdAt: existingRow?.createdAt ?? now,
     updatedAt: now,
   })
@@ -494,6 +635,11 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
     assertTaskRuntimeOnPath(task.runtimeId)
     // Same as Create / Save — don't arm a schedule that would fire an empty prompt.
     assertTaskPrompt(task.prompt)
+    assertNativeResume({
+      resumeSessionId: task.resumeSessionId,
+      runtimeId: task.runtimeId,
+      cwd: task.cwd,
+    })
   }
   db.prepare('UPDATE tasks SET enabled = ?, updatedAt = ? WHERE id = ?').run(
     enabled ? 1 : 0,
@@ -544,6 +690,11 @@ export function runTaskNow(taskId: string): { runId: string } {
   if (!runtime) throw new Error('Runtime not found for task')
   // Legacy blank prompts used to spawn a silent no-op — refuse before insert.
   assertTaskPrompt(task.prompt)
+  assertNativeResume({
+    resumeSessionId: task.resumeSessionId,
+    runtimeId: task.runtimeId,
+    cwd: task.cwd,
+  })
 
   const runId = startRun({
     runtime,
@@ -556,6 +707,8 @@ export function runTaskNow(taskId: string): { runId: string } {
     model: task.model,
     effort: task.effort,
     timeoutMs: task.timeoutMs,
+    resumeSessionId: task.resumeSessionId,
+    resumeSessionLabel: task.resumeSessionLabel,
   })
   return { runId }
 }
@@ -765,7 +918,7 @@ export function getConversation(runId: string) {
   const workspaceWithMeta = workspace ? (siblings.find((w) => w.id === workspace.id) ?? null) : null
   const project = workspace ? (getProject(workspace.projectId) ?? null) : null
 
-  const catalog = runtime ? modelsForBin(runtime.bin) : []
+  const catalog = runtime ? cachedModelsForBin(runtime.bin) : []
   const matchedModel = findModel(catalog, run.model)
   const selectedModel = matchedModel ?? defaultModel(catalog)
 
@@ -1318,45 +1471,6 @@ export { mobileStatus } from './mobile/status'
 export type { DeviceRow, DevicePairingRow } from './db'
 
 // ---------------------------------------------------------------------------
-// Slack (control surface)
-//
-// Not an `IntegrationProvider`: GitHub / Jira / Linear push events *in* to
-// start automations, whereas Slack is a two-way remote control — it reads run
-// state and steers runs. Different shape, so it gets its own facade.
-// ---------------------------------------------------------------------------
-
-export {
-  publicSettings as getSlackSettingsPublic,
-  slackConnectionStatus,
-  type SlackSettingsInput,
-  type SlackSettingsPublic,
-} from './slack'
-export type { SlackConnectionStatus } from '../lib/slack/types'
-
-import {
-  applySlackSettings,
-  saveSlackSettings as saveSlackSettingsRow,
-  publicSettings as slackPublicSettings,
-  testSlackConnection as testSlackConnectionInner,
-  type SlackSettingsInput as SlackInput,
-  type SlackSettingsPublic as SlackPublic,
-  type SlackTestResult,
-} from './slack'
-
-export type { SlackTestResult }
-
-/** Save Slack settings, then reconnect so the change takes effect at once. */
-export async function saveSlackSettings(input: SlackInput): Promise<SlackPublic> {
-  const saved = saveSlackSettingsRow(input)
-  await applySlackSettings()
-  return slackPublicSettings(saved)
-}
-
-export async function testSlackConnection(): Promise<SlackTestResult> {
-  return testSlackConnectionInner()
-}
-
-// ---------------------------------------------------------------------------
 // Cloud control plane (optional). Local features never consult this.
 // ---------------------------------------------------------------------------
 
@@ -1368,6 +1482,7 @@ export {
   getCloudStatus,
   ingestTestEvent,
   signOutAndDisconnect,
+  skipCloudOnboarding,
   startCloudLogin,
   startJiraConnect,
 } from './cloud'

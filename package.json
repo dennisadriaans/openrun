@@ -2,7 +2,7 @@
   "name": "openrun",
   "private": true,
   "description": "Schedule Claude Code, Codex, Grok and Gemini like cron jobs — on your machine, with no API keys.",
-  "homepage": "https://getopenrun.dev",
+  "homepage": "https://openrun.sh",
   "repository": {
     "type": "git",
     "url": "https://github.com/dennisadriaans/openrun.git"
@@ -26,7 +26,7 @@
     "generate-routes": "tsr generate",
     "build": "vite build",
     "start": "node --experimental-strip-types scripts/start.ts",
-    "token": "node --experimental-strip-types scripts/token.ts",
+    "token:print": "node --experimental-strip-types scripts/token.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src scripts",
@@ -63,6 +63,8 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "simple-icons": "^16.28.0",
     "tailwindcss": "^4.1.18"
   },
@@ -72,7 +74,7 @@
     "@tanstack/devtools-vite": "^0.8.1",
     "@tanstack/router-cli": "^1.132.0",
     "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.10.2",
+    "@types/node": "^26.2.0",
     "@types/node-cron": "^3.0.11",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.2.0",
