@@ -180,8 +180,13 @@ a standalone route.
 - **`changelog.d/`** — one markdown file per shipped change, folded into `CHANGELOG.md` at
   release. Entries are user-facing and written in the negative-relief voice the existing file
   uses: *"You no longer …"*. Match it.
-- **Commits** — when the user asks to commit / open a PR: `DX: …` / `feat: …` /
-  `fix: …` / `docs: …`; one shippable slice per PR.
+- **Commits** — always [Conventional Commits](https://www.conventionalcommits.org):
+  `type(scope): summary`. Types: `feat` `fix` `refactor` `perf` `docs` `test` `build` `ci`
+  `chore`, `!` before the colon for a breaking change. Scope is the area, not the path —
+  `tasks`, `chat`, `cloud`, `runtimes`, `security`, `workspace`, `deps` — and is optional.
+  Subject is lowercase imperative ("add", not "added"/"adds"), no trailing period, **≤ 60
+  characters**. Skip the body when the subject says it all; add one only for the *why* the
+  diff cannot show, wrapped at 80. One shippable slice per commit and per PR.
 
 ## Gotchas
 
