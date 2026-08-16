@@ -13,7 +13,13 @@ import { Composer } from '../components/Chat'
 import { BranchPicker, ProjectPicker, RuntimePicker } from '../components/ComposerControls'
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
-import { defaultEffort, defaultModel, findModel, modelsForBin } from '../lib/models'
+import {
+  defaultEffort,
+  defaultModel,
+  findModel,
+  modelsForRuntime,
+  visibleModels,
+} from '../lib/models'
 import { pickDefaultRuntime } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { useProjects, useRuntimes, useStartChat, useWorkspaces } from '../lib/queries'
@@ -68,11 +74,12 @@ function NewRun() {
   }, [runtimes, runtimeId, prefs.runtimeId])
 
   const runtime = runtimes?.find((r) => r.id === runtimeId)
-  const models = useMemo(() => (runtime ? modelsForBin(runtime.bin) : []), [runtime])
+  const models = useMemo(() => (runtime ? modelsForRuntime(runtime) : []), [runtime])
 
   useEffect(() => {
     const remembered = pickerPrefForRuntime(prefs, runtimeId)
-    const seeded = findModel(models, remembered.model) ?? defaultModel(models)
+    const seeded =
+      findModel(models, remembered.model) ?? defaultModel(visibleModels(models, prefs.hiddenModels))
     setModel(seeded?.slug ?? '')
     setEffort(remembered.effort || defaultEffort(seeded))
     // Re-seed only when the catalog (i.e. runtime) changes.

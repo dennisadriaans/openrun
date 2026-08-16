@@ -41,8 +41,8 @@ no source-disclosure obligation, and no AGPL conflict for your legal team.
 - A perpetual, non-exclusive license to the Open Run core under proprietary terms.
 - Freedom to embed, modify and distribute without AGPLv3 obligations.
 - Written warranty and indemnity terms (AGPLv3 provides neither).
-- Optional: access to the commercial planes — managed Slack app, fleet control
-  plane, remote runners, SSO, audit log, policy engine. These are **separate
+- Optional: access to the commercial planes — fleet control plane, remote
+  runners, SSO, audit log, policy engine. These are **separate
   proprietary products** and are not part of this repository.
 
 ---
@@ -54,13 +54,12 @@ Everything in this repository is AGPLv3 and stays that way.
 **In this repository, free forever:** the scheduler, every runtime adapter
 (Claude Code, Codex, Grok, Gemini, ACP), the executor, git actions and PR
 creation, verification checks and verdicts, racing attempts, supervised
-approvals, webhook integrations, the Slack control surface (using your own Slack
-app), the planner, and the entire UI.
+approvals, webhook integrations, the planner, and the entire UI.
 
 **Not in this repository, sold separately:** things that require *our* servers or
-*our* compliance work — a managed Slack app, a fleet dashboard across machines,
-hosted run history, remote runners, team seats and RBAC, SSO/SAML/SCIM, audit
-export and the org policy engine.
+*our* compliance work — a fleet dashboard across machines, hosted run history,
+remote runners, team seats and RBAC, SSO/SAML/SCIM, audit export and the org
+policy engine.
 
 No feature that runs on your machine will ever move behind that line. See the
 [README](./README.md#open-source) for the standing commitment.

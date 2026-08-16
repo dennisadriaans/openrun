@@ -7,11 +7,13 @@
  */
 import cron from 'node-cron'
 import { isValidCron } from '../lib/cron'
+import { nativeResumeKindFor } from '../lib/nativeSessions.ts'
 import { hasTaskPrompt } from '../lib/taskPrompt'
 import { hasWorkspaceId } from '../lib/workspaceRef'
 import { isWorkspaceReady } from '../lib/workspaceReady'
 import { getDb, type RuntimeRow, type TaskRow } from './db'
 import { runTask } from './executor'
+import { nativeSessionExists } from './nativeSessions'
 import { isShuttingDown } from './processControl'
 import { drainAllQueues, enqueueRun } from './runQueue'
 import { checkRuntimeInstalled } from './runtimePath'
@@ -27,6 +29,21 @@ const g = globalThis as unknown as {
 function jobs(): Map<string, Scheduled> {
   if (!g.__agentopsJobs) g.__agentopsJobs = new Map()
   return g.__agentopsJobs
+}
+
+function nativeResumeReady(task: TaskRow, runtime: RuntimeRow): boolean {
+  const id = task.resumeSessionId.trim()
+  if (!id) return true
+  const kind = nativeResumeKindFor(runtime)
+  if (!kind) return false
+  return nativeSessionExists(task.cwd, kind, id)
+}
+
+function disableAfterScheduleFire(taskId: string) {
+  getDb()
+    .prepare('UPDATE tasks SET enabled = 0, updatedAt = ? WHERE id = ?')
+    .run(Date.now(), taskId)
+  unscheduleTask(taskId)
 }
 
 function scheduleTask(task: TaskRow) {
@@ -49,6 +66,7 @@ function scheduleTask(task: TaskRow) {
   // Same for a blank prompt — enable already refuses; this covers legacy rows
   // armed before Create / Save required Agent Instructions.
   if (!hasTaskPrompt(task.prompt)) return
+  if (!nativeResumeReady(task, runtimeRow)) return
 
   const handle = cron.schedule(task.cron, () => {
     if (isShuttingDown()) return
@@ -63,8 +81,10 @@ function scheduleTask(task: TaskRow) {
       | undefined
     if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) return
     if (!hasTaskPrompt(fresh.prompt)) return
+    if (!nativeResumeReady(fresh, runtime)) return
     try {
       runTask(fresh, runtime, 'schedule')
+      if (fresh.fireOnce) disableAfterScheduleFire(fresh.id)
     } catch (err) {
       // The overwhelmingly common failure is "this workspace already has a run
       // in progress" — a long run overlapping the next tick. That used to end
@@ -75,6 +95,7 @@ function scheduleTask(task: TaskRow) {
         workspaceId: fresh.workspaceId,
         trigger: 'schedule',
       })
+      if (result.queued && fresh.fireOnce) disableAfterScheduleFire(fresh.id)
       if (!result.queued) {
         console.error(
           `[scheduler] failed to start task ${fresh.id}: ${String(err)} (not queued: ${result.reason})`,

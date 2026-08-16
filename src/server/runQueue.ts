@@ -162,10 +162,12 @@ export function drainWorkspace(workspaceId: string): void {
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(entry.taskId) as
       | TaskRow
       | undefined
-    // Deleted, disabled, empty prompt, or pointed at a workspace / runtime that
-    // is no longer usable while it waited — drop it and try the next entry.
-    // Same gates the scheduler applies before arming a fresh tick.
-    if (!task?.enabled) continue
+    // Deleted, empty prompt, or pointed at a workspace / runtime that is no
+    // longer usable while it waited — drop it and try the next entry.
+    // Disabled recurring tasks drop too. A fire-once task that was paused
+    // *because* it already fired must still drain: the queue entry is that fire.
+    if (!task) continue
+    if (!task.enabled && !task.fireOnce) continue
     if (!hasTaskPrompt(task.prompt) && !entry.prompt.trim()) continue
     const workspace = getWorkspace(workspaceId)
     if (!workspace || !isWorkspaceReady(workspace.status)) continue

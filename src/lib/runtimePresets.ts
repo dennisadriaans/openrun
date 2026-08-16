@@ -50,6 +50,15 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     description: 'xAI Grok build CLI (headless). Prompt via temp file; resume + models supported.',
   },
   {
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    bin: 'agy',
+    argsTemplate: ['-p', '--output-format', 'stream-json', '--dangerously-skip-permissions'],
+    promptViaStdin: true,
+    description:
+      'Google Antigravity CLI (`agy`) headless. Claude-Code-shaped flags and stream-json, so tool calls and follow-up turns work; models come from `agy models`.',
+  },
+  {
     id: 'gemini',
     label: 'Gemini CLI',
     bin: 'gemini',

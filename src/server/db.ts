@@ -1,7 +1,7 @@
 /**
  * SQLite persistence layer.
  *
- * Everything is stored in a single local file (./data/agentops.db) so the whole
+ * Everything is stored in a single local file (./data/openrun.db) so the whole
  * proof-of-concept is self-contained and requires no external services. This
  * module is server-only — it is never imported into client bundles (route
  * components reach it exclusively through server functions).
@@ -12,6 +12,7 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { dirname, resolve } from 'node:path'
+import { openrunEnv } from '../lib/openrunEnv.ts'
 import { RUNTIME_PRESETS } from '../lib/runtimePresets.ts'
 import { ensureProcessPathAugmented } from './userPath.ts'
 
@@ -80,6 +81,18 @@ export type TaskRow = {
   maxRepairAttempts: number
   /** Per-run wall-clock budget in ms. 0 = the app default. */
   timeoutMs: number
+  /**
+   * Native CLI session to resume on the first turn instead of minting
+   * a new UUID. Empty = start a new conversation (the default).
+   */
+  resumeSessionId: string
+  /** Picker title captured at save, used as the run stub. */
+  resumeSessionLabel: string
+  /**
+   * 1 = disable the automation after the next successful scheduled fire, so a
+   * wall-clock "once at 03:01" does not repeat every night.
+   */
+  fireOnce: number
   createdAt: number
   updatedAt: number
   lastRunAt: number | null
@@ -278,38 +291,6 @@ export type NotificationDeliveryRow = {
   sentAt: number
 }
 
-/**
- * Binds a Slack thread to the run it is about.
- *
- * `threadTs` is Slack's parent message timestamp — unique per channel, not
- * globally, hence the composite key. Once a run has a thread, a bare reply in
- * it is that run's next turn.
- */
-export type SlackThreadRow = {
-  threadTs: string
-  channelId: string
-  runId: string
-  createdAt: number
-}
-
-/**
- * A turn typed from Slack while the run was still working.
- *
- * `sendFollowUp` refuses to resume a run that is mid-turn, but from a phone
- * "actually, skip the tests" is exactly what you want to say *while* it is
- * busy. Rather than making the user wait and retype, the message is parked
- * here and flushed when the run finalizes.
- */
-export type SlackPendingTurnRow = {
-  id: string
-  runId: string
-  text: string
-  channelId: string
-  threadTs: string
-  userId: string
-  createdAt: number
-}
-
 /** One check's outcome within one verification pass of a run. */
 export type CheckResultRow = {
   id: string
@@ -360,8 +341,13 @@ export type WorkspaceRow = {
  * of the user's own editor/working copy and means removing a workspace never
  * risks touching files the user didn't ask us to manage.
  */
-export function agentopsHome(): string {
-  return process.env.AGENTOPS_HOME || path.join(os.homedir(), '.agentops')
+export function openrunHome(): string {
+  const fromEnv = openrunEnv('HOME')
+  if (fromEnv) return fromEnv
+  const next = path.join(os.homedir(), '.openrun')
+  const legacy = path.join(os.homedir(), '.agentops')
+  if (!existsSync(next) && existsSync(legacy)) return legacy
+  return next
 }
 
 /** Filesystem/URL-safe slug for project and branch directory names. */
@@ -378,14 +364,16 @@ let _db: Database.Database | null = null
 export function getDb(): Database.Database {
   if (_db) return _db
 
-  const dbPath = resolve(process.cwd(), 'data', 'agentops.db')
+  const next = resolve(process.cwd(), 'data', 'openrun.db')
+  const legacy = resolve(process.cwd(), 'data', 'agentops.db')
+  const dbPath = !existsSync(next) && existsSync(legacy) ? legacy : next
   if (!existsSync(dirname(dbPath))) mkdirSync(dirname(dbPath), { recursive: true })
 
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
-  // Slack bot/app tokens and webhook signing secrets are stored here in the
+  // Webhook signing secrets are stored here in the
   // clear, so file permissions are the only thing protecting them from other
   // accounts on the machine. Applied after open so the file exists, and to the
   // WAL sidecars too — they hold the same rows before a checkpoint.
@@ -560,6 +548,10 @@ function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'verdict', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'repairAttempts', 'INTEGER NOT NULL DEFAULT 0')
   addColumn(db, 'runs', 'timedOut', 'INTEGER NOT NULL DEFAULT 0')
+
+  addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'tasks', 'fireOnce', 'INTEGER NOT NULL DEFAULT 0')
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS check_results (
@@ -738,34 +730,16 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_turn_events_message
       ON turn_events(messageId, seq ASC);
-  `)
-
-  // Slack control surface. Connection settings live in app_meta (a singleton
-  // connection, unlike integrations which are per-repo), so only the thread
-  // binding needs a table: it is what turns a plain reply in a Slack thread
-  // into the next turn of the run that thread is about.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS slack_threads (
-      threadTs TEXT NOT NULL,
-      channelId TEXT NOT NULL,
-      runId TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      PRIMARY KEY (channelId, threadTs)
+    -- Models the installed CLIs actually offer, discovered in the background so
+    -- the composer never pays for it. The fingerprint identifies the binary the
+    -- rows came from; a mismatch is what schedules the next refresh. Pure
+    -- cache: safe to delete, rebuilt on the next boot.
+    CREATE TABLE IF NOT EXISTS model_catalog (
+      kind TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      models TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_slack_threads_run
-      ON slack_threads(runId, createdAt DESC);
-
-    CREATE TABLE IF NOT EXISTS slack_pending_turns (
-      id TEXT PRIMARY KEY,
-      runId TEXT NOT NULL,
-      text TEXT NOT NULL,
-      channelId TEXT NOT NULL DEFAULT '',
-      threadTs TEXT NOT NULL DEFAULT '',
-      userId TEXT NOT NULL DEFAULT '',
-      createdAt INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_slack_pending_turns_run
-      ON slack_pending_turns(runId, createdAt ASC);
   `)
 }
 

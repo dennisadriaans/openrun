@@ -7,6 +7,7 @@ import { restartCloudRelay, startCloudRelay, stopCloudRelay } from './relay.ts'
 import { signOutCloud } from './login.ts'
 
 export { getCloudStatus } from './status.ts'
+export { skipCloudOnboarding } from './onboarding.ts'
 export {
   completeCloudLogin,
   configuredCloudUrl,

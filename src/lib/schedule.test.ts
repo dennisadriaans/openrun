@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   buildCron,
+  defaultOnceAtCron,
   formatTime,
   formatTimezoneOffset,
   nextRunAt,
@@ -70,5 +71,10 @@ describe('format helpers', () => {
     const ts = nextRunAt('0 4 * * *', from)
     assert.ok(typeof ts === 'number')
     assert.ok(ts > from.getTime())
+  })
+
+  it('defaults once-at to the next local hour', () => {
+    assert.equal(defaultOnceAtCron(new Date('2026-08-15T02:40:00')), '0 3 * * *')
+    assert.equal(defaultOnceAtCron(new Date('2026-08-15T23:10:00')), '0 0 * * *')
   })
 })

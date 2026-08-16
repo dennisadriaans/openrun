@@ -7,7 +7,7 @@ body:
       value: |
         Open Run drives headless coding-agent CLIs as child processes. Adding one
         is the most self-contained contribution available — see
-        [adding a runtime](https://getopenrun.dev/docs/adding-a-runtime).
+        [adding a runtime](https://openrun.sh/docs/adding-a-runtime).
 
         A CLI is a good fit only if it is **non-interactive**: it accepts a prompt
         on stdin or via a file, does its work, and exits. TUI-only agents and IDE

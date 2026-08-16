@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { missingRuntimeBinaryMessage } from './runtimeBinary.ts'
 import { runPrereqBlockedReason, workspaceBlockedReason } from './runPrereqGate.ts'
 import { emptyTaskPromptMessage } from './taskPrompt.ts'
+import { missingNativeSessionMessage } from './nativeSessions.ts'
 import { missingWorkspaceMessage } from './workspaceRef.ts'
 import { workspaceNotReadyMessage } from './workspaceReady.ts'
 
@@ -80,10 +81,28 @@ describe('runPrereqBlockedReason', () => {
     )
   })
 
-  it('flags an empty prompt last', () => {
+  it('flags an empty prompt before a missing native chat', () => {
     assert.equal(
       runPrereqBlockedReason({ ...healthy, promptValid: false }),
       emptyTaskPromptMessage(),
+    )
+  })
+
+  it('flags a missing native Claude chat last', () => {
+    assert.equal(
+      runPrereqBlockedReason({
+        ...healthy,
+        resumeSessionId: 'sess-1',
+        resumeSessionValid: false,
+      }),
+      missingNativeSessionMessage(),
+    )
+  })
+
+  it('ignores resumeSessionValid when no native session is bound', () => {
+    assert.equal(
+      runPrereqBlockedReason({ ...healthy, resumeSessionId: '', resumeSessionValid: false }),
+      null,
     )
   })
 })

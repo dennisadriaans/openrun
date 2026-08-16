@@ -21,6 +21,7 @@ import { isSupervised } from '../lib/supervisedPolicy'
 import { buildStreamJsonUserMessage } from '../lib/claudeControl'
 import { extractGrokAssistantText } from '../lib/agentEvents/grok.ts'
 import { isAcpTransport } from '../lib/acpTransport'
+import type { EventRuntimeKind } from '../lib/agentEvents/types.ts'
 import type { RuntimeRow } from './db'
 import { ensureMachineReadableArgs } from './turnEvents'
 
@@ -56,7 +57,17 @@ export function runtimeKind(bin: string): RuntimeKind {
   // Gemini has a model catalog and ACP support, but no headless resume flag of
   // its own — over the CLI transport it stays single-shot (see supportsResume).
   if (name.includes('gemini')) return 'gemini'
+  if (name === 'agy' || name.includes('antigravity')) return 'antigravity'
   return 'generic'
+}
+
+/**
+ * Antigravity mirrors Claude Code's headless surface (`-p`, `--output-format
+ * stream-json`, `--dangerously-skip-permissions`, `--model`, `--effort`), so it
+ * reuses Claude's stdout adapter rather than getting a near-identical copy.
+ */
+export function eventKindFor(kind: RuntimeKind): EventRuntimeKind {
+  return kind === 'antigravity' ? 'claude' : (kind as EventRuntimeKind)
 }
 
 export type TurnCommand = {
@@ -117,7 +128,7 @@ function appendModelEffortArgs(
   const insertAt = stdinIdx >= 0 ? stdinIdx : next.length
   const flags: string[] = []
 
-  if (kind === 'claude') {
+  if (kind === 'claude' || kind === 'antigravity') {
     if (model) flags.push('--model', model)
     const cliEffort = cliEffortValue(kind, modelOpt, effort ?? '')
     if (cliEffort) flags.push('--effort', cliEffort)
@@ -141,8 +152,8 @@ function stripPermissionFlags(args: string[]): string[] {
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!
     if (a === SKIP_PERMISSIONS || a === ALWAYS_APPROVE) continue
-    if (a === '--permission-mode' || a === '--sandbox' || a === '--full-auto') {
-      if (a === '--permission-mode' || a === '--sandbox') i += 1
+    if (a === '--permission-mode' || a === '--sandbox' || a === '--full-auto' || a === '--mode') {
+      if (a !== '--full-auto') i += 1
       continue
     }
     if (a.startsWith('-c') && args[i + 1]?.includes('approval_policy')) {
@@ -187,6 +198,13 @@ function applyRuntimeModeFlags(
     if (runtimeMode === 'full-access') {
       flags.push(ALWAYS_APPROVE)
     }
+  } else if (kind === 'antigravity') {
+    if (runtimeMode === 'full-access') {
+      flags.push(SKIP_PERMISSIONS)
+    } else if (runtimeMode === 'auto-accept-edits') {
+      // `agy` spells Claude's `--permission-mode acceptEdits` as `--mode`.
+      flags.push('--mode', 'accept-edits')
+    }
   }
 
   if (flags.length === 0) return cleaned
@@ -208,6 +226,7 @@ function isResumeOwnedFlag(arg: string, next: string | undefined, kind: RuntimeK
     arg === '--skip-git-repo-check' ||
     arg === '--resume' ||
     arg === '-r' ||
+    arg === '--conversation' ||
     arg === '--continue' ||
     arg === '-c' ||
     arg === 'exec' ||
@@ -229,6 +248,7 @@ function isResumeOwnedFlag(arg: string, next: string | undefined, kind: RuntimeK
   }
   if (arg === '--reasoning-effort' || arg === '--session-id' || arg === '-s') return true
   if (arg === '--prompt-file' || arg === '--permission-mode' || arg === '--sandbox') return true
+  if (kind === 'antigravity' && (arg === '--mode' || arg === '--conversation')) return true
   if (arg.startsWith('-c') && next?.includes('model_reasoning_effort')) return true
   if (arg.startsWith('-c') && next?.includes('approval_policy')) return true
   if (kind === 'claude' && (arg === next || next === undefined) && arg === '{prompt}') return true
@@ -258,6 +278,8 @@ function extractPreservedTemplateArgs(template: string[], kind: RuntimeKind): st
         a === '--sandbox' ||
         a === '--resume' ||
         a === '-r' ||
+        a === '--conversation' ||
+        a === '--mode' ||
         a === PERMISSION_PROMPT_TOOL ||
         a === STREAM_JSON ||
         (a === '-c' && next)
@@ -338,7 +360,7 @@ export function buildTurnCommand(input: {
     args = appendModelEffortArgs(args, kind, model, effort)
     args = applyRuntimeModeFlags(args, kind, runtimeMode)
     if (machineReadable) {
-      args = ensureMachineReadableArgs(args, kind)
+      args = ensureMachineReadableArgs(args, eventKindFor(kind))
     }
 
     const promptFileContents = needsPromptFile(args) ? prompt : null
@@ -405,6 +427,27 @@ export function buildTurnCommand(input: {
     }
   }
 
+  if (kind === 'antigravity') {
+    // `--conversation <id>` is the by-id resume; `--continue` picks the most
+    // recent one for the cwd, which is right when the id never surfaced.
+    let args = sessionId
+      ? ['-p', '--output-format', 'stream-json', '--conversation', sessionId]
+      : ['-p', '--output-format', 'stream-json', '--continue']
+    args = mergePreservedArgs(args, preserved)
+    args = appendModelEffortArgs(args, kind, model, effort)
+    args = applyRuntimeModeFlags(args, kind, runtimeMode)
+    return {
+      args,
+      stdin: prompt,
+      promptFileContents: null,
+      display: display(runtime.bin, args),
+      canResume: true,
+      keepStdinOpen: false,
+      acpPrompt: prompt,
+      acpSessionId: sessionId,
+    }
+  }
+
   if (kind === 'codex') {
     let args = sessionId
       ? ['exec', '--json', 'resume', sessionId, '--skip-git-repo-check', '-']
@@ -437,7 +480,7 @@ export function buildTurnCommand(input: {
     args = mergePreservedArgs(args, preserved)
     args = appendModelEffortArgs(args, kind, model, effort)
     args = applyRuntimeModeFlags(args, kind, runtimeMode)
-    args = ensureMachineReadableArgs(args, kind)
+    args = ensureMachineReadableArgs(args, eventKindFor(kind))
     return {
       args,
       stdin: null,

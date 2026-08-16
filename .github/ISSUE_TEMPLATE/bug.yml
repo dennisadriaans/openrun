@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Setup help ("my Slack app won't connect", "which runtime should I use")
+        Setup help ("my webhook won't fire", "which runtime should I use")
         belongs in [Discussions](../../discussions), not here. Issues are for
         bugs and roadmap work.
 
@@ -46,7 +46,6 @@ body:
         - Attempts / racing
         - Chat / turn events / approvals
         - Webhooks (GitHub / Jira / Linear)
-        - Slack control surface
         - Notifications
         - UI / live updates
         - Install / build / setup

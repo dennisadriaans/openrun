@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { canRunTaskNow, runNowBlockedReason } from './runNowGate.ts'
 import { missingRuntimeBinaryMessage } from './runtimeBinary.ts'
 import { emptyTaskPromptMessage } from './taskPrompt.ts'
+import { missingNativeSessionMessage } from './nativeSessions.ts'
 import { missingWorkspaceMessage } from './workspaceRef.ts'
 import { workspaceNotReadyMessage } from './workspaceReady.ts'
 
@@ -76,9 +77,20 @@ describe('runNowBlockedReason', () => {
     )
   })
 
-  it('flags an empty prompt last', () => {
+  it('flags an empty prompt before a missing native chat', () => {
     assert.equal(runNowBlockedReason({ ...healthy, promptValid: false }), emptyTaskPromptMessage())
     assert.equal(canRunTaskNow({ ...healthy, promptValid: false }), false)
+  })
+
+  it('flags a missing native Claude chat last', () => {
+    assert.equal(
+      runNowBlockedReason({
+        ...healthy,
+        resumeSessionId: 'sess-1',
+        resumeSessionValid: false,
+      }),
+      missingNativeSessionMessage(),
+    )
   })
 
   it('does not block on cron — invalid schedules still allow Run now', () => {

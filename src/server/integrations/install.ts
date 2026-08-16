@@ -20,6 +20,7 @@ import { providerMeta } from '../../lib/integrations/catalog.ts'
 import { checkRuntimeInstalled } from '../runtimePath.ts'
 import { getDb, type RuntimeRow } from '../db.ts'
 import { ghStatus } from '../git.ts'
+import { openrunEnv } from '../../lib/openrunEnv.ts'
 import { listProjects } from '../workspaces.ts'
 import {
   createIntegration,
@@ -116,10 +117,10 @@ function assertAutomationTargets(input: InstallIntegrationInput): {
 
 /**
  * Snapshot used by the Install UI — gh auth, suggested repos, runtimes, workspaces.
- * Suggested public URL comes from AGENTOPS_BASE_URL when set (optional convenience only).
+ * Suggested public URL comes from OPENRUN_BASE_URL when set (optional convenience only).
  */
 export function getInstallContext(): InstallContext {
-  const suggestedPublicBaseUrl = (process.env.AGENTOPS_BASE_URL || '').trim().replace(/\/+$/, '')
+  const suggestedPublicBaseUrl = openrunEnv('BASE_URL').replace(/\/+$/, '')
   const gh = ghStatus()
 
   const projectRepos: InstallContext['githubRepos'] = []

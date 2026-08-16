@@ -3,7 +3,7 @@ contact_links:
   - name: Setup help and questions
     url: https://github.com/dennisadriaans/openrun/discussions
     about: >
-      Installing, connecting a Slack app, choosing a runtime, writing prompts.
+      Installing, connecting a webhook, choosing a runtime, writing prompts.
       Setup friction reported here shapes what gets built next.
   - name: Report a security vulnerability
     url: https://github.com/dennisadriaans/openrun/security/advisories/new

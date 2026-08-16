@@ -23,6 +23,15 @@ export type PickerPrefs = {
   runtimeMode?: RuntimeMode
   /** Last model/effort keyed by runtime id. */
   byRuntime?: Record<string, RuntimeModelPref>
+  /**
+   * Model slugs the user has hidden from every picker.
+   *
+   * Deliberately flat rather than keyed by runtime: "I never use Sonnet 4.x"
+   * is a statement about the model, not about one runtime row, so hiding it
+   * once covers a second Claude runtime too. Display-only — a run already on a
+   * hidden model keeps working, and the server never reads this.
+   */
+  hiddenModels?: string[]
 }
 
 /** Patch applied via {@link usePickerPrefs}'s `remember`. */
@@ -33,6 +42,7 @@ export type PickerPrefsPatch = {
   forRuntimeId?: string
   model?: string
   effort?: string
+  hiddenModels?: string[]
 }
 
 function sanitize(raw: unknown): PickerPrefs {
@@ -52,6 +62,9 @@ function sanitize(raw: unknown): PickerPrefs {
       by[id] = pref
     }
     out.byRuntime = by
+  }
+  if (Array.isArray(obj.hiddenModels)) {
+    out.hiddenModels = obj.hiddenModels.filter((s): s is string => typeof s === 'string')
   }
   return out
 }
@@ -78,6 +91,7 @@ export function applyPatch(prev: PickerPrefs, patch: PickerPrefsPatch): PickerPr
   const next: PickerPrefs = { ...prev }
   if (patch.runtimeId !== undefined) next.runtimeId = patch.runtimeId
   if (patch.runtimeMode !== undefined) next.runtimeMode = patch.runtimeMode
+  if (patch.hiddenModels !== undefined) next.hiddenModels = patch.hiddenModels
 
   const scope = patch.forRuntimeId ?? patch.runtimeId ?? prev.runtimeId
   if (scope && (patch.model !== undefined || patch.effort !== undefined)) {

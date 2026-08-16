@@ -54,3 +54,12 @@ describe('pickerPrefForRuntime', () => {
     assert.deepEqual(pickerPrefForRuntime({ byRuntime: {} }, undefined), {})
   })
 })
+
+describe('hidden models', () => {
+  it('round-trips through a patch so the choice survives a reload', () => {
+    const next = applyPatch({}, { hiddenModels: ['claude-sonnet-4-6'] })
+    assert.deepEqual(next.hiddenModels, ['claude-sonnet-4-6'])
+    // Unrelated patches must not drop it.
+    assert.deepEqual(applyPatch(next, { runtimeId: 'claude' }).hiddenModels, ['claude-sonnet-4-6'])
+  })
+})

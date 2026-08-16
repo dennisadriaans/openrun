@@ -4,8 +4,8 @@
  * Open Run is open core. This module is the machine-readable form of the
  * commitment in the README: **everything that runs on your machine is AGPLv3
  * and stays that way.** What is sold separately is the set of things that need
- * somebody else's server — a managed Slack app, a fleet dashboard across
- * machines, hosted run history, remote runners, SSO, audit, policy.
+ * somebody else's server — a fleet dashboard across machines, hosted run
+ * history, remote runners, SSO, audit, policy.
  *
  * Two consequences are load-bearing and are asserted in the colocated test:
  *
@@ -73,7 +73,6 @@ export function editionLabel(edition: Edition): string {
  * not something withheld to create an upgrade path.
  */
 export const CONTROL_PLANE_CAPABILITIES = [
-  'managed-slack-app',
   'fleet-dashboard',
   'hosted-run-history',
   'hosted-webhook-ingress',

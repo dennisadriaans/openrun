@@ -13,30 +13,38 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import {
   ACCESS_TOKEN_COOKIE,
+  ACCESS_TOKEN_COOKIE_LEGACY,
   ACCESS_TOKEN_HEADER,
+  ACCESS_TOKEN_HEADER_LEGACY,
   ACCESS_TOKEN_QUERY_PARAM,
+  ACCESS_TOKEN_QUERY_PARAM_LEGACY,
+  accessCookieHeader,
   DEFAULT_HOST,
   hostHeaderRefusal,
   insecureHostWarning,
+  isDocumentRequest,
   parseAllowedHosts,
   pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
+  unauthorizedMessage,
+  urlWithoutAccessToken,
   type ServerAccessConfig,
 } from '../lib/serverAccess.ts'
-import { agentopsHome } from './db.ts'
+import { openrunEnv } from '../lib/openrunEnv.ts'
+import { openrunHome } from './db.ts'
 
 /** Owner read/write only. Anything wider and the token is not a secret. */
 const OWNER_ONLY = 0o600
 
 /** Interface the server binds. */
 export function resolveHost(): string {
-  return process.env.AGENTOPS_HOST?.trim() || DEFAULT_HOST
+  return openrunEnv('HOST') || DEFAULT_HOST
 }
 
 function allowInsecureHost(): boolean {
-  const raw = process.env.AGENTOPS_ALLOW_INSECURE_HOST?.trim().toLowerCase()
+  const raw = openrunEnv('ALLOW_INSECURE_HOST').toLowerCase()
   return raw === '1' || raw === 'true' || raw === 'yes'
 }
 
@@ -52,8 +60,8 @@ let cachedToken: { value: string | null } | null = null
 /**
  * The configured access token, or `null` when there is none.
  *
- * `AGENTOPS_ACCESS_TOKEN` wins. Otherwise we look for a token previously
- * written to `~/.agentops/access-token` — but we never *generate* one here.
+ * `OPENRUN_ACCESS_TOKEN` wins. Otherwise we look for a token previously
+ * written to `~/.openrun/access-token` — but we never *generate* one here.
  * Auto-generating on a loopback-only install would hand every user a secret
  * they have to manage in order to use a tool the operating system already
  * protects, and it would break `curl localhost:3000` for no gain.
@@ -62,7 +70,7 @@ let cachedToken: { value: string | null } | null = null
 export function resolveAccessToken(): string | null {
   if (cachedToken) return cachedToken.value
 
-  const fromEnv = process.env.AGENTOPS_ACCESS_TOKEN?.trim()
+  const fromEnv = openrunEnv('ACCESS_TOKEN')
   if (fromEnv) {
     cachedToken = { value: fromEnv }
     return fromEnv
@@ -81,13 +89,13 @@ export function resolveAccessToken(): string | null {
 
 /** Where a generated token is persisted between restarts. */
 export function accessTokenPath(): string {
-  return join(agentopsHome(), 'access-token')
+  return join(openrunHome(), 'access-token')
 }
 
 /**
  * Return the access token, creating and persisting one if none exists.
  *
- * Called by operators (via `pnpm token`) rather than on the boot path, so a
+ * Called by operators (via `pnpm token:print`) rather than on the boot path, so a
  * default loopback install never grows a credential it did not ask for.
  */
 export function ensureAccessToken(): string {
@@ -95,7 +103,7 @@ export function ensureAccessToken(): string {
   if (existing) return existing
 
   const token = randomBytes(32).toString('hex')
-  const home = agentopsHome()
+  const home = openrunHome()
   if (!existsSync(home)) mkdirSync(home, { recursive: true, mode: 0o700 })
 
   const file = accessTokenPath()
@@ -114,7 +122,7 @@ export function serverAccessConfig(): ServerAccessConfig {
     host: resolveHost(),
     hasToken: resolveAccessToken() !== null,
     allowInsecureHost: allowInsecureHost(),
-    allowedHosts: parseAllowedHosts(process.env.AGENTOPS_ALLOWED_HOSTS),
+    allowedHosts: parseAllowedHosts(openrunEnv('ALLOWED_HOSTS')),
   }
 }
 
@@ -197,14 +205,20 @@ function cookieValue(header: string | null, name: string): string | null {
  * token to URLs after the first authenticated load.
  */
 function presentedToken(request: Request): string | null {
-  const header = request.headers.get(ACCESS_TOKEN_HEADER)
+  const header =
+    request.headers.get(ACCESS_TOKEN_HEADER) ?? request.headers.get(ACCESS_TOKEN_HEADER_LEGACY)
   if (header) return header.trim()
 
-  const cookie = cookieValue(request.headers.get('cookie'), ACCESS_TOKEN_COOKIE)
+  const cookieHeader = request.headers.get('cookie')
+  const cookie =
+    cookieValue(cookieHeader, ACCESS_TOKEN_COOKIE) ??
+    cookieValue(cookieHeader, ACCESS_TOKEN_COOKIE_LEGACY)
   if (cookie) return cookie
 
   try {
-    const fromQuery = new URL(request.url).searchParams.get(ACCESS_TOKEN_QUERY_PARAM)
+    const params = new URL(request.url).searchParams
+    const fromQuery =
+      params.get(ACCESS_TOKEN_QUERY_PARAM) ?? params.get(ACCESS_TOKEN_QUERY_PARAM_LEGACY)
     if (fromQuery) return fromQuery.trim()
   } catch {
     // A request URL we cannot parse simply has no query token.
@@ -213,22 +227,54 @@ function presentedToken(request: Request): string | null {
   return null
 }
 
+/** Whether the token may be marked `Secure` — i.e. this connection is HTTPS. */
+function requestIsSecure(request: Request): boolean {
+  const forwarded = request.headers.get('x-forwarded-proto')
+  if (forwarded) return forwarded.split(',')[0]?.trim().toLowerCase() === 'https'
+
+  try {
+    return new URL(request.url).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 /**
- * `null` when the request may proceed, or a `Response` to return instead.
+ * What the global middleware should do with a request.
+ *
+ * `respond` short-circuits with that exact response — a refusal, or the
+ * redirect that strips the token out of the address bar. `proceed` runs the
+ * handler, appending `setCookie` to whatever it returns.
+ */
+export type AccessDecision =
+  | { kind: 'respond'; response: Response }
+  | { kind: 'proceed'; setCookie: string | null }
+
+const PROCEED: AccessDecision = { kind: 'proceed', setCookie: null }
+
+function refuse(body: string, status: number): AccessDecision {
+  return {
+    kind: 'respond',
+    response: new Response(body, { status, headers: { 'Cache-Control': 'no-store' } }),
+  }
+}
+
+/**
+ * Whether the request may proceed, and what the browser is handed on its way.
  *
  * Applied globally in `src/start.ts`, so every server function and every API
  * route is covered by one decision rather than 71 individual ones.
+ *
+ * A request that authenticates by header or query parameter also *establishes*
+ * the cookie. Without that step a configured token is unusable from a browser:
+ * the SPA's own calls carry no header, so the first page load would be the only
+ * request that ever succeeded.
  */
-export function accessRefusalResponse(request: Request): Response | null {
+export function accessDecision(request: Request): AccessDecision {
   // A configuration we refused to boot under must not serve traffic either —
   // in dev, Vite has already opened the port by the time this runs.
   const bindRefusal = serverAccessRefusal()
-  if (bindRefusal) {
-    return new Response(bindRefusal, {
-      status: 503,
-      headers: { 'Cache-Control': 'no-store' },
-    })
-  }
+  if (bindRefusal) return refuse(bindRefusal, 503)
 
   const config = serverAccessConfig()
 
@@ -239,28 +285,64 @@ export function accessRefusalResponse(request: Request): Response | null {
     // Unparseable URL: fall through and require the token.
   }
 
-  // Signed webhook and Slack endpoints authenticate their callers themselves.
+  // Signed webhook endpoints authenticate their callers themselves.
   // They are also the endpoints a third party addresses by a tunnel hostname,
   // so they sit ahead of the Host check as well as the token check.
-  if (pathAuthenticatesItself(pathname)) return null
+  if (pathAuthenticatesItself(pathname)) return PROCEED
 
   // Runs before the token check: a rebound page is refused whether or not a
   // token is configured, and the default install has none.
   const hostRefusal = hostHeaderRefusal(config, request.headers.get('host'))
-  if (hostRefusal) {
-    return new Response(hostRefusal, {
-      status: 403,
-      headers: { 'Cache-Control': 'no-store' },
-    })
-  }
+  if (hostRefusal) return refuse(hostRefusal, 403)
 
-  if (!tokenRequiredForRequests(config)) return null
+  if (!tokenRequiredForRequests(config)) return PROCEED
 
   const expected = resolveAccessToken()
-  if (expected && tokensMatch(expected, presentedToken(request))) return null
+  if (!expected || !tokensMatch(expected, presentedToken(request))) {
+    return refuse(unauthorizedMessage(), 401)
+  }
 
-  return new Response('Unauthorized: missing or invalid Open Run access token.', {
-    status: 401,
-    headers: { 'Cache-Control': 'no-store' },
-  })
+  // Already holding the cookie: nothing to hand out, nothing to clean up.
+  if (cookieValue(request.headers.get('cookie'), ACCESS_TOKEN_COOKIE) === expected) return PROCEED
+  if (cookieValue(request.headers.get('cookie'), ACCESS_TOKEN_COOKIE_LEGACY) === expected) {
+    return { kind: 'proceed', setCookie: accessCookieHeader(expected, requestIsSecure(request)) }
+  }
+
+  const cookie = accessCookieHeader(expected, requestIsSecure(request))
+
+  // A page load that carried the token in its URL gets bounced to a clean one,
+  // so the secret does not sit in history, in the address bar, or in a Referer.
+  const cleaned = urlWithoutAccessToken(request.url)
+  if (cleaned && isDocumentRequest(request.method, request.headers.get('accept'))) {
+    return {
+      kind: 'respond',
+      response: new Response(null, {
+        status: 303,
+        headers: { location: cleaned, 'set-cookie': cookie, 'Cache-Control': 'no-store' },
+      }),
+    }
+  }
+
+  return { kind: 'proceed', setCookie: cookie }
+}
+
+/**
+ * Attach the token cookie to a handler's response.
+ *
+ * Headers are immutable on some responses (anything that came back from
+ * `fetch`), so fall back to rebuilding rather than throwing inside middleware.
+ */
+export function withAccessCookie(response: Response, cookie: string): Response {
+  try {
+    response.headers.append('set-cookie', cookie)
+    return response
+  } catch {
+    const headers = new Headers(response.headers)
+    headers.append('set-cookie', cookie)
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
+  }
 }
