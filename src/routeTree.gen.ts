@@ -15,6 +15,7 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PlannerRouteImport } from './routes/planner'
 import { Route as RuntimesRouteImport } from './routes/runtimes'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as CloudCallbackRouteImport } from './routes/cloud.callback'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsProviderRouteImport } from './routes/integrations.$provider'
@@ -76,6 +77,11 @@ const PlannerRoute = PlannerRouteImport.update({
 const RuntimesRoute = RuntimesRouteImport.update({
   id: '/runtimes',
   path: '/runtimes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CloudCallbackRoute = CloudCallbackRouteImport.update({
@@ -254,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -293,6 +300,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -334,6 +342,7 @@ export interface FileRoutesById {
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -376,6 +385,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
     | '/runs/$runId'
@@ -415,6 +425,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
     | '/runs/$runId'
@@ -455,6 +466,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
     | '/runs/$runId'
@@ -496,6 +508,7 @@ export interface RootRouteChildren {
   NotificationsRoute: typeof NotificationsRoute
   PlannerRoute: typeof PlannerRoute
   RuntimesRoute: typeof RuntimesRoute
+  WelcomeRoute: typeof WelcomeRoute
   CloudCallbackRoute: typeof CloudCallbackRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   RunsNewRoute: typeof RunsNewRoute
@@ -568,6 +581,13 @@ declare module '@tanstack/react-router' {
       path: '/runtimes'
       fullPath: '/runtimes'
       preLoaderRoute: typeof RuntimesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cloud/callback': {
@@ -846,6 +866,7 @@ const rootRouteChildren: RootRouteChildren = {
   NotificationsRoute: NotificationsRoute,
   PlannerRoute: PlannerRoute,
   RuntimesRoute: RuntimesRoute,
+  WelcomeRoute: WelcomeRoute,
   CloudCallbackRoute: CloudCallbackRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   RunsNewRoute: RunsNewRoute,

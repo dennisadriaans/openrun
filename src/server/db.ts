@@ -1,7 +1,7 @@
 /**
  * SQLite persistence layer.
  *
- * Everything is stored in a single local file (./data/agentops.db) so the whole
+ * Everything is stored in a single local file (./data/openrun.db) so the whole
  * proof-of-concept is self-contained and requires no external services. This
  * module is server-only — it is never imported into client bundles (route
  * components reach it exclusively through server functions).
@@ -12,6 +12,7 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { dirname, resolve } from 'node:path'
+import { openrunEnv } from '../lib/openrunEnv.ts'
 import { RUNTIME_PRESETS } from '../lib/runtimePresets.ts'
 import { ensureProcessPathAugmented } from './userPath.ts'
 
@@ -340,8 +341,13 @@ export type WorkspaceRow = {
  * of the user's own editor/working copy and means removing a workspace never
  * risks touching files the user didn't ask us to manage.
  */
-export function agentopsHome(): string {
-  return process.env.AGENTOPS_HOME || path.join(os.homedir(), '.agentops')
+export function openrunHome(): string {
+  const fromEnv = openrunEnv('HOME')
+  if (fromEnv) return fromEnv
+  const next = path.join(os.homedir(), '.openrun')
+  const legacy = path.join(os.homedir(), '.agentops')
+  if (!existsSync(next) && existsSync(legacy)) return legacy
+  return next
 }
 
 /** Filesystem/URL-safe slug for project and branch directory names. */
@@ -358,7 +364,9 @@ let _db: Database.Database | null = null
 export function getDb(): Database.Database {
   if (_db) return _db
 
-  const dbPath = resolve(process.cwd(), 'data', 'agentops.db')
+  const next = resolve(process.cwd(), 'data', 'openrun.db')
+  const legacy = resolve(process.cwd(), 'data', 'agentops.db')
+  const dbPath = !existsSync(next) && existsSync(legacy) ? legacy : next
   if (!existsSync(dirname(dbPath))) mkdirSync(dirname(dbPath), { recursive: true })
 
   const db = new Database(dbPath)

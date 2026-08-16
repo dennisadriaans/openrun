@@ -468,6 +468,10 @@ export const completeCloudLogin = createServerFn({ method: 'POST' })
     return { email: session.email, userId: session.userId }
   })
 
+export const skipCloudOnboarding = createServerFn({ method: 'POST' }).handler(async () =>
+  (await core()).skipCloudOnboarding(),
+)
+
 export const signOutCloud = createServerFn({ method: 'POST' }).handler(async () => {
   await (await core()).signOutAndDisconnect()
   return { ok: true }

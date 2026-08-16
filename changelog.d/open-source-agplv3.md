@@ -29,5 +29,5 @@ this project never produces, so it exited without ever listening; it now serves
 the real build — streaming SSE responses rather than buffering them — after
 checking the bind address.
 
-Docs: [getopenrun.dev](https://getopenrun.dev) covers install, architecture,
+Docs: [openrun.sh](https://openrun.sh) covers install, architecture,
 the security model, and how to add another agent CLI.

@@ -26,23 +26,25 @@ import { Readable } from 'node:stream'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_HOST, insecureHostWarning, serverBindRefusal } from '../src/lib/serverAccess.ts'
+import { openrunEnv } from '../src/lib/openrunEnv.ts'
 
 // ---------------------------------------------------------------------------
 // 1. Refuse an unsafe bind
 // ---------------------------------------------------------------------------
 
 function storedTokenExists(): boolean {
-  const home =
-    process.env.AGENTOPS_HOME ||
-    resolve(process.env.HOME || process.env.USERPROFILE || '.', '.agentops')
-  return existsSync(resolve(home, 'access-token'))
+  const fromEnv = openrunEnv('HOME')
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '.'
+  const home = fromEnv || resolve(homeDir, '.openrun')
+  const legacy = fromEnv || resolve(homeDir, '.agentops')
+  return existsSync(resolve(home, 'access-token')) || existsSync(resolve(legacy, 'access-token'))
 }
 
-const host = process.env.AGENTOPS_HOST?.trim() || DEFAULT_HOST
-const allowInsecureRaw = process.env.AGENTOPS_ALLOW_INSECURE_HOST?.trim().toLowerCase()
+const host = openrunEnv('HOST') || DEFAULT_HOST
+const allowInsecureRaw = openrunEnv('ALLOW_INSECURE_HOST').toLowerCase()
 const config = {
   host,
-  hasToken: Boolean(process.env.AGENTOPS_ACCESS_TOKEN?.trim() || storedTokenExists()),
+  hasToken: Boolean(openrunEnv('ACCESS_TOKEN') || storedTokenExists()),
   allowInsecureHost:
     allowInsecureRaw === '1' || allowInsecureRaw === 'true' || allowInsecureRaw === 'yes',
 }

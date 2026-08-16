@@ -76,7 +76,7 @@ test('a non-loopback bind with no token is refused', () => {
   })
   assert.ok(refusal, 'expected a refusal')
   assert.match(refusal, /0\.0\.0\.0/)
-  assert.match(refusal, /AGENTOPS_ACCESS_TOKEN/)
+  assert.match(refusal, /OPENRUN_ACCESS_TOKEN/)
 })
 
 test('a token, or the explicit override, unblocks a non-loopback bind', () => {
@@ -181,7 +181,7 @@ test('a rebound hostname is refused even with no token configured', () => {
   const refusal = hostHeaderRefusal(loopbackBind, 'evil.example:3000')
   assert.ok(refusal, 'expected a refusal')
   assert.match(refusal, /evil\.example/)
-  assert.match(refusal, /AGENTOPS_ALLOWED_HOSTS/)
+  assert.match(refusal, /OPENRUN_ALLOWED_HOSTS/)
 
   // A token does not change the answer: the guard runs before it.
   assert.ok(hostHeaderRefusal({ ...loopbackBind, hasToken: true }, 'evil.example'))
@@ -253,15 +253,19 @@ test('the token cookie is scoped to the whole app and hidden from scripts', () =
 })
 
 test('a token with cookie-hostile characters survives the round trip', () => {
-  assert.match(accessCookieHeader('a b;c', false), /^agentops_token=a%20b%3Bc;/)
+  assert.match(accessCookieHeader('a b;c', false), /^openrun_token=a%20b%3Bc;/)
 })
 
 test('the token is stripped from a URL without disturbing the rest of it', () => {
   assert.equal(
-    urlWithoutAccessToken('http://127.0.0.1:3000/runs/1?agentops_token=abc&tab=diff#top'),
+    urlWithoutAccessToken('http://127.0.0.1:3000/runs/1?openrun_token=abc&tab=diff#top'),
     '/runs/1?tab=diff#top',
   )
-  assert.equal(urlWithoutAccessToken('http://127.0.0.1:3000/?agentops_token=abc'), '/')
+  assert.equal(urlWithoutAccessToken('http://127.0.0.1:3000/?openrun_token=abc'), '/')
+  assert.equal(
+    urlWithoutAccessToken('http://127.0.0.1:3000/?agentops_token=abc'),
+    '/',
+  )
 })
 
 test('a URL carrying no token needs no redirect', () => {
@@ -284,6 +288,6 @@ test('the 401 tells the caller how to authenticate', () => {
   const message = unauthorizedMessage()
 
   assert.match(message, /pnpm token:print/)
-  assert.match(message, /agentops_token=/)
-  assert.match(message, /x-agentops-token/)
+  assert.match(message, /openrun_token=/)
+  assert.match(message, /x-openrun-token/)
 })

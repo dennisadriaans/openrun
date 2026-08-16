@@ -20,8 +20,8 @@ point its own domain at `127.0.0.1` (DNS rebinding) and then address Open Run as
 though it were same-origin. So on a loopback bind Open Run also refuses any
 request whose `Host` header is not a loopback name, and cross-site calls to
 server functions are rejected by a CSRF check. If you reach Open Run through a
-tunnel or reverse proxy, name it in `AGENTOPS_ALLOWED_HOSTS`. See
-[the security model](https://getopenrun.dev/docs/security) for the full trust
+tunnel or reverse proxy, name it in `OPENRUN_ALLOWED_HOSTS`. See
+[the security model](https://openrun.sh/docs/security) for the full trust
 model, including what we defend against and what we deliberately do not.
 
 ## Supported versions
@@ -95,14 +95,14 @@ with a pointer here.
   surfaced in the command preview, and requires acknowledgement before a schedule
   is armed. Its existence is a documented product decision.
 - **Secrets at rest in the local database.** Webhook secrets are stored
-  unencrypted in `~/.agentops` / `data/agentops.db`, protected by file
+  unencrypted in `~/.openrun` / `data/openrun.db`, protected by file
   permissions (`0600`) and nothing else. Disk encryption is your operating
   system's job. Encryption-at-rest is on the roadmap; see
-  [the known-gaps list](https://getopenrun.dev/docs/security#known-gaps).
+  [the known-gaps list](https://openrun.sh/docs/security#known-gaps).
 - **Anyone with a local shell account can control Open Run.** The trust boundary
   is the machine, not the user account.
 - **Deliberately exposing the server to a network** and then reporting that it is
-  reachable. Setting `AGENTOPS_HOST` to a non-loopback address is an explicit,
+  reachable. Setting `OPENRUN_HOST` to a non-loopback address is an explicit,
   warned-about choice.
 - Vulnerabilities in the agent CLIs themselves (`claude`, `codex`, `grok`,
   `gemini`) — report those to their vendors.
@@ -117,5 +117,5 @@ with a pointer here.
 2. Start with read-only prompts and a runtime that is *not* in full-access mode.
 3. Configure project checks so runs must prove themselves before you trust them.
 4. Use supervised mode for anything touching a repository you care about.
-5. Review `~/.agentops` permissions if you have ever copied the directory
+5. Review `~/.openrun` permissions if you have ever copied the directory
    between machines.

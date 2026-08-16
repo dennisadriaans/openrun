@@ -749,6 +749,14 @@ export function useCompleteCloudLogin() {
   })
 }
 
+export function useSkipCloudOnboarding() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => fns.skipCloudOnboarding(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cloudStatus'] }),
+  })
+}
+
 export function useSignOutCloud() {
   const qc = useQueryClient()
   return useMutation({

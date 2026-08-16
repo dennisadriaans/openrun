@@ -13,8 +13,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import {
   ACCESS_TOKEN_COOKIE,
+  ACCESS_TOKEN_COOKIE_LEGACY,
   ACCESS_TOKEN_HEADER,
+  ACCESS_TOKEN_HEADER_LEGACY,
   ACCESS_TOKEN_QUERY_PARAM,
+  ACCESS_TOKEN_QUERY_PARAM_LEGACY,
   accessCookieHeader,
   DEFAULT_HOST,
   hostHeaderRefusal,
@@ -29,18 +32,19 @@ import {
   urlWithoutAccessToken,
   type ServerAccessConfig,
 } from '../lib/serverAccess.ts'
-import { agentopsHome } from './db.ts'
+import { openrunEnv } from '../lib/openrunEnv.ts'
+import { openrunHome } from './db.ts'
 
 /** Owner read/write only. Anything wider and the token is not a secret. */
 const OWNER_ONLY = 0o600
 
 /** Interface the server binds. */
 export function resolveHost(): string {
-  return process.env.AGENTOPS_HOST?.trim() || DEFAULT_HOST
+  return openrunEnv('HOST') || DEFAULT_HOST
 }
 
 function allowInsecureHost(): boolean {
-  const raw = process.env.AGENTOPS_ALLOW_INSECURE_HOST?.trim().toLowerCase()
+  const raw = openrunEnv('ALLOW_INSECURE_HOST').toLowerCase()
   return raw === '1' || raw === 'true' || raw === 'yes'
 }
 
@@ -56,8 +60,8 @@ let cachedToken: { value: string | null } | null = null
 /**
  * The configured access token, or `null` when there is none.
  *
- * `AGENTOPS_ACCESS_TOKEN` wins. Otherwise we look for a token previously
- * written to `~/.agentops/access-token` — but we never *generate* one here.
+ * `OPENRUN_ACCESS_TOKEN` wins. Otherwise we look for a token previously
+ * written to `~/.openrun/access-token` — but we never *generate* one here.
  * Auto-generating on a loopback-only install would hand every user a secret
  * they have to manage in order to use a tool the operating system already
  * protects, and it would break `curl localhost:3000` for no gain.
@@ -66,7 +70,7 @@ let cachedToken: { value: string | null } | null = null
 export function resolveAccessToken(): string | null {
   if (cachedToken) return cachedToken.value
 
-  const fromEnv = process.env.AGENTOPS_ACCESS_TOKEN?.trim()
+  const fromEnv = openrunEnv('ACCESS_TOKEN')
   if (fromEnv) {
     cachedToken = { value: fromEnv }
     return fromEnv
@@ -85,7 +89,7 @@ export function resolveAccessToken(): string | null {
 
 /** Where a generated token is persisted between restarts. */
 export function accessTokenPath(): string {
-  return join(agentopsHome(), 'access-token')
+  return join(openrunHome(), 'access-token')
 }
 
 /**
@@ -99,7 +103,7 @@ export function ensureAccessToken(): string {
   if (existing) return existing
 
   const token = randomBytes(32).toString('hex')
-  const home = agentopsHome()
+  const home = openrunHome()
   if (!existsSync(home)) mkdirSync(home, { recursive: true, mode: 0o700 })
 
   const file = accessTokenPath()
@@ -118,7 +122,7 @@ export function serverAccessConfig(): ServerAccessConfig {
     host: resolveHost(),
     hasToken: resolveAccessToken() !== null,
     allowInsecureHost: allowInsecureHost(),
-    allowedHosts: parseAllowedHosts(process.env.AGENTOPS_ALLOWED_HOSTS),
+    allowedHosts: parseAllowedHosts(openrunEnv('ALLOWED_HOSTS')),
   }
 }
 
@@ -201,14 +205,20 @@ function cookieValue(header: string | null, name: string): string | null {
  * token to URLs after the first authenticated load.
  */
 function presentedToken(request: Request): string | null {
-  const header = request.headers.get(ACCESS_TOKEN_HEADER)
+  const header =
+    request.headers.get(ACCESS_TOKEN_HEADER) ?? request.headers.get(ACCESS_TOKEN_HEADER_LEGACY)
   if (header) return header.trim()
 
-  const cookie = cookieValue(request.headers.get('cookie'), ACCESS_TOKEN_COOKIE)
+  const cookieHeader = request.headers.get('cookie')
+  const cookie =
+    cookieValue(cookieHeader, ACCESS_TOKEN_COOKIE) ??
+    cookieValue(cookieHeader, ACCESS_TOKEN_COOKIE_LEGACY)
   if (cookie) return cookie
 
   try {
-    const fromQuery = new URL(request.url).searchParams.get(ACCESS_TOKEN_QUERY_PARAM)
+    const params = new URL(request.url).searchParams
+    const fromQuery =
+      params.get(ACCESS_TOKEN_QUERY_PARAM) ?? params.get(ACCESS_TOKEN_QUERY_PARAM_LEGACY)
     if (fromQuery) return fromQuery.trim()
   } catch {
     // A request URL we cannot parse simply has no query token.
@@ -294,6 +304,9 @@ export function accessDecision(request: Request): AccessDecision {
 
   // Already holding the cookie: nothing to hand out, nothing to clean up.
   if (cookieValue(request.headers.get('cookie'), ACCESS_TOKEN_COOKIE) === expected) return PROCEED
+  if (cookieValue(request.headers.get('cookie'), ACCESS_TOKEN_COOKIE_LEGACY) === expected) {
+    return { kind: 'proceed', setCookie: accessCookieHeader(expected, requestIsSecure(request)) }
+  }
 
   const cookie = accessCookieHeader(expected, requestIsSecure(request))
 

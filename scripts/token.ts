@@ -5,16 +5,21 @@
  * a default install is protected by the operating system and has no token at
  * all. See SECURITY.md.
  */
-import { ACCESS_TOKEN_QUERY_PARAM, DEFAULT_HOST } from '../src/lib/serverAccess.ts'
+import {
+  ACCESS_TOKEN_HEADER,
+  ACCESS_TOKEN_QUERY_PARAM,
+  DEFAULT_HOST,
+} from '../src/lib/serverAccess.ts'
+import { openrunEnv } from '../src/lib/openrunEnv.ts'
 import { accessTokenPath, ensureAccessToken } from '../src/server/accessToken.ts'
 
 const token = ensureAccessToken()
-const host = process.env.AGENTOPS_HOST?.trim() || DEFAULT_HOST
+const host = openrunEnv('HOST') || DEFAULT_HOST
 const port = Number(process.env.PORT || 3000)
 
 console.log(token)
 console.error(`\nStored in ${accessTokenPath()} (mode 0600).`)
 console.error(`\nSign a browser in once — the cookie it sets covers every later request:`)
 console.error(`  http://${host}:${port}/?${ACCESS_TOKEN_QUERY_PARAM}=${token}`)
-console.error(`\nScripts and curl send it as the \`x-agentops-token\` header instead.`)
-console.error(`Set AGENTOPS_ACCESS_TOKEN to pin a value of your own.`)
+console.error(`\nScripts and curl send it as the \`${ACCESS_TOKEN_HEADER}\` header instead.`)
+console.error(`Set OPENRUN_ACCESS_TOKEN to pin a value of your own.`)

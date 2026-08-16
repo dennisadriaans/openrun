@@ -20,7 +20,7 @@ Open <http://localhost:3000>. Requires Node 22+, pnpm, and at least one of `clau
 > [!WARNING]
 > **Open Run runs agent CLIs with your credentials in directories you choose.** Anyone who can reach its HTTP server can run commands as you. It binds `127.0.0.1` only. Start with read-only prompts. See [SECURITY.md](./SECURITY.md).
 
-Docs: [getopenrun.dev](https://getopenrun.dev) · Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md)
+Docs: [openrun.sh](https://openrun.sh) · Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## Open source
 

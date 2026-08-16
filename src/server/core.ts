@@ -1482,6 +1482,7 @@ export {
   getCloudStatus,
   ingestTestEvent,
   signOutAndDisconnect,
+  skipCloudOnboarding,
   startCloudLogin,
   startJiraConnect,
 } from './cloud'

@@ -139,7 +139,7 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | Verification checks, verdicts, the repair loop | `lib/checks.ts` (defs), `server/checks.ts` (runner), `lib/verdict.ts` (judgement); `executor.concludeTurn` decides *whether* a turn is verified — unattended turns only |
 | Supervised mode / tool approvals | `lib/approvals.ts` (the model), `lib/claudeControl.ts` (Claude's responder), `lib/supervisedPolicy.ts` (who may) |
 | AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
-| Schema, migrations, seeded runtimes, `~/.agentops` paths | `server/db.ts` |
+| Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts` |
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
 | Projects, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts` |
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |
@@ -147,6 +147,7 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (GitHub / Jira / Linear) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx`, `routes/api/webhooks/$integrationId.ts` |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
+| First-run account gate | `routes/welcome.tsx`; the redirect lives in `AppLayout` in `routes/__root.tsx`, the remembered skip in `server/cloud/onboarding.ts` |
 | Runtime binary on PATH, args templates, transport | `server/runtimePath.ts`, `server/userPath.ts`, `lib/runtimeBinary.ts`, `lib/argsTemplate.ts`, `lib/runtimePresets.ts`, `lib/acpTransport.ts` |
 | Live updates | the modules in the live-path diagram above |
 | Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
@@ -189,8 +190,8 @@ a standalone route.
   `pnpm generate-routes`: the standalone router-cli currently emits a different `Register`
   block from the Vite plugin, dropping the `config` entry that types the `src/start.ts`
   instance. The plugin's output is authoritative.
-- `data/agentops.db` is git-ignored and created on first run; delete it to reset all state.
-  App-managed clones and worktrees live in `~/.agentops` (`AGENTOPS_HOME` overrides).
+- `data/openrun.db` is git-ignored and created on first run; delete it to reset all state.
+  App-managed clones and worktrees live in `~/.openrun` (`OPENRUN_HOME` overrides).
 - The scheduler and both live pub/sub registries are **module singletons guarded on
   `globalThis`** so they survive Vite HMR. Don't re-instantiate them per call.
 - `db.ts` migrations are additive-only (`addColumn` diffs `table_info`; SQLite has no

@@ -4,6 +4,7 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
+  useNavigate,
   useRouterState,
 } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -307,7 +308,25 @@ function Sidebar() {
   )
 }
 
+/** Routes that must render before the account gate has an answer. */
+function isUngatedPath(pathname: string): boolean {
+  return pathname === '/welcome' || pathname.startsWith('/cloud/')
+}
+
 function AppLayout() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const navigate = useNavigate()
+  const { data: cloud, isPending } = useCloudStatus()
+
+  const ungated = isUngatedPath(pathname)
+  const needsWelcome = !isPending && Boolean(cloud) && !cloud!.signedIn && !cloud!.onboardingSkipped
+
+  useEffect(() => {
+    if (needsWelcome && !ungated) void navigate({ to: '/welcome', replace: true })
+  }, [needsWelcome, ungated, navigate])
+
+  if (ungated) return <Outlet />
+
   return (
     <SidebarProvider>
       <TopBarActionsProvider>

@@ -12,11 +12,14 @@
  * applied. No `node:` imports — `server/accessToken.ts` supplies the values.
  */
 
-/** Interface bound when `AGENTOPS_HOST` is unset. */
+/** Interface bound when `OPENRUN_HOST` is unset. */
 export const DEFAULT_HOST = '127.0.0.1'
 
 /** Header carrying the access token. Preferred over the query parameter. */
-export const ACCESS_TOKEN_HEADER = 'x-agentops-token'
+export const ACCESS_TOKEN_HEADER = 'x-openrun-token'
+
+/** Pre-rebrand header; still accepted so existing scripts keep working. */
+export const ACCESS_TOKEN_HEADER_LEGACY = 'x-agentops-token'
 
 /**
  * Query parameter carrying the access token.
@@ -25,10 +28,16 @@ export const ACCESS_TOKEN_HEADER = 'x-agentops-token'
  * (`/api/activity/stream`, `/api/runs/$runId/stream`) have no way to send the
  * header. The parameter exists for them.
  */
-export const ACCESS_TOKEN_QUERY_PARAM = 'agentops_token'
+export const ACCESS_TOKEN_QUERY_PARAM = 'openrun_token'
+
+/** Pre-rebrand query parameter; still accepted and stripped from URLs. */
+export const ACCESS_TOKEN_QUERY_PARAM_LEGACY = 'agentops_token'
 
 /** Cookie the browser gets once, so the SPA does not append a token to every URL. */
-export const ACCESS_TOKEN_COOKIE = 'agentops_token'
+export const ACCESS_TOKEN_COOKIE = 'openrun_token'
+
+/** Pre-rebrand cookie; still read so an already-signed-in browser keeps working. */
+export const ACCESS_TOKEN_COOKIE_LEGACY = 'agentops_token'
 
 /**
  * How long the browser keeps the token cookie.
@@ -76,8 +85,12 @@ export function urlWithoutAccessToken(rawUrl: string): string | null {
     return null
   }
 
-  if (!url.searchParams.has(ACCESS_TOKEN_QUERY_PARAM)) return null
+  const hadToken =
+    url.searchParams.has(ACCESS_TOKEN_QUERY_PARAM) ||
+    url.searchParams.has(ACCESS_TOKEN_QUERY_PARAM_LEGACY)
+  if (!hadToken) return null
   url.searchParams.delete(ACCESS_TOKEN_QUERY_PARAM)
+  url.searchParams.delete(ACCESS_TOKEN_QUERY_PARAM_LEGACY)
   return `${url.pathname}${url.search}${url.hash}`
 }
 
@@ -107,9 +120,9 @@ export type ServerAccessConfig = {
   host: string
   /** Whether an access token is configured (never the token itself). */
   hasToken: boolean
-  /** `AGENTOPS_ALLOW_INSECURE_HOST` — bind wide open, on purpose. */
+  /** `OPENRUN_ALLOW_INSECURE_HOST` — bind wide open, on purpose. */
   allowInsecureHost: boolean
-  /** `AGENTOPS_ALLOWED_HOSTS` — extra names a request may address us by. */
+  /** `OPENRUN_ALLOWED_HOSTS` — extra names a request may address us by. */
   allowedHosts?: string[]
 }
 
@@ -167,9 +180,9 @@ export function serverBindRefusal(config: ServerAccessConfig): string | null {
   return (
     `Refusing to bind ${config.host}: Open Run runs agent CLIs with your credentials, ` +
     `so anyone who can reach this port can run commands as you. ` +
-    `Set AGENTOPS_ACCESS_TOKEN (openssl rand -hex 32) to require a token, ` +
-    `or unset AGENTOPS_HOST to bind ${DEFAULT_HOST} only. ` +
-    `AGENTOPS_ALLOW_INSECURE_HOST=1 overrides this when the port is already ` +
+    `Set OPENRUN_ACCESS_TOKEN (openssl rand -hex 32) to require a token, ` +
+    `or unset OPENRUN_HOST to bind ${DEFAULT_HOST} only. ` +
+    `OPENRUN_ALLOW_INSECURE_HOST=1 overrides this when the port is already ` +
     `protected by something else — see SECURITY.md.`
   )
 }
@@ -186,7 +199,7 @@ export function insecureHostWarning(config: ServerAccessConfig): string | null {
   if (!config.hasToken && config.allowInsecureHost) {
     return (
       `Open Run is bound to ${config.host} with NO access token because ` +
-      `AGENTOPS_ALLOW_INSECURE_HOST is set. Anyone who can reach this port can ` +
+      `OPENRUN_ALLOW_INSECURE_HOST is set. Anyone who can reach this port can ` +
       `run commands as you.`
     )
   }
@@ -222,7 +235,7 @@ export function hostnameFromHostHeader(header: string | null | undefined): strin
   return name || null
 }
 
-/** `AGENTOPS_ALLOWED_HOSTS` as a normalized list. */
+/** `OPENRUN_ALLOWED_HOSTS` as a normalized list. */
 export function parseAllowedHosts(raw: string | null | undefined): string[] {
   if (typeof raw !== 'string') return []
   return raw
@@ -265,7 +278,7 @@ export function hostHeaderRefusal(
     `Refused: this request addressed Open Run as "${hostname}", but Open Run is ` +
     `bound to ${config.host} and only answers to a loopback name. This is the ` +
     `DNS-rebinding guard. If you are reaching Open Run through a tunnel or a ` +
-    `reverse proxy, add that hostname to AGENTOPS_ALLOWED_HOSTS.`
+    `reverse proxy, add that hostname to OPENRUN_ALLOWED_HOSTS.`
   )
 }
 

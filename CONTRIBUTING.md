@@ -20,7 +20,7 @@ pnpm dev         # http://localhost:3000
 ```
 
 Node 22+ and `pnpm` are required. Platform notes and first-run steps:
-[getopenrun.dev/docs/install](https://getopenrun.dev/docs/install).
+[openrun.sh/docs/install](https://openrun.sh/docs/install).
 
 ## Before you open a pull request
 
@@ -95,7 +95,7 @@ The highest-value contribution paths, in order:
    file, then exit). TUI-only agents and IDE extensions are out of scope. The
    four levels are: preset (`lib/runtimePresets.ts`), events
    (`lib/agentEvents/`), resume (`server/resume.ts`), models (`lib/models.ts`).
-   Walkthrough: [getopenrun.dev/docs/adding-a-runtime](https://getopenrun.dev/docs/adding-a-runtime).
+   Walkthrough: [openrun.sh/docs/adding-a-runtime](https://openrun.sh/docs/adding-a-runtime).
 2. **A new webhook provider**, normalising onto the existing
    `CanonicalWebhookEvent`.
 3. **Platform fixes** — Windows/WSL paths, `PATH` discovery, shell differences.

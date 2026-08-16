@@ -4,10 +4,10 @@ import { parseRelayServerMessage } from './types.ts'
 
 test('parseRelayServerMessage accepts hello_ok and webhook.event', () => {
   const hello = parseRelayServerMessage(
-    JSON.stringify({ type: 'hello_ok', userId: 'u1', email: 'a@b.c' }),
+    JSON.stringify({ type: 'hello_ok', userId: 'u1', machineId: 'mch_1' }),
   )
   assert.equal(hello?.type, 'hello_ok')
-  if (hello?.type === 'hello_ok') assert.equal(hello.email, 'a@b.c')
+  if (hello?.type === 'hello_ok') assert.equal(hello.machineId, 'mch_1')
 
   const event = parseRelayServerMessage(
     JSON.stringify({
