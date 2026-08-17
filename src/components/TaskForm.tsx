@@ -713,7 +713,7 @@ function WebhookTriggerRow({
             <p className="text-[12px] text-amber-200/90">
               No connections yet.{' '}
               <a href="/integrations" className="underline-offset-2 hover:underline">
-                Add GitHub, Jira, or Linear
+                Connect an issue tracker
               </a>{' '}
               first.
             </p>

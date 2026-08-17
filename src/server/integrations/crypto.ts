@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 
-/** Generate a webhook signing secret suitable for GitHub / Jira / Linear. */
+/** Generate a signing secret for a webhook this machine hosts itself. */
 export function generateWebhookSecret(): string {
   return randomBytes(32).toString('hex')
 }
