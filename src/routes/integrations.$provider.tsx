@@ -1,8 +1,10 @@
 /**
- * GitHub / Jira / Linear — shared install/detail template.
+ * Shared install/detail template for every provider.
  *
- * Install always creates a local endpoint. When a public URL and credentials
- * are present, we also register the webhook at the provider.
+ * A hosted connection lives on the control plane and receives events over the
+ * relay. A local install creates an endpoint on this machine, and additionally
+ * registers the webhook at the provider when a public URL and credentials are
+ * present.
  */
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router'
 import { Check, Copy, RefreshCw, Trash2 } from 'lucide-react'
@@ -20,6 +22,8 @@ import type { IntegrationProviderId } from '../lib/integrations/types'
 import { absoluteTime } from '../lib/format'
 import {
   useCloudStatus,
+  useDisconnectHostedIntegration,
+  useHostedConnections,
   useIngestTestEvent,
   useIntegrations,
   useRemoveIntegration,
@@ -86,8 +90,10 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
   const update = useUpdateIntegration()
   const rotate = useRotateIntegrationSecret()
   const remove = useRemoveIntegration()
+  const disconnectHosted = useDisconnectHostedIntegration()
   const testEvent = useIngestTestEvent()
   const { data: cloud } = useCloudStatus()
+  const { data: hostedConnections } = useHostedConnections()
 
   const [adding, setAdding] = useState(false)
   const [revealed, setRevealed] = useState<Record<string, string>>({})
@@ -154,6 +160,14 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
             const secret = revealed[integ.id]
             const url = `${origin}${integ.webhookPath}`
             const hosted = integ.hosted
+            // The vendor's own words when a hook failed to register or renew.
+            const remote = hosted
+              ? (hostedConnections ?? []).find((c) => c.id === integ.cloudConnectionId)
+              : undefined
+            const remoteProblem =
+              remote && remote.status !== 'active'
+                ? remote.statusMessage || `Connection is ${remote.status}.`
+                : ''
             return (
               <Card key={integ.id} className="space-y-4 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -169,7 +183,11 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
                         : integ.enabled
                           ? 'Receiving events'
                           : 'Paused'}
+                      {remote?.target ? ` · ${remote.target.name}` : ''}
                     </div>
+                    {remoteProblem ? (
+                      <div className="mt-1 text-ui-sm text-warn">{remoteProblem}</div>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <Button
@@ -229,10 +247,19 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
                     <Button
                       type="button"
                       variant="ghost"
+                      disabled={disconnectHosted.isPending}
                       onClick={() => {
-                        if (confirm(`Delete ${integ.name}? Automations will be unbound.`)) {
+                        const warning = hosted
+                          ? `Disconnect ${integ.name}? The webhook is removed at ${title} and automations will be unbound.`
+                          : `Delete ${integ.name}? Automations will be unbound.`
+                        if (!confirm(warning)) return
+                        if (!hosted) {
                           void remove.mutateAsync(integ.id)
+                          return
                         }
+                        void disconnectHosted.mutateAsync(integ.id).then((result) => {
+                          if (!result.ok) setRemoteNote(result.remoteError ?? 'Disconnect failed')
+                        })
                       }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -242,7 +269,7 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
 
                 {hosted ? (
                   <p className="text-ui-sm text-tier-tertiary">
-                    Jira posts to the control plane. This machine does not expose a webhook URL.
+                    {title} posts to the control plane. This machine does not expose a webhook URL.
                   </p>
                 ) : (
                   <>

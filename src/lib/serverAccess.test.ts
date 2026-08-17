@@ -262,10 +262,7 @@ test('the token is stripped from a URL without disturbing the rest of it', () =>
     '/runs/1?tab=diff#top',
   )
   assert.equal(urlWithoutAccessToken('http://127.0.0.1:3000/?openrun_token=abc'), '/')
-  assert.equal(
-    urlWithoutAccessToken('http://127.0.0.1:3000/?agentops_token=abc'),
-    '/',
-  )
+  assert.equal(urlWithoutAccessToken('http://127.0.0.1:3000/?agentops_token=abc'), '/')
 })
 
 test('a URL carrying no token needs no redirect', () => {

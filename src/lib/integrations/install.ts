@@ -73,8 +73,11 @@ export type InstallIntegrationInput = {
 /** Sensible defaults so Install works without picking every event. */
 export const DEFAULT_INSTALL_EVENTS: Record<IntegrationProviderId, string[]> = {
   github: ['issues.opened'],
+  gitlab: ['issue.open', 'issue.status_changed'],
+  bitbucket: ['issue:created', 'issue:status_changed'],
   jira: ['jira:issue_created', 'jira:issue_status_changed'],
   linear: ['Issue.create', 'Issue.status_changed'],
+  'azure-devops': ['workitem.created', 'workitem.status_changed'],
 }
 
 /** GitHub repo hook event names derived from our catalog issue event ids. */

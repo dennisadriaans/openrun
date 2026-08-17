@@ -177,10 +177,9 @@ async function connect(): Promise<void> {
       return
     }
 
-    const socket = new WebSocket(
-      `${cloudWsUrl(cloudUrl)}?ticket=${encodeURIComponent(ticket)}`,
-      ['openrun.v1'],
-    )
+    const socket = new WebSocket(`${cloudWsUrl(cloudUrl)}?ticket=${encodeURIComponent(ticket)}`, [
+      'openrun.v1',
+    ])
     s.socket = socket
 
     socket.addEventListener('open', () => {

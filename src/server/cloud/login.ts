@@ -1,10 +1,15 @@
 /**
- * Start / complete Open Run cloud login and Jira OAuth against the control
- * plane. The browser does the human part; this process only ever handles the
- * loopback callback and the token exchange.
+ * Start / complete Open Run cloud login and hosted integration OAuth against
+ * the control plane. The browser does the human part; this process only ever
+ * handles the loopback callback and the token exchange.
  */
 import { hostname, platform } from 'node:os'
-import { cloudJiraStartUrl, cloudLoginUrl, localCloudCallbackUrl } from '../../lib/cloud/login.ts'
+import {
+  cloudIntegrationStartUrl,
+  cloudLoginUrl,
+  localCloudCallbackUrl,
+} from '../../lib/cloud/login.ts'
+import { isIntegrationProviderId } from '../../lib/integrations/catalog.ts'
 import { createPkcePair, randomOAuthState } from '../../lib/cloud/pkce.ts'
 import type { CloudSessionStored } from '../../lib/cloud/types.ts'
 import { CLOUD_PATHS, resolveCloudUrl } from '../../lib/cloud/url.ts'
@@ -15,6 +20,7 @@ import {
   readMachineId,
   readPkcePending,
   writeCloudSession,
+  writeConnectPending,
   writePkcePending,
 } from './session.ts'
 
@@ -22,8 +28,9 @@ const PKCE_TTL_MS = 15 * 60 * 1000
 /** Refresh this far before the access token actually lapses. */
 const REFRESH_SKEW_MS = 10 * 60 * 1000
 
+/** `AGENTOPS_CLOUD_URL` is the pre-rename spelling and still honoured. */
 export function configuredCloudUrl(): string | null {
-  return resolveCloudUrl(process.env.AGENTOPS_CLOUD_URL)
+  return resolveCloudUrl(process.env.OPENRUN_CLOUD_URL ?? process.env.AGENTOPS_CLOUD_URL)
 }
 
 function deviceName(): string {
@@ -63,7 +70,10 @@ type TokenResponse = {
   error?: string
 }
 
-async function exchange(cloudUrl: string, body: Record<string, string>): Promise<CloudSessionStored> {
+async function exchange(
+  cloudUrl: string,
+  body: Record<string, string>,
+): Promise<CloudSessionStored> {
   const res = await fetch(`${cloudUrl}${CLOUD_PATHS.token}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -144,12 +154,22 @@ export function signOutCloud(): void {
   clearPkcePending()
 }
 
-export function startJiraConnect(origin: string): { url: string } {
+/**
+ * Send the browser to the control plane to authorize one provider. The pending
+ * record is what the loopback callback checks the return against, so a stray
+ * `/cloud/callback?connection_id=…` cannot mint a local row on its own.
+ */
+export function startHostedConnect(input: { provider: string; origin: string }): { url: string } {
   const cloudUrl = configuredCloudUrl()
   if (!cloudUrl) throw new Error('Cloud is turned off.')
   if (!readCloudSession()) throw new Error('Sign in first.')
+  if (!isIntegrationProviderId(input.provider)) {
+    throw new Error(`Unknown integration provider: ${input.provider}`)
+  }
   const state = randomOAuthState()
-  const redirectUri = localCloudCallbackUrl(origin)
-  writePkcePending({ verifier: 'jira', state, redirectUri, createdAt: Date.now() })
-  return { url: cloudJiraStartUrl({ cloudUrl, redirectUri, state }) }
+  const redirectUri = localCloudCallbackUrl(input.origin)
+  writeConnectPending({ provider: input.provider, state, redirectUri, createdAt: Date.now() })
+  return {
+    url: cloudIntegrationStartUrl({ cloudUrl, provider: input.provider, redirectUri, state }),
+  }
 }

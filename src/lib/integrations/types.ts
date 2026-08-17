@@ -5,7 +5,13 @@
  * and prompt templates stay provider-agnostic.
  */
 
-export type IntegrationProviderId = 'github' | 'jira' | 'linear'
+export type IntegrationProviderId =
+  | 'github'
+  | 'gitlab'
+  | 'bitbucket'
+  | 'jira'
+  | 'linear'
+  | 'azure-devops'
 
 export type WebhookEventCatalogEntry = {
   id: string
@@ -69,6 +75,12 @@ export type ProviderMeta = {
   setupSteps: string[]
   /** Docs URL for the vendor webhook UI. */
   docsUrl: string
+  /**
+   * False when the only way to connect is through the control plane — the
+   * provider has no local verify/parse implementation to receive a webhook
+   * this machine hosts itself.
+   */
+  supportsLocalInstall: boolean
 }
 
 export function emptyIssue(partial?: Partial<CanonicalIssue>): CanonicalIssue {

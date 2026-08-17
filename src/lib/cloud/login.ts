@@ -1,8 +1,8 @@
 /**
- * Browser-safe URL builders for the control-plane device approval and Jira
- * OAuth start.
+ * Browser-safe URL builders for the control-plane device approval and hosted
+ * integration OAuth start.
  */
-import { CLOUD_PATHS } from './url.ts'
+import { CLOUD_PATHS, integrationStartPath } from './url.ts'
 
 export function cloudLoginUrl(input: {
   cloudUrl: string
@@ -27,12 +27,13 @@ export function cloudLoginUrl(input: {
  * No token on the query string: the control plane authenticates this hop with
  * the ordinary browser session, and prompts for sign-in when there isn't one.
  */
-export function cloudJiraStartUrl(input: {
+export function cloudIntegrationStartUrl(input: {
   cloudUrl: string
+  provider: string
   redirectUri: string
   state: string
 }): string {
-  const url = new URL(CLOUD_PATHS.jiraStart, input.cloudUrl)
+  const url = new URL(integrationStartPath(input.provider), input.cloudUrl)
   url.searchParams.set('redirect_uri', input.redirectUri)
   url.searchParams.set('state', input.state)
   return url.toString()

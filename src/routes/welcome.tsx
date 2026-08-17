@@ -67,9 +67,7 @@ function WelcomePage() {
         <h1 className="text-2xl font-medium tracking-tight text-foreground">
           Connect Open Run to your account
         </h1>
-        <p className="mt-2 text-ui-sm text-tier-secondary">
-          Free, and it takes about ten seconds.
-        </p>
+        <p className="mt-2 text-ui-sm text-tier-secondary">Free, and it takes about ten seconds.</p>
 
         <ul className="mt-8 space-y-5">
           {POINTS.map((point) => (

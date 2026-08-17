@@ -1,6 +1,14 @@
 /**
- * One-click provider install — creates a local endpoint immediately, and
+ * One-click provider install.
+ *
+ * Two routes in. **Connect** hands the browser to the control plane, which owns
+ * the vendor OAuth app and the webhook — nothing to paste, and no public URL
+ * needed because events arrive over this machine's outbound relay. **Set up
+ * locally** is the self-hosted path: it creates a local endpoint immediately and
  * registers the remote webhook when a public URL and credentials are present.
+ *
+ * GitLab, Bitbucket, and Azure DevOps have no local verify/parse
+ * implementation, so Connect is the only route for them.
  */
 import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -16,7 +24,7 @@ import {
   useInstallContext,
   useInstallIntegration,
   useCloudStatus,
-  useStartJiraConnect,
+  useStartHostedConnect,
 } from '../lib/queries'
 import { Button, Field, inputClass } from './ui'
 
@@ -39,7 +47,7 @@ export function IntegrationInstallPanel({
   const { data: ctx, isLoading: ctxLoading } = useInstallContext()
   const install = useInstallIntegration()
   const { data: cloud } = useCloudStatus()
-  const startJira = useStartJiraConnect()
+  const startConnect = useStartHostedConnect()
   const [localSetup, setLocalSetup] = useState(false)
 
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
@@ -104,10 +112,10 @@ export function IntegrationInstallPanel({
     }
   }
 
-  const connectJira = async () => {
+  const connect = async () => {
     setError(null)
     try {
-      const { url } = await startJira.mutateAsync(origin)
+      const { url } = await startConnect.mutateAsync({ provider, origin })
       window.location.href = url
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -120,7 +128,29 @@ export function IntegrationInstallPanel({
     return <p className="text-ui-sm text-tier-tertiary">Loading…</p>
   }
 
-  const showLocal = provider !== 'jira' || localSetup || !cloud?.signedIn
+  const hostedOnly = !meta.supportsLocalInstall
+  const signedIn = Boolean(cloud?.signedIn)
+  const showHosted = signedIn && !localSetup
+  const showLocal = !hostedOnly && (localSetup || !signedIn)
+  const errorBox = error ? (
+    <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">{error}</p>
+  ) : null
+
+  if (hostedOnly && !signedIn) {
+    return (
+      <div className="space-y-3">
+        <p className="text-ui-sm text-tier-secondary">
+          {meta.label} connects through your Open Run account. Sign in from the sidebar, then come
+          back and click Connect — there is nothing to paste and no public URL to set up.
+        </p>
+        {onCancel ? (
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -136,7 +166,43 @@ export function IntegrationInstallPanel({
         </Field>
       ) : null}
 
-      {provider === 'github' ? (
+      {showHosted ? (
+        <div className="space-y-3">
+          <p className="text-ui-sm text-tier-secondary">
+            Connect {meta.label} in the browser. Tokens stay on the control plane; this machine
+            receives events over an outbound connection.
+          </p>
+          {errorBox}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="primary"
+              disabled={startConnect.isPending}
+              onClick={() => void connect()}
+            >
+              {startConnect.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting…
+                </>
+              ) : (
+                `Connect ${meta.label}`
+              )}
+            </Button>
+            {hostedOnly ? null : (
+              <Button type="button" variant="ghost" onClick={() => setLocalSetup(true)}>
+                Set up locally
+              </Button>
+            )}
+            {onCancel ? (
+              <Button type="button" variant="ghost" onClick={onCancel}>
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {showLocal && provider === 'github' ? (
         <div className="space-y-2">
           <Field label="Repository" hint="optional">
             {ctx?.githubRepos.length ? (
@@ -173,7 +239,7 @@ export function IntegrationInstallPanel({
         </div>
       ) : null}
 
-      {provider === 'linear' ? (
+      {showLocal && provider === 'linear' ? (
         <Field
           label="Linear API key"
           hint={
@@ -193,45 +259,7 @@ export function IntegrationInstallPanel({
         </Field>
       ) : null}
 
-      {provider === 'jira' && cloud?.signedIn && !localSetup ? (
-        <div className="space-y-3">
-          <p className="text-ui-sm text-tier-secondary">
-            Connect Jira in the browser. Tokens stay on the control plane; this machine receives
-            events over an outbound connection.
-          </p>
-          {error ? (
-            <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="primary"
-              disabled={startJira.isPending}
-              onClick={() => void connectJira()}
-            >
-              {startJira.isPending ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting…
-                </>
-              ) : (
-                'Connect Jira'
-              )}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => setLocalSetup(true)}>
-              Set up locally
-            </Button>
-            {onCancel ? (
-              <Button type="button" variant="ghost" onClick={onCancel}>
-                Cancel
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {provider === 'jira' && showLocal ? (
+      {showLocal && provider === 'jira' ? (
         <div className="space-y-4">
           <Field label="Jira site URL">
             <input
@@ -276,11 +304,7 @@ export function IntegrationInstallPanel({
 
       {showLocal ? (
         <>
-          {error ? (
-            <p className="rounded-md border border-danger px-3 py-2 text-ui-sm text-danger">
-              {error}
-            </p>
-          ) : null}
+          {errorBox}
 
           <div className="flex flex-wrap gap-2">
             <Button
@@ -297,6 +321,11 @@ export function IntegrationInstallPanel({
                 'Install'
               )}
             </Button>
+            {signedIn && localSetup ? (
+              <Button type="button" variant="ghost" onClick={() => setLocalSetup(false)}>
+                Back
+              </Button>
+            ) : null}
             {onCancel ? (
               <Button type="button" variant="ghost" disabled={install.isPending} onClick={onCancel}>
                 Cancel

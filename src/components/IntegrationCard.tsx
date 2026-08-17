@@ -1,6 +1,7 @@
-import { BookOpen, Pencil } from 'lucide-react'
+import { BookOpen, Infinity as InfinityIcon, Pencil } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { siGithub, siJira, siLinear } from 'simple-icons'
+import { siBitbucket, siGithub, siGitlab, siJira, siLinear } from 'simple-icons'
+import type { IntegrationProviderId } from '../lib/integrations/types'
 import { Switch } from './ui'
 
 function SimpleMark({
@@ -21,36 +22,27 @@ function SimpleMark({
   )
 }
 
+/** simple-icons dropped the Azure DevOps mark, so that one falls through. */
+const BRAND_MARKS: Partial<Record<IntegrationProviderId, typeof siGithub>> = {
+  github: siGithub,
+  gitlab: siGitlab,
+  bitbucket: siBitbucket,
+  jira: siJira,
+  linear: siLinear,
+}
+
 export function IntegrationBrandIcon({
   id,
   className = 'size-5',
 }: {
-  id: 'github' | 'jira' | 'linear'
+  id: IntegrationProviderId
   className?: string
 }) {
-  if (id === 'github') {
-    return (
-      <SimpleMark
-        title={siGithub.title}
-        path={siGithub.path}
-        hex={siGithub.hex}
-        className={className}
-      />
-    )
+  const mark = BRAND_MARKS[id]
+  if (!mark) {
+    return <InfinityIcon className={className} style={{ color: '#0078D4' }} aria-label={id} />
   }
-  if (id === 'jira') {
-    return (
-      <SimpleMark title={siJira.title} path={siJira.path} hex={siJira.hex} className={className} />
-    )
-  }
-  return (
-    <SimpleMark
-      title={siLinear.title}
-      path={siLinear.path}
-      hex={siLinear.hex}
-      className={className}
-    />
-  )
+  return <SimpleMark title={mark.title} path={mark.path} hex={mark.hex} className={className} />
 }
 
 const BADGE_TONE: Record<'blue' | 'purple', string> = {

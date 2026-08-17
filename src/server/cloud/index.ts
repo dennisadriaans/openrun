@@ -12,11 +12,16 @@ export {
   completeCloudLogin,
   configuredCloudUrl,
   startCloudLogin,
-  startJiraConnect,
+  startHostedConnect,
   signOutCloud,
 } from './login.ts'
 export { restartCloudRelay, startCloudRelay, stopCloudRelay } from './relay.ts'
-export { completeHostedJiraConnect, ingestTestEvent } from './hosted.ts'
+export {
+  completeHostedConnect,
+  disconnectHostedIntegration,
+  ingestTestEvent,
+  listHostedConnections,
+} from './hosted.ts'
 
 export function bootCloud(): void {
   try {

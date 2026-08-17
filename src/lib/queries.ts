@@ -768,20 +768,48 @@ export function useSignOutCloud() {
   })
 }
 
-export function useStartJiraConnect() {
+export function useStartHostedConnect() {
   return useMutation({
-    mutationFn: (origin: string) => fns.startJiraConnect({ data: { origin } }),
+    mutationFn: (data: { provider: string; origin: string }) => fns.startHostedConnect({ data }),
   })
 }
 
-export function useCompleteHostedJiraConnect() {
+export function useCompleteHostedConnect() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: { cloudConnectionId: string; siteUrl?: string; name?: string }) =>
-      fns.completeHostedJiraConnect({ data }),
+    mutationFn: (data: {
+      provider: string
+      cloudConnectionId: string
+      state?: string
+      siteUrl?: string
+      accountName?: string
+    }) => fns.completeHostedConnect({ data }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['integrations'] })
       qc.invalidateQueries({ queryKey: ['installContext'] })
+      qc.invalidateQueries({ queryKey: ['hostedConnections'] })
+    },
+  })
+}
+
+export function useHostedConnections() {
+  const { data: cloud } = useCloudStatus()
+  return useQuery({
+    queryKey: ['hostedConnections'],
+    queryFn: () => fns.listHostedConnections(),
+    enabled: Boolean(cloud?.signedIn),
+    staleTime: 30_000,
+  })
+}
+
+export function useDisconnectHostedIntegration() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (integrationId: string) =>
+      fns.disconnectHostedIntegration({ data: { integrationId } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['integrations'] })
+      qc.invalidateQueries({ queryKey: ['hostedConnections'] })
     },
   })
 }

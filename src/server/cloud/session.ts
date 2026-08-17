@@ -63,8 +63,7 @@ export function readCloudSession(): CloudSessionStored | null {
     return {
       accessToken: parsed.accessToken,
       refreshToken: parsed.refreshToken,
-      accessExpiresAt:
-        typeof parsed.accessExpiresAt === 'number' ? parsed.accessExpiresAt : 0,
+      accessExpiresAt: typeof parsed.accessExpiresAt === 'number' ? parsed.accessExpiresAt : 0,
       userId: parsed.userId,
       email: parsed.email,
       machineId: parsed.machineId,
@@ -120,6 +119,56 @@ export function readPkcePending(): PkcePending | null {
 
 export function clearPkcePending(): void {
   const file = cloudPkcePath()
+  if (existsSync(file)) unlinkSync(file)
+}
+
+/**
+ * A hosted integration connect in flight. Kept in its own file rather than in
+ * the PKCE slot: connecting an integration must not discard a sign-in the user
+ * started in another tab, and the callback has to know which provider it is
+ * finishing without trusting the query string for it.
+ */
+export type ConnectPending = {
+  provider: string
+  state: string
+  redirectUri: string
+  createdAt: number
+}
+
+export function cloudConnectPath(): string {
+  return join(openrunHome(), 'cloud-connect')
+}
+
+export function writeConnectPending(pending: ConnectPending): void {
+  writeSecretFile(cloudConnectPath(), `${JSON.stringify(pending)}\n`)
+}
+
+export function readConnectPending(): ConnectPending | null {
+  const file = cloudConnectPath()
+  if (!existsSync(file)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<ConnectPending>
+    if (
+      typeof parsed.provider !== 'string' ||
+      typeof parsed.state !== 'string' ||
+      typeof parsed.redirectUri !== 'string' ||
+      typeof parsed.createdAt !== 'number'
+    ) {
+      return null
+    }
+    return {
+      provider: parsed.provider,
+      state: parsed.state,
+      redirectUri: parsed.redirectUri,
+      createdAt: parsed.createdAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function clearConnectPending(): void {
+  const file = cloudConnectPath()
   if (existsSync(file)) unlinkSync(file)
 }
 

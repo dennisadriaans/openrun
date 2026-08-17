@@ -477,13 +477,29 @@ export const signOutCloud = createServerFn({ method: 'POST' }).handler(async () 
   return { ok: true }
 })
 
-export const startJiraConnect = createServerFn({ method: 'POST' })
-  .validator((d: { origin: string }) => d)
-  .handler(async ({ data }) => (await core()).startJiraConnect(data.origin))
+export const startHostedConnect = createServerFn({ method: 'POST' })
+  .validator((d: { provider: string; origin: string }) => d)
+  .handler(async ({ data }) => (await core()).startHostedConnect(data))
 
-export const completeHostedJiraConnect = createServerFn({ method: 'POST' })
-  .validator((d: { cloudConnectionId: string; siteUrl?: string; name?: string }) => d)
-  .handler(async ({ data }) => (await core()).completeHostedJiraConnect(data))
+export const completeHostedConnect = createServerFn({ method: 'POST' })
+  .validator(
+    (d: {
+      provider: string
+      cloudConnectionId: string
+      state?: string
+      siteUrl?: string
+      accountName?: string
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).completeHostedConnect(data))
+
+export const listHostedConnections = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listHostedConnections(),
+)
+
+export const disconnectHostedIntegration = createServerFn({ method: 'POST' })
+  .validator((d: { integrationId: string }) => d)
+  .handler(async ({ data }) => (await core()).disconnectHostedIntegration(data.integrationId))
 
 export const ingestTestEvent = createServerFn({ method: 'POST' })
   .validator((d: { integrationId: string }) => d)

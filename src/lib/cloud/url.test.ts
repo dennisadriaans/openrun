@@ -26,9 +26,6 @@ test('malformed URLs disable rather than half-attach', () => {
 })
 
 test('cloudWsUrl switches protocol and path', () => {
-  assert.equal(
-    cloudWsUrl('https://cloud.example.com'),
-    'wss://cloud.example.com/api/machine/relay',
-  )
+  assert.equal(cloudWsUrl('https://cloud.example.com'), 'wss://cloud.example.com/api/machine/relay')
   assert.equal(cloudWsUrl('http://127.0.0.1:3000'), 'ws://127.0.0.1:3000/api/machine/relay')
 })

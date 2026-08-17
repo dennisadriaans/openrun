@@ -2,11 +2,12 @@
  * CRUD for third-party integration connections (webhook endpoints + secrets).
  */
 import { randomBytes } from 'node:crypto'
+import { INTEGRATION_PROVIDERS, providerMeta } from '../../lib/integrations/catalog.ts'
 import { cloudConnectionIdFromConfig } from '../../lib/integrations/install.ts'
 import type { IntegrationProviderId } from '../../lib/integrations/types.ts'
 import { getDb } from '../db.ts'
 import { generateWebhookSecret } from './crypto.ts'
-import { assertIntegrationProvider, listIntegrationProviders } from './registry.ts'
+import { assertIntegrationProvider } from './registry.ts'
 
 export type IntegrationRow = {
   id: string
@@ -47,7 +48,6 @@ function parseConfigBag(raw: string): { installMethod?: string; cloudConnectionI
 }
 
 function decorate(row: IntegrationRow, revealSecret = false): IntegrationPublic {
-  const provider = assertIntegrationProvider(row.provider)
   const config = parseConfigBag(row.config)
   const hosted = config.installMethod === 'hosted'
   return {
@@ -59,7 +59,7 @@ function decorate(row: IntegrationRow, revealSecret = false): IntegrationPublic 
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     webhookPath: webhookPathFor(row.id),
-    providerLabel: provider.label,
+    providerLabel: providerMeta(row.provider)?.label ?? row.provider,
     hosted,
     cloudConnectionId: config.cloudConnectionId,
     ...(revealSecret && !hosted ? { secret: row.secret } : {}),
@@ -103,14 +103,18 @@ export type CreateIntegrationInput = {
 }
 
 export function createIntegration(input: CreateIntegrationInput): IntegrationPublic {
-  assertIntegrationProvider(input.provider)
+  const meta = providerMeta(input.provider)
+  if (!meta) throw new Error(`Unknown integration provider: ${input.provider}`)
   const db = getDb()
   const now = Date.now()
   const hosted = input.config?.installMethod === 'hosted'
+  // A local endpoint needs verify/parse; a hosted one only needs the catalog,
+  // because the control plane does both before the event reaches the relay.
+  if (!hosted) assertIntegrationProvider(input.provider)
   const row: IntegrationRow = {
     id: id(),
     provider: input.provider,
-    name: input.name.trim() || assertIntegrationProvider(input.provider).label,
+    name: input.name.trim() || meta.label,
     secret: hosted ? '' : generateWebhookSecret(),
     config: JSON.stringify(input.config ?? {}),
     enabled: 1,
@@ -173,13 +177,20 @@ export function deleteIntegration(integrationId: string) {
   db.prepare('DELETE FROM integrations WHERE id = ?').run(integrationId)
 }
 
+/**
+ * Every provider the UI can offer, hosted-only ones included. Deliberately the
+ * browser-safe catalog rather than the local registry: GitLab, Bitbucket, and
+ * Azure DevOps are connectable through the control plane and would be invisible
+ * if this listed only providers with a local verify/parse implementation.
+ */
 export function listProviderCatalog() {
-  return listIntegrationProviders().map((p) => ({
+  return INTEGRATION_PROVIDERS.map((p) => ({
     id: p.id,
     label: p.label,
     description: p.description,
     events: p.events,
     setupSteps: p.setupSteps,
     docsUrl: p.docsUrl,
+    supportsLocalInstall: p.supportsLocalInstall,
   }))
 }

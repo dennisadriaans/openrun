@@ -1478,12 +1478,14 @@ export {
   afterSignIn,
   bootCloud,
   completeCloudLogin,
-  completeHostedJiraConnect,
+  completeHostedConnect,
+  disconnectHostedIntegration,
   getCloudStatus,
   ingestTestEvent,
+  listHostedConnections,
   signOutAndDisconnect,
   skipCloudOnboarding,
   startCloudLogin,
-  startJiraConnect,
+  startHostedConnect,
 } from './cloud'
 export type { CloudStatus } from '../lib/cloud/types.ts'
