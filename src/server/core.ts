@@ -1407,6 +1407,7 @@ export {
   rotateIntegrationSecret,
   updateIntegration,
   getInstallContext,
+  type CreateIntegrationAutomationInput,
   type CreateIntegrationInput,
   type IntegrationPublic,
   type UpdateIntegrationInput,
@@ -1415,8 +1416,10 @@ export {
 } from './integrations'
 import {
   cleanupRemoteWebhook,
+  createIntegrationAutomation as createIntegrationAutomationRow,
   deleteIntegration as deleteIntegrationRow,
   installIntegration as installIntegrationRow,
+  type CreateIntegrationAutomationInput,
   type InstallIntegrationResult as InstallResult,
 } from './integrations'
 import type { InstallIntegrationInput } from '../lib/integrations/install'
@@ -1426,26 +1429,44 @@ export function deleteIntegration(integrationId: string) {
   deleteIntegrationRow(integrationId)
 }
 
+/**
+ * The one place an integration turns into a task row, shared by the local
+ * install path and the "finish setup" step after a hosted connect.
+ */
+function writeIntegrationAutomation(args: {
+  name: string
+  description: string
+  runtimeId: string
+  prompt: string
+  workspaceId: string
+  enabled: boolean
+  webhookIntegrationId: string
+  webhookEvents: string[]
+}): { id: string } {
+  const task = upsertTask({
+    name: args.name,
+    description: args.description,
+    runtimeId: args.runtimeId,
+    prompt: args.prompt,
+    cwd: '',
+    workspaceId: args.workspaceId,
+    cron: '',
+    enabled: args.enabled,
+    webhookIntegrationId: args.webhookIntegrationId,
+    webhookEvents: args.webhookEvents,
+    webhookFilters: {},
+  })
+  return { id: task.id }
+}
+
 /** One-click install: local endpoint, optional remote webhook + automation. */
 export async function installIntegration(input: InstallIntegrationInput): Promise<InstallResult> {
-  return installIntegrationRow(input, {
-    createAutomation: (args) => {
-      const task = upsertTask({
-        name: args.name,
-        description: args.description,
-        runtimeId: args.runtimeId,
-        prompt: args.prompt,
-        cwd: '',
-        workspaceId: args.workspaceId,
-        cron: '',
-        enabled: args.enabled,
-        webhookIntegrationId: args.webhookIntegrationId,
-        webhookEvents: args.webhookEvents,
-        webhookFilters: {},
-      })
-      return { id: task.id }
-    },
-  })
+  return installIntegrationRow(input, { createAutomation: writeIntegrationAutomation })
+}
+
+/** Wire an already-connected integration to a workspace and runtime. */
+export function createIntegrationAutomation(input: CreateIntegrationAutomationInput) {
+  return createIntegrationAutomationRow(input, { createAutomation: writeIntegrationAutomation })
 }
 
 // ---------------------------------------------------------------------------
@@ -1482,6 +1503,7 @@ export {
   disconnectHostedIntegration,
   getCloudStatus,
   ingestTestEvent,
+  listCloudProviders,
   listHostedConnections,
   signOutAndDisconnect,
   skipCloudOnboarding,
@@ -1489,3 +1511,4 @@ export {
   startHostedConnect,
 } from './cloud'
 export type { CloudStatus } from '../lib/cloud/types.ts'
+export type { CloudProviderCatalog } from '../lib/cloud/providers.ts'

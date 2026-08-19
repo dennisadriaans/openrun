@@ -32,3 +32,7 @@ export {
   type InstallContext,
   type InstallIntegrationResult,
 } from './install.ts'
+export {
+  createIntegrationAutomation,
+  type CreateIntegrationAutomationInput,
+} from './automation.ts'

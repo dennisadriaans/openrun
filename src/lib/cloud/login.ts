@@ -42,3 +42,20 @@ export function cloudIntegrationStartUrl(input: {
 export function localCloudCallbackUrl(origin: string): string {
   return `${origin.replace(/\/+$/, '')}/cloud/callback`
 }
+
+/**
+ * Where to land the user after sign-in, so clicking Connect while signed out
+ * resumes the connect instead of dumping them on the automations list.
+ *
+ * Only a path inside this app is allowed. The value is written to disk before
+ * the browser leaves and read back by the callback route, so anything that
+ * could name another origin would turn our own callback into an open redirect.
+ */
+export function safeLocalNext(raw: string | undefined | null): string {
+  const value = (raw ?? '').trim()
+  // A protocol-relative `//evil.example` is a URL, not a path.
+  if (!value.startsWith('/') || value.startsWith('//')) return ''
+  // Backslashes are normalized to slashes by some browsers before parsing.
+  if (value.includes('\\')) return ''
+  return value
+}

@@ -5,6 +5,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { IntegrationPage } from '../components/IntegrationPage'
+import { safeLocalNext } from '../lib/cloud/login'
 import { isIntegrationProviderId } from '../lib/integrations/catalog'
 import { useCompleteCloudLogin, useCompleteHostedConnect } from '../lib/queries'
 
@@ -57,8 +58,13 @@ function CloudCallbackPage() {
           return
         }
         if (search.code && search.state) {
-          await completeLogin.mutateAsync({ code: search.code, state: search.state })
-          await navigate({ to: '/tasks' })
+          const result = await completeLogin.mutateAsync({
+            code: search.code,
+            state: search.state,
+          })
+          // Signing in from a provider page resumes that connect; the path was
+          // recorded before the browser left and re-validated on the way back.
+          await navigate({ to: safeLocalNext(result.next) || '/tasks' })
           return
         }
         setMessage('Nothing to complete. You can close this tab.')

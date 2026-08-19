@@ -9,6 +9,7 @@
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router'
 import { Check, Copy, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { IntegrationAutomationSetup } from '../components/IntegrationAutomationSetup'
 import { IntegrationInstallPanel } from '../components/IntegrationInstall'
 import { IntegrationPage, IntegrationStatusBanner } from '../components/IntegrationPage'
 import { Button, Card } from '../components/ui'
@@ -28,11 +29,19 @@ import {
   useIntegrations,
   useRemoveIntegration,
   useRotateIntegrationSecret,
+  useTasks,
   useUpdateIntegration,
   useWebhookDeliveries,
 } from '../lib/queries'
 
 export const Route = createFileRoute('/integrations/$provider')({
+  /**
+   * `connect=1` is set by the sign-in round-trip so the connect the user
+   * clicked resumes. Absent rather than `false` when unset, so every other link
+   * to this page stays a plain URL.
+   */
+  validateSearch: (search: Record<string, unknown>): { connect?: true } =>
+    search.connect === '1' || search.connect === true ? { connect: true } : {},
   beforeLoad: ({ params }) => {
     if (!isIntegrationProviderId(params.provider)) {
       throw redirect({ to: '/integrations' })
@@ -77,15 +86,23 @@ function CopyField({ label, value }: { label: string; value: string }) {
 
 function IntegrationProviderPage() {
   const { provider: raw } = Route.useParams()
+  const { connect } = Route.useSearch()
   if (!isIntegrationProviderId(raw)) return null
-  return <ProviderDetail provider={raw} />
+  return <ProviderDetail provider={raw} autoConnect={connect === true} />
 }
 
-function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
+function ProviderDetail({
+  provider,
+  autoConnect,
+}: {
+  provider: IntegrationProviderId
+  autoConnect: boolean
+}) {
   const navigate = useNavigate()
   const meta = providerMeta(provider)
   const title = providerPageTitle(provider)
   const { data: integrations, isLoading } = useIntegrations()
+  const { data: tasks } = useTasks()
   const { data: deliveries } = useWebhookDeliveries()
   const update = useUpdateIntegration()
   const rotate = useRotateIntegrationSecret()
@@ -98,12 +115,26 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
   const [adding, setAdding] = useState(false)
   const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [remoteNote, setRemoteNote] = useState<string | null>(null)
+  const [dismissedSetup, setDismissedSetup] = useState<string[]>([])
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
   const rows = (integrations ?? []).filter((row) => row.provider === provider)
   const configured = rows.length > 0
   const enabledCount = rows.filter((row) => row.enabled).length
   const showInstall = !configured || adding
+
+  const boundIntegrationIds = new Set(
+    (tasks ?? []).map((task) => task.webhookIntegrationId).filter(Boolean),
+  )
+  /**
+   * The connection the user most likely just finished: newest first, and only
+   * one that no automation binds yet. Without an automation a delivery arrives
+   * and matches nothing, so this is the difference between "connected" and
+   * "working".
+   */
+  const needsAutomation = rows.find(
+    (row) => !boundIntegrationIds.has(row.id) && !dismissedSetup.includes(row.id),
+  )
 
   const providerDeliveries = (deliveries ?? []).filter((d) =>
     rows.some((row) => row.id === d.integrationId),
@@ -142,6 +173,7 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
         <Card className="space-y-4 p-4">
           <IntegrationInstallPanel
             provider={provider}
+            autoConnect={autoConnect}
             onCancel={configured ? () => setAdding(false) : undefined}
             onInstalled={(result) => {
               if (result.secret) {
@@ -150,6 +182,18 @@ function ProviderDetail({ provider }: { provider: IntegrationProviderId }) {
               setRemoteNote(result.remoteError ?? null)
               setAdding(false)
             }}
+          />
+        </Card>
+      ) : null}
+
+      {!showInstall && needsAutomation ? (
+        <Card className="space-y-4 p-4">
+          <IntegrationAutomationSetup
+            provider={provider}
+            integrationId={needsAutomation.id}
+            integrationName={needsAutomation.name}
+            onCreated={({ taskId }) => navigate({ to: '/tasks/$taskId', params: { taskId } })}
+            onDismiss={() => setDismissedSetup((prev) => [...prev, needsAutomation.id])}
           />
         </Card>
       ) : null}

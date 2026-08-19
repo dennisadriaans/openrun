@@ -131,6 +131,26 @@ export function defaultInstallEvents(provider: IntegrationProviderId): string[] 
   return [...DEFAULT_INSTALL_EVENTS[provider]]
 }
 
+/**
+ * Narrow a requested event list to ids this provider actually emits, falling
+ * back to the defaults when nothing usable is left.
+ *
+ * An id outside the catalog can never match a delivery, so binding one produces
+ * an automation that looks armed and silently never fires. The setup form and
+ * the server write path both run this, so the UI cannot offer a binding the
+ * server would drop.
+ */
+export function resolveAutomationEvents(
+  provider: IntegrationProviderId,
+  requested: string[] | undefined,
+  bindableEventIds: readonly string[],
+): string[] {
+  const known = new Set(bindableEventIds)
+  const picked = (requested ?? []).map((id) => id.trim()).filter((id) => known.has(id))
+  const unique = [...new Set(picked)]
+  return unique.length > 0 ? unique : defaultInstallEvents(provider)
+}
+
 export function defaultAutomationName(
   provider: IntegrationProviderId,
   connectionName: string,

@@ -27,11 +27,19 @@ export function providerPageTitle(id: IntegrationProviderId): string {
   return id === 'github' ? 'GitHub' : (providerMeta(id)?.label ?? id)
 }
 
-/** Steps shown when the connection is made through the control plane. */
-const HOSTED_STEPS = [
-  'Sign in to Open Run, then click Connect — the browser handles the rest.',
-  'Approve the app at the provider and pick what it may watch.',
-  'Events arrive over this machine’s outbound connection. No tunnel, no tokens to paste.',
+/**
+ * How a connection is made. Identical for every provider on purpose — Connect
+ * is the only path a user should have to know about, and the differences
+ * between vendors (who picks a project, who signs how) are handled for them.
+ *
+ * A provider with `supportsLocalInstall` can also be wired by hand, but that is
+ * a fallback for self-hosters and lives behind a disclosure in the install
+ * panel, not in the steps.
+ */
+const CONNECT_STEPS = [
+  'Click Connect. Open Run sends you to the provider to approve access.',
+  'Approve, and pick what it may watch if the provider asks.',
+  'Pick a workspace and runtime — the automation is created ready to run.',
 ]
 
 export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
@@ -66,11 +74,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'issue_comment.edited', label: 'Comment edited' },
       { id: 'issue_comment.deleted', label: 'Comment deleted' },
     ],
-    setupSteps: [
-      'Click Install — Open Run uses your local `gh` login to create the webhook (no tokens to paste).',
-      'Paste a public base URL if you are on localhost (Cloudflare Tunnel / ngrok).',
-      'Pick the repo and events; we create a ready automation in the same step.',
-    ],
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'gitlab',
@@ -99,7 +103,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         description: 'Comment text is available as {{extra.comment}}',
       },
     ],
-    setupSteps: HOSTED_STEPS,
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'bitbucket',
@@ -126,7 +130,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         description: 'Derived when assignee changes on update',
       },
     ],
-    setupSteps: HOSTED_STEPS,
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'jira',
@@ -155,11 +159,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'worklog_updated', label: 'Worklog updated' },
       { id: 'worklog_deleted', label: 'Worklog deleted' },
     ],
-    setupSteps: [
-      'Click Install and paste your Jira site, Atlassian email, and an API token (used once, not stored).',
-      'Paste a public base URL if you are on localhost (Cloudflare Tunnel / ngrok).',
-      'Pick events; we register the webhook in Jira and create a ready automation.',
-    ],
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'linear',
@@ -189,11 +189,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'Cycle.create', label: 'Cycle created' },
       { id: 'Cycle.update', label: 'Cycle updated' },
     ],
-    setupSteps: [
-      'Click Install and paste a Linear personal API key (Settings → API — used once, not stored).',
-      'Paste a public base URL if you are on localhost (Cloudflare Tunnel / ngrok).',
-      'Pick events; we register the webhook in Linear and create a ready automation.',
-    ],
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'azure-devops',
@@ -215,7 +211,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         description: 'Derived when System.AssignedTo changes',
       },
     ],
-    setupSteps: HOSTED_STEPS,
+    setupSteps: CONNECT_STEPS,
   },
 ]
 

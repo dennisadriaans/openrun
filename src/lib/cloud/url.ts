@@ -16,6 +16,8 @@ export const CLOUD_PATHS = {
   relay: '/api/machine/relay',
   /** Hosted connections owned by the signed-in account, by machine token. */
   connections: '/api/machine/integrations',
+  /** Which providers this deployment can connect. Public, no token. */
+  providers: '/api/integrations/providers',
 } as const
 
 /** Where the browser starts a hosted OAuth flow for one provider. */

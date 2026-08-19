@@ -627,6 +627,19 @@ export function useInstallIntegration() {
   })
 }
 
+/** Bind a connected integration to a workspace + runtime. */
+export function useCreateIntegrationAutomation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Parameters<typeof fns.createIntegrationAutomation>[0]['data']) =>
+      fns.createIntegrationAutomation({ data }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['integrations'] })
+    },
+  })
+}
+
 // --- Checks & notifications ------------------------------------------------
 
 /** Checks Open Run would propose for a repo, from its package.json scripts. */
@@ -735,9 +748,25 @@ export function useCloudStatus() {
   })
 }
 
+/**
+ * Which providers this control plane can connect. Deliberately not gated on
+ * `signedIn`: the integrations list has to be honest before anyone signs in,
+ * and the endpoint needs no token.
+ */
+export function useCloudProviders() {
+  const { data: cloud } = useCloudStatus()
+  return useQuery({
+    queryKey: ['cloudProviders', cloud?.cloudUrl ?? 'off'],
+    queryFn: () => fns.cloudProviders(),
+    enabled: Boolean(cloud?.cloudUrl),
+    staleTime: 60_000,
+  })
+}
+
 export function useStartCloudLogin() {
   return useMutation({
-    mutationFn: (origin: string) => fns.startCloudLogin({ data: { origin } }),
+    mutationFn: (input: string | { origin: string; next?: string }) =>
+      fns.startCloudLogin({ data: typeof input === 'string' ? { origin: input } : input }),
   })
 }
 
@@ -745,7 +774,11 @@ export function useCompleteCloudLogin() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: { code: string; state: string }) => fns.completeCloudLogin({ data }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cloudStatus'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cloudStatus'] })
+      // A fresh sign-in can reach a plane the cached catalog never saw.
+      qc.invalidateQueries({ queryKey: ['cloudProviders'] })
+    },
   })
 }
 

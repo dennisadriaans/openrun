@@ -11,7 +11,9 @@ import {
   linearResourceTypesFromCatalog,
   parseGithubOwnerRepo,
   remoteInstallBaseUrl,
+  resolveAutomationEvents,
 } from './install.ts'
+import { providerMeta } from './catalog.ts'
 
 test('isLikelyLocalhostUrl detects loopback hosts', () => {
   assert.equal(isLikelyLocalhostUrl('http://localhost:3000'), true)
@@ -63,6 +65,36 @@ test('cloudConnectionIdFromConfig only reads hosted rows', () => {
   )
   assert.equal(cloudConnectionIdFromConfig('{}'), null)
   assert.equal(cloudConnectionIdFromConfig('not-json'), null)
+})
+
+test('resolveAutomationEvents keeps only ids the provider can emit', () => {
+  const jiraIds = providerMeta('jira')!.events.map((event) => event.id)
+
+  assert.deepEqual(
+    resolveAutomationEvents('jira', ['jira:issue_created', 'jira:issue_updated'], jiraIds),
+    ['jira:issue_created', 'jira:issue_updated'],
+  )
+  // An id no delivery can carry would bind an automation that never fires.
+  assert.deepEqual(resolveAutomationEvents('jira', ['issues.opened'], jiraIds), [
+    'jira:issue_created',
+    'jira:issue_status_changed',
+  ])
+  assert.deepEqual(resolveAutomationEvents('jira', [], jiraIds), [
+    'jira:issue_created',
+    'jira:issue_status_changed',
+  ])
+  assert.deepEqual(resolveAutomationEvents('jira', undefined, jiraIds), [
+    'jira:issue_created',
+    'jira:issue_status_changed',
+  ])
+})
+
+test('resolveAutomationEvents trims and de-duplicates', () => {
+  const linearIds = providerMeta('linear')!.events.map((event) => event.id)
+  assert.deepEqual(
+    resolveAutomationEvents('linear', [' Issue.create ', 'Issue.create'], linearIds),
+    ['Issue.create'],
+  )
 })
 
 test('catalog events map to remote provider subscriptions', () => {

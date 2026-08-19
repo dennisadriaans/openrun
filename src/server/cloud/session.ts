@@ -87,6 +87,11 @@ export type PkcePending = {
   state: string
   redirectUri: string
   createdAt: number
+  /**
+   * In-app path to land on afterwards, so signing in from a provider page
+   * resumes that connect. Validated by `safeLocalNext` before it is written.
+   */
+  next?: string
 }
 
 export function writePkcePending(pending: PkcePending): void {
@@ -111,6 +116,7 @@ export function readPkcePending(): PkcePending | null {
       state: parsed.state,
       redirectUri: parsed.redirectUri,
       createdAt: parsed.createdAt,
+      ...(typeof parsed.next === 'string' ? { next: parsed.next } : {}),
     }
   } catch {
     return null

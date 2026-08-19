@@ -5,6 +5,7 @@
  */
 import { restartCloudRelay, startCloudRelay, stopCloudRelay } from './relay.ts'
 import { signOutCloud } from './login.ts'
+import { forgetCloudProviders } from './providers.ts'
 
 export { getCloudStatus } from './status.ts'
 export { skipCloudOnboarding } from './onboarding.ts'
@@ -16,6 +17,7 @@ export {
   signOutCloud,
 } from './login.ts'
 export { restartCloudRelay, startCloudRelay, stopCloudRelay } from './relay.ts'
+export { listCloudProviders } from './providers.ts'
 export {
   completeHostedConnect,
   disconnectHostedIntegration,
@@ -34,8 +36,12 @@ export function bootCloud(): void {
 export async function signOutAndDisconnect(): Promise<void> {
   stopCloudRelay()
   signOutCloud()
+  forgetCloudProviders()
 }
 
 export async function afterSignIn(): Promise<void> {
+  // Signing in usually means the machine just came online, or is pointed at a
+  // different control plane than the cached answer came from.
+  forgetCloudProviders()
   await restartCloudRelay()
 }

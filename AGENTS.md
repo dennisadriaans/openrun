@@ -146,6 +146,8 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | How a diff line looks (git panel **and** chat edit hunks) | `components/DiffRows.tsx`; tokens from `lib/highlight.ts`; agent-supplied hunks via `lib/lineDiff.ts` |
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (GitHub / Jira / Linear) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx`, `routes/api/webhooks/$integrationId.ts` |
+| Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationInstall.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
+| Binding a connection to a workspace + runtime | `server/integrations/automation.ts`, `components/IntegrationAutomationSetup.tsx`; event narrowing in `lib/integrations/install.ts` |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
 | First-run account gate | `routes/welcome.tsx`; the redirect lives in `AppLayout` in `routes/__root.tsx`, the remembered skip in `server/cloud/onboarding.ts` |
 | Runtime binary on PATH, args templates, transport | `server/runtimePath.ts`, `server/userPath.ts`, `lib/runtimeBinary.ts`, `lib/argsTemplate.ts`, `lib/runtimePresets.ts`, `lib/acpTransport.ts` |

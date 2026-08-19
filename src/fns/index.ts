@@ -6,6 +6,7 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import type {
+  CreateIntegrationAutomationInput,
   CreateIntegrationInput,
   NotifierInput,
   PreviewCommandInput,
@@ -414,6 +415,11 @@ export const installIntegration = createServerFn({ method: 'POST' })
   .validator((d: InstallIntegrationInput) => d)
   .handler(async ({ data }) => (await core()).installIntegration(data))
 
+/** Bind a connected integration to a workspace + runtime so deliveries run. */
+export const createIntegrationAutomation = createServerFn({ method: 'POST' })
+  .validator((d: CreateIntegrationAutomationInput) => d)
+  .handler(async ({ data }) => (await core()).createIntegrationAutomation(data))
+
 /** Soft type re-export for UI forms. */
 export type { IntegrationProviderId }
 export type { InstallIntegrationInput }
@@ -456,8 +462,8 @@ export const cloudStatus = createServerFn({ method: 'GET' }).handler(async () =>
 )
 
 export const startCloudLogin = createServerFn({ method: 'POST' })
-  .validator((d: { origin: string }) => d)
-  .handler(async ({ data }) => (await core()).startCloudLogin(data.origin))
+  .validator((d: { origin: string; next?: string }) => d)
+  .handler(async ({ data }) => (await core()).startCloudLogin(data.origin, data.next))
 
 export const completeCloudLogin = createServerFn({ method: 'POST' })
   .validator((d: { code: string; state: string }) => d)
@@ -465,8 +471,13 @@ export const completeCloudLogin = createServerFn({ method: 'POST' })
     const c = await core()
     const session = await c.completeCloudLogin(data)
     await c.afterSignIn()
-    return { email: session.email, userId: session.userId }
+    return { email: session.email, userId: session.userId, next: session.next }
   })
+
+/** Which providers this control plane can connect. Public — no session needed. */
+export const cloudProviders = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listCloudProviders(),
+)
 
 export const skipCloudOnboarding = createServerFn({ method: 'POST' }).handler(async () =>
   (await core()).skipCloudOnboarding(),
