@@ -234,3 +234,50 @@ export function parseGrokModelsOutput(text: string): DiscoveredModel[] {
 function grokDisplayName(slug: string): string {
   return slug.replace(/^grok-/, 'Grok ')
 }
+
+// --- fx (`fx models --json`) -----------------------------------------------
+
+/**
+ * `fx models --json` prints one object:
+ * `{ "kind":"models", "ids":["zai/glm-5.2-fast", ...] }`.
+ * Failures are `{ "kind":"models", "error":"..." }` with no `ids`.
+ */
+export function parseFxModelsOutput(text: string): DiscoveredModel[] {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) return []
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const ids = obj.ids
+  if (!Array.isArray(ids)) return []
+  const out: DiscoveredModel[] = []
+  for (let i = 0; i < ids.length; i++) {
+    const slug = typeof ids[i] === 'string' ? ids[i].trim() : ''
+    if (!slug || slug.includes(' ')) continue
+    out.push({
+      slug,
+      name: fxDisplayName(slug),
+      efforts: [],
+      defaultEffort: '',
+      rank: ids.length - i,
+    })
+  }
+  return out
+}
+
+function fxDisplayName(slug: string): string {
+  const local = slug.split('/').pop() ?? slug
+  return local
+    .replace(/glm/gi, 'GLM')
+    .replace(/gpt/gi, 'GPT')
+    .split('-')
+    .map((part) => {
+      if (!part) return part
+      if (/^[A-Z0-9.]+$/.test(part)) return part
+      return part.charAt(0).toUpperCase() + part.slice(1)
+    })
+    .join(' ')
+}

@@ -24,6 +24,7 @@ import {
   catalogFromDiscovered,
   parseAgyModelsOutput,
   parseClaudeBundleModels,
+  parseFxModelsOutput,
   parseGrokModelsOutput,
 } from '../lib/modelDiscovery.ts'
 import {
@@ -45,6 +46,7 @@ const PROVIDERS: Partial<Record<RuntimeModelKind, Provider>> = {
   claude: { discover: (p) => scanClaudeBundle(p) },
   antigravity: { discover: (p) => runAndParse(p, ['models'], parseAgyModelsOutput, 20_000) },
   grok: { discover: (p) => runAndParse(p, ['models'], parseGrokModelsOutput, 10_000) },
+  fx: { discover: (p) => runAndParse(p, ['models', '--json'], parseFxModelsOutput, 20_000) },
 }
 
 /**
@@ -154,7 +156,7 @@ export async function refreshModelCatalog(bin: string, opts?: { force?: boolean 
 
 /** Warm every known CLI's catalog once at boot, off the critical path. */
 export function warmModelCatalogs(): void {
-  for (const bin of ['claude', 'agy', 'grok']) {
+  for (const bin of ['claude', 'agy', 'grok', 'fx']) {
     void refreshModelCatalog(bin, { force: true })
   }
 }

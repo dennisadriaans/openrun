@@ -56,6 +56,12 @@ export type AcpLaunchPreset = {
 
 export const ACP_LAUNCH_PRESETS: AcpLaunchPreset[] = [
   {
+    kind: 'fx',
+    bin: 'fx',
+    args: ['acp'],
+    note: 'fx speaks ACP natively — install from https://fx.sh/ (`curl -fsSL https://fx.sh/setup.sh | bash`).',
+  },
+  {
     kind: 'gemini',
     bin: 'gemini',
     args: ['--experimental-acp'],

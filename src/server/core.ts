@@ -1274,7 +1274,9 @@ export async function planObjective(input: {
       ? ['exec', '--skip-git-repo-check', '-']
       : plannerKind === 'grok'
         ? ['--prompt-file', '{promptFile}', '--output-format', 'plain', '--always-approve']
-        : ['-p', '--output-format', 'text', '--dangerously-skip-permissions']
+        : plannerKind === 'fx'
+          ? ['ask', '--yolo']
+          : ['-p', '--output-format', 'text', '--dangerously-skip-permissions']
   const plannerRuntime: RuntimeRow = {
     ...runtime,
     canOpenPrs: 0,

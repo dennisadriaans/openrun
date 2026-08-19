@@ -4,6 +4,7 @@ import {
   catalogFromDiscovered,
   parseAgyModelsOutput,
   parseClaudeBundleModels,
+  parseFxModelsOutput,
   parseGrokModelsOutput,
 } from './modelDiscovery.ts'
 
@@ -145,4 +146,32 @@ test('catalog shaping drops duplicate slugs', () => {
     { slug: 'a', name: 'A again', efforts: [], defaultEffort: '', rank: 9 },
   ]
   assert.equal(catalogFromDiscovered('grok', dupe).length, 1)
+})
+
+const FX_MODELS_JSON =
+  '{"kind":"models","count":2,"shown_count":2,"more_count":0,"private_models_hidden":false,"ids":["zai/glm-5.2-fast","openai/gpt-5.4"]}\n'
+
+test('fx models --json parses gateway ids in catalog order', () => {
+  const models = parseFxModelsOutput(FX_MODELS_JSON)
+  assert.deepEqual(
+    models.map((m) => m.slug),
+    ['zai/glm-5.2-fast', 'openai/gpt-5.4'],
+  )
+  assert.equal(models[0]?.name, 'GLM 5.2 Fast')
+  assert.equal(models[1]?.name, 'GPT 5.4')
+})
+
+test('fx models --json yields nothing on an error payload', () => {
+  assert.deepEqual(
+    parseFxModelsOutput('{"kind":"models","error":"could not list models: Unavailable"}\n'),
+    [],
+  )
+  assert.deepEqual(parseFxModelsOutput('not json'), [])
+})
+
+test('fx catalog shaping keeps CLI order so the first id is the default', () => {
+  const catalog = catalogFromDiscovered('fx', parseFxModelsOutput(FX_MODELS_JSON))
+  assert.equal(catalog[0]?.slug, 'zai/glm-5.2-fast')
+  assert.equal(catalog[0]?.provider, 'fx')
+  assert.deepEqual(catalog[0]?.efforts, [])
 })

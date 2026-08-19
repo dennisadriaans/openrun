@@ -96,7 +96,10 @@ export function killPidTree(pid: number, opts?: { graceMs?: number }): boolean {
 }
 
 /** Spawn options so agent grandchildren can be torn down with the parent. */
-export function agentSpawnOptions(cwd: string): {
+export function agentSpawnOptions(
+  cwd: string,
+  extraEnv?: Record<string, string>,
+): {
   cwd: string
   env: NodeJS.ProcessEnv
   stdio: ['pipe', 'pipe', 'pipe']
@@ -104,10 +107,9 @@ export function agentSpawnOptions(cwd: string): {
 } {
   return {
     cwd,
-    env: process.env,
+    env:
+      extraEnv && Object.keys(extraEnv).length > 0 ? { ...process.env, ...extraEnv } : process.env,
     stdio: ['pipe', 'pipe', 'pipe'],
-    // Own process group on Unix so cancel/timeout can kill the whole tree
-    // (tool shells the agent started). Windows uses taskkill-style single-pid.
     detached: process.platform !== 'win32',
   }
 }

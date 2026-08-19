@@ -45,6 +45,12 @@ describe('acpLaunchPresetFor', () => {
     assert.deepEqual(preset?.args, ['--experimental-acp'])
   })
 
+  it('knows fx speaks ACP natively', () => {
+    const preset = acpLaunchPresetFor('fx')
+    assert.equal(preset?.bin, 'fx')
+    assert.deepEqual(preset?.args, ['acp'])
+  })
+
   it('points Claude and Codex at their adapters', () => {
     assert.match(String(acpLaunchPresetFor('claude')?.args.join(' ')), /claude-code-acp/)
     assert.equal(acpLaunchPresetFor('codex')?.bin, 'codex-acp')
