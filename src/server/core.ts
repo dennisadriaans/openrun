@@ -22,6 +22,7 @@ import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
+import type { WebhookFilters } from '../lib/integrations/types'
 import {
   isNativeResumeKind,
   missingNativeSessionMessage,
@@ -473,13 +474,7 @@ export type TaskInput = {
   /** Provider event ids to match; empty/omitted = all events on that connection. */
   webhookEvents?: string[]
   /** Optional label/project/status filters. */
-  webhookFilters?: {
-    labels?: string[]
-    projects?: string[]
-    statuses?: string[]
-    previousStatuses?: string[]
-    assignees?: string[]
-  }
+  webhookFilters?: WebhookFilters
   /** Run the project's verification checks after each turn (default on). */
   verifyEnabled?: boolean
   /** Repair turns allowed on a failed-checks run; capped at MAX_REPAIR_ATTEMPTS. */
@@ -1442,6 +1437,7 @@ function writeIntegrationAutomation(args: {
   enabled: boolean
   webhookIntegrationId: string
   webhookEvents: string[]
+  webhookFilters?: WebhookFilters
 }): { id: string } {
   const task = upsertTask({
     name: args.name,
@@ -1454,7 +1450,7 @@ function writeIntegrationAutomation(args: {
     enabled: args.enabled,
     webhookIntegrationId: args.webhookIntegrationId,
     webhookEvents: args.webhookEvents,
-    webhookFilters: {},
+    webhookFilters: args.webhookFilters ?? {},
   })
   return { id: task.id }
 }
