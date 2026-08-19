@@ -12,6 +12,12 @@ import { useId, useMemo, useState } from 'react'
 import { providerMeta } from '../lib/integrations/catalog'
 import { defaultAutomationPrompt } from '../lib/integrations/install'
 import {
+  availableRecipes,
+  defaultRecipe,
+  type AutomationRecipe,
+  type RecipeId,
+} from '../lib/integrations/recipes'
+import {
   availableTriggers,
   compileTrigger,
   defaultTrigger,
@@ -41,10 +47,17 @@ export function IntegrationAutomationSetup({
   const { data: ctx, isLoading } = useInstallContext()
   const create = useCreateIntegrationAutomation()
 
+  const recipes = useMemo(() => availableRecipes(provider), [provider])
+  const opening = useMemo(() => defaultRecipe(provider), [provider])
+
   const [workspaceId, setWorkspaceId] = useState('')
   const [runtimeId, setRuntimeId] = useState('')
-  const [trigger, setTrigger] = useState<IntegrationTrigger>(() => defaultTrigger(provider))
-  const [prompt, setPrompt] = useState(() => defaultAutomationPrompt(provider))
+  const [recipeId, setRecipeId] = useState<RecipeId | null>(() => opening?.id ?? null)
+  const [trigger, setTrigger] = useState<IntegrationTrigger>(
+    () => opening?.trigger ?? defaultTrigger(provider),
+  )
+  const [prompt, setPrompt] = useState(() => opening?.prompt ?? defaultAutomationPrompt(provider))
+  const [automationName, setAutomationName] = useState(() => opening?.automationName ?? '')
   const [showRaw, setShowRaw] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -90,6 +103,7 @@ export function IntegrationAutomationSetup({
         runtimeId: chosenRuntime,
         trigger,
         prompt,
+        name: automationName.trim() || undefined,
       })
       onCreated({ taskId: result.taskId })
     } catch (err) {
@@ -98,9 +112,19 @@ export function IntegrationAutomationSetup({
   }
 
   const setKind = (kind: TriggerKind) => {
+    // Editing the trigger by hand means this is no longer the recipe as shipped.
+    setRecipeId(null)
     setTrigger(
       kind === 'custom' ? { kind: 'custom', events: [...compiled.events] } : { kind, value: '' },
     )
+  }
+
+  /** A recipe replaces the fields it owns; workspace and runtime are the user's. */
+  const applyRecipe = (recipe: AutomationRecipe) => {
+    setRecipeId(recipe.id)
+    setTrigger(recipe.trigger)
+    setPrompt(recipe.prompt)
+    setAutomationName(recipe.automationName)
   }
 
   if (!meta) return null
@@ -115,6 +139,49 @@ export function IntegrationAutomationSetup({
           Run will start a coding agent each time that happens.
         </p>
       </div>
+
+      {recipes.length ? (
+        <Field label="Start from">
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {recipes.map((recipe) => {
+              const selected = recipeId === recipe.id
+              return (
+                <button
+                  key={recipe.id}
+                  type="button"
+                  onClick={() => applyRecipe(recipe)}
+                  aria-pressed={selected}
+                  className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                    selected
+                      ? 'border-[var(--border-strong)] bg-[var(--bg-primary)]'
+                      : 'border-[var(--border-quaternary)] hover:bg-hover'
+                  }`}
+                >
+                  <span className="block text-ui-sm text-foreground">{recipe.title}</span>
+                  <span className="mt-0.5 block text-ui-sm text-tier-quaternary">
+                    {recipe.summary}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          {recipeId === null ? (
+            <p className="mt-1.5 text-ui-sm text-tier-quaternary">
+              Edited — pick a starting point again to reset the trigger and prompt.
+            </p>
+          ) : null}
+        </Field>
+      ) : null}
+
+      <Field label="Name">
+        <input
+          className={inputClass}
+          value={automationName}
+          onChange={(e) => setAutomationName(e.target.value)}
+          placeholder={`${meta.label}: ${integrationName}`}
+          aria-label="Automation name"
+        />
+      </Field>
 
       <Field label="Workspace">
         <select
@@ -170,7 +237,10 @@ export function IntegrationAutomationSetup({
               <input
                 className={inputClass}
                 value={trigger.value ?? ''}
-                onChange={(e) => setTrigger({ ...trigger, value: e.target.value })}
+                onChange={(e) => {
+                  setRecipeId(null)
+                  setTrigger({ ...trigger, value: e.target.value })
+                }}
                 placeholder={option.placeholder}
                 list={option.suggestions ? statusListId : undefined}
                 aria-label={option.label}
@@ -206,7 +276,8 @@ export function IntegrationAutomationSetup({
                       type="checkbox"
                       className="mt-0.5"
                       checked={checked}
-                      onChange={() =>
+                      onChange={() => {
+                        setRecipeId(null)
                         setTrigger((prev) => {
                           const current = prev.events ?? []
                           return {
@@ -216,7 +287,7 @@ export function IntegrationAutomationSetup({
                               : [...current, event.id],
                           }
                         })
-                      }
+                      }}
                     />
                     <span className="min-w-0">
                       <span className="block text-ui-sm text-foreground">{event.label}</span>
@@ -251,7 +322,10 @@ export function IntegrationAutomationSetup({
         <textarea
           className={`${inputClass} min-h-32 resize-y`}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => {
+            setRecipeId(null)
+            setPrompt(e.target.value)
+          }}
           spellCheck={false}
         />
       </Field>

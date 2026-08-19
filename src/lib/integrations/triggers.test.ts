@@ -180,6 +180,30 @@ describe('compiled triggers match the deliveries they claim to', () => {
     assert.equal(eventMatchesFilters(other, filters), false)
   })
 
+  /**
+   * Labelling a ticket as you file it is the ordinary way to use a label, and
+   * it produces a create — not an update, and on most vendors not a label event
+   * either. Every provider's label trigger has to cover it or the flagship
+   * recipe ignores exactly the tickets it was set up for.
+   */
+  it('fires on a ticket that arrives already labelled', () => {
+    for (const provider of INTEGRATION_PROVIDER_IDS) {
+      const labelTrigger = availableTriggers(provider).find((o) => o.kind === 'labeled')
+      if (!labelTrigger) continue
+
+      const createdId = availableTriggers(provider).find((o) => o.kind === 'created')!.events[0]!
+      assert.ok(
+        labelTrigger.events.includes(createdId),
+        `${provider} label trigger misses ${createdId}`,
+      )
+
+      const { events, filters } = compileTrigger(provider, { kind: 'labeled', value: 'agent' })
+      const born = deliveryOf(provider, { eventType: createdId, labels: ['agent'] })
+      assert.equal(eventTypeMatches(born.eventType, events), true, `${provider} event`)
+      assert.equal(eventMatchesFilters(born, filters), true, `${provider} filter`)
+    }
+  })
+
   it('an empty status trigger fires on any transition', () => {
     const { filters } = compileTrigger('linear', { kind: 'status', value: '' })
     for (const status of ['Todo', 'In Progress', 'Done']) {
@@ -232,22 +256,6 @@ describe('detectTrigger', () => {
         assert.equal(detected.value, value)
       }
     }
-  })
-
-  it('reads a shared event with no filter as the plainer kind', () => {
-    // Jira has no label webhook, so "carries a label" and "changes in any way"
-    // both bind jira:issue_updated. Without a label to match they are the same
-    // binding, and the plainer reading is the honest one.
-    const bare = compileTrigger('jira', { kind: 'labeled', value: '' })
-    assert.deepEqual(bare, compileTrigger('jira', { kind: 'updated' }))
-    assert.equal(detectTrigger('jira', bare.events, bare.filters).kind, 'updated')
-
-    // Add the label back and it is unambiguously the label trigger again.
-    const narrowed = compileTrigger('jira', { kind: 'labeled', value: 'agent' })
-    assert.deepEqual(detectTrigger('jira', narrowed.events, narrowed.filters), {
-      kind: 'labeled',
-      value: 'agent',
-    })
   })
 
   it('reports a shape the builder cannot express as custom', () => {

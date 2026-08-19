@@ -64,6 +64,11 @@ const NOUN: Record<IntegrationProviderId, string> = {
   'azure-devops': 'work item',
 }
 
+/** What this provider calls the thing, for copy that has to name it. */
+export function providerNoun(provider: IntegrationProviderId): string {
+  return NOUN[provider]
+}
+
 /** "an issue", "a work item" — these strings are read by users, not parsed. */
 function an(noun: string): string {
   return `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`
@@ -113,12 +118,18 @@ const KIND_SHAPE: Record<Exclude<TriggerKind, 'custom'>, KindShape> = {
  *
  * Where a vendor has no dedicated event, the closest one is paired with the
  * filter that makes it mean the right thing — Jira has no "labelled" webhook,
- * so `labeled` binds `jira:issue_updated` and narrows on the label. That reads
- * as "updated while carrying this label" rather than "the moment it was
+ * so `labeled` binds the update event and narrows on the label. That reads as
+ * "changed while carrying this label" rather than "the moment it was
  * labelled", which is why those entries carry a `note`.
+ *
+ * `labeled` also binds the *create* event everywhere. Labelling a ticket as you
+ * file it is the ordinary way to use a label, and it produces a create — not an
+ * update, and on most vendors not a label event either. Without this the
+ * flagship "label it and the agent picks it up" recipe silently ignored every
+ * ticket that arrived already labelled.
  */
 const BROADER_LABEL_NOTE =
-  'This provider has no label event, so it fires on any update while the label is present.'
+  'This provider has no label event, so it fires whenever a ticket is created or changed while carrying the label.'
 
 const KIND_EVENTS: Record<
   IntegrationProviderId,
@@ -127,7 +138,7 @@ const KIND_EVENTS: Record<
   github: {
     created: ['issues.opened'],
     status: ['issues.closed', 'issues.reopened'],
-    labeled: ['issues.labeled'],
+    labeled: ['issues.opened', 'issues.labeled'],
     assigned: ['issues.assigned'],
     commented: ['issue_comment.created'],
     updated: ['issues.edited'],
@@ -135,7 +146,7 @@ const KIND_EVENTS: Record<
   gitlab: {
     created: ['issue.open'],
     status: ['issue.status_changed'],
-    labeled: ['issue.update'],
+    labeled: ['issue.open', 'issue.update'],
     assigned: ['issue.assigned'],
     commented: ['note.create'],
     updated: ['issue.update'],
@@ -151,7 +162,7 @@ const KIND_EVENTS: Record<
   jira: {
     created: ['jira:issue_created'],
     status: ['jira:issue_status_changed'],
-    labeled: ['jira:issue_updated'],
+    labeled: ['jira:issue_created', 'jira:issue_updated'],
     assigned: ['jira:issue_assigned'],
     commented: ['comment_created'],
     updated: ['jira:issue_updated'],
@@ -159,7 +170,7 @@ const KIND_EVENTS: Record<
   linear: {
     created: ['Issue.create'],
     status: ['Issue.status_changed'],
-    labeled: ['Issue.update'],
+    labeled: ['Issue.create', 'Issue.update'],
     assigned: ['Issue.assigned'],
     commented: ['Comment.create'],
     updated: ['Issue.update'],
@@ -167,7 +178,7 @@ const KIND_EVENTS: Record<
   'azure-devops': {
     created: ['workitem.created'],
     status: ['workitem.status_changed'],
-    labeled: ['workitem.updated'],
+    labeled: ['workitem.created', 'workitem.updated'],
     assigned: ['workitem.assigned'],
     // No comment event in the canonical vocabulary.
     updated: ['workitem.updated'],

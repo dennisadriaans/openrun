@@ -81,6 +81,13 @@ export type ProviderMeta = {
    * this machine hosts itself.
    */
   supportsLocalInstall: boolean
+  /**
+   * True when this provider's parse fills `extra.comment` with the comment
+   * body. A prompt that interpolates `{{extra.comment}}` on a provider that
+   * does not renders an empty line, so anything offering a comment-driven
+   * template has to check this rather than assume a comment event carries text.
+   */
+  emitsCommentText: boolean
 }
 
 export function emptyIssue(partial?: Partial<CanonicalIssue>): CanonicalIssue {

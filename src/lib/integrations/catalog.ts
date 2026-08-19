@@ -49,6 +49,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description: 'Open, edit, label, assign, close, and reopen issue events from a GitHub repo.',
     docsUrl: 'https://docs.github.com/en/webhooks/webhook-events-and-payloads#issues',
     supportsLocalInstall: true,
+    emitsCommentText: true,
     events: [
       { id: 'issues.opened', label: 'Opened', description: 'A new issue was created' },
       { id: 'issues.edited', label: 'Edited', description: 'Issue title or body changed' },
@@ -82,6 +83,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description: 'GitLab issue open, close, reopen, update, and comment events for one project.',
     docsUrl: 'https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html',
     supportsLocalInstall: false,
+    emitsCommentText: true,
     events: [
       { id: 'issue.open', label: 'Opened' },
       { id: 'issue.update', label: 'Updated' },
@@ -111,6 +113,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description: 'Bitbucket Cloud issue create, update, and comment events for one repository.',
     docsUrl: 'https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/',
     supportsLocalInstall: false,
+    emitsCommentText: true,
     events: [
       { id: 'issue:created', label: 'Created' },
       { id: 'issue:updated', label: 'Updated' },
@@ -138,6 +141,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description: 'Jira Cloud issue webhooks — status changes, create, update, assign, and more.',
     docsUrl: 'https://developer.atlassian.com/cloud/jira/platform/webhooks/',
     supportsLocalInstall: true,
+    emitsCommentText: true,
     events: [
       { id: 'jira:issue_created', label: 'Created' },
       { id: 'jira:issue_updated', label: 'Updated' },
@@ -167,6 +171,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description: 'Linear issue create, update, remove, and status-change events.',
     docsUrl: 'https://linear.app/developers/webhooks',
     supportsLocalInstall: true,
+    emitsCommentText: false,
     events: [
       { id: 'Issue.create', label: 'Created' },
       { id: 'Issue.update', label: 'Updated' },
@@ -197,6 +202,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description: 'Azure Boards work-item created, updated, and status-change events.',
     docsUrl: 'https://learn.microsoft.com/azure/devops/service-hooks/events',
     supportsLocalInstall: false,
+    emitsCommentText: false,
     events: [
       { id: 'workitem.created', label: 'Created' },
       { id: 'workitem.updated', label: 'Updated' },
