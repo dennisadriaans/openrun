@@ -8,14 +8,13 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
   pull-requests: write
   statuses: write
 
 jobs:
   cla:
     runs-on: ubuntu-latest
-    # Skip the maintainer's own PRs and anything opened by a bot.
     if: >
       (github.event.issue.pull_request || github.event_name == 'pull_request_target') &&
       github.actor != 'dependabot[bot]'
@@ -28,16 +27,10 @@ jobs:
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # A fine-grained PAT with contents:write on the signatures repository.
-          # Signatures are stored outside this repo so a PR can never touch them.
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_SIGNATURES_TOKEN }}
         with:
           path-to-document: https://github.com/dennisadriaans/openrun/blob/main/CLA.md
           branch: main
-          allowlist: dennisadriaans,bot*,*[bot]
-
-          remote-organization-name: dennisadriaans
-          remote-repository-name: openrun-cla-signatures
+          allowlist: dennisadriaans,cursoragent,bot*,*[bot]
           path-to-signatures: signatures/v1/cla.json
 
           custom-notsigned-prcomment: >
