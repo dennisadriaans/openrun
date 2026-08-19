@@ -65,6 +65,7 @@ export type AcpTurnInput = {
   prompt: string
   /** Existing ACP session to resume; empty for a first turn. */
   sessionId: string
+  extraEnv?: Record<string, string>
 }
 
 /** A permission request waiting on a human decision. */
@@ -115,7 +116,7 @@ function normalizeOptions(raw: unknown): PermissionOption[] {
  * has exactly one completion path to handle.
  */
 export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurnHandle {
-  const child = spawn(input.bin, input.args, agentSpawnOptions(input.cwd))
+  const child = spawn(input.bin, input.args, agentSpawnOptions(input.cwd, input.extraEnv))
 
   const pending = new Map<string, PendingPermission>()
   let permissionSeq = 0

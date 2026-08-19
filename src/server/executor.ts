@@ -1,7 +1,7 @@
 /**
  * Process executor.
  *
- * Spawns a runtime's CLI (claude / codex / grok / gemini) as a local child
+ * Spawns a runtime's CLI (claude / codex / grok / gemini / fx) as a local child
  * process, streaming stdout/stderr incrementally into the DB so the UI can tail
  * it live. Everything runs locally against the user's own CLI logins — no API
  * tokens, no cloud.
@@ -52,7 +52,6 @@ import { buildControlResponse, type ApprovalDecision } from '../lib/claudeContro
 import { resolveApprovalAnswer } from '../lib/approvals'
 import type { PermissionOption, ToolKind } from '../lib/acp'
 import { isAcpTransport } from '../lib/acpTransport'
-import { parseArgsTemplate } from '../lib/argsTemplate'
 import { startAcpTurn } from './acpTurn'
 import { withPrCapability } from '../lib/prCapability'
 import { detectGhFailure } from '../lib/ghOutcome'
@@ -484,6 +483,8 @@ function spawnTurn(input: {
         cwd,
         prompt: turn.acpPrompt ?? prompt,
         sessionId: turn.acpSessionId ?? '',
+        args: turn.args,
+        extraEnv: turn.extraEnv,
         assistantMsgId,
         timeoutMs,
         unattended,
@@ -532,7 +533,7 @@ function spawnTurn(input: {
         .run(displayCommand, runId, '%{promptFile}%')
     }
 
-    child = spawn(runtime.bin, spawnArgs, agentSpawnOptions(cwd))
+    child = spawn(runtime.bin, spawnArgs, agentSpawnOptions(cwd, turn.extraEnv))
   } catch (err) {
     if (promptFileDir) {
       try {
@@ -981,6 +982,8 @@ function spawnAcpTurn(input: {
   cwd: string
   prompt: string
   sessionId: string
+  args: string[]
+  extraEnv?: Record<string, string>
   assistantMsgId: string
   timeoutMs: number
   unattended: boolean
@@ -1151,10 +1154,11 @@ function spawnAcpTurn(input: {
   const handle = startAcpTurn(
     {
       bin: runtime.bin,
-      args: parseArgsTemplateSafe(runtime.argsTemplate),
+      args: input.args,
       cwd,
       prompt: input.prompt,
       sessionId: input.sessionId,
+      extraEnv: input.extraEnv,
     },
     {
       onEvents: (events) => persistEvents(coalescer.push(events)),
@@ -1214,15 +1218,6 @@ function spawnAcpTurn(input: {
       stillLive: () => liveMap().has(runId),
     })
   }, timeoutMs)
-}
-
-/** Args template for an ACP launch command; a broken one just means no args. */
-function parseArgsTemplateSafe(template: string): string[] {
-  try {
-    return parseArgsTemplate(template)
-  } catch {
-    return []
-  }
 }
 
 /**

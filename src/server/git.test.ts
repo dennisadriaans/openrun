@@ -31,6 +31,7 @@ function makeRepo(): string {
   git(dir, ['init'])
   git(dir, ['config', 'user.email', 'test@example.com'])
   git(dir, ['config', 'user.name', 'Test'])
+  git(dir, ['config', 'core.autocrlf', 'false'])
   writeFileSync(join(dir, 'tracked.txt'), 'base\n')
   writeFileSync(join(dir, 'clean.txt'), 'clean\n')
   git(dir, ['add', '.'])

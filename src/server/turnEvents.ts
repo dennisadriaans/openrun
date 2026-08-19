@@ -7,8 +7,8 @@
  * so `server/` code never reaches into an adapter directly and picks up a
  * runtime-specific import by accident.
  */
-import type { TurnEventKind, TurnEventPayload, TurnEventRow } from '../lib/turnEvents'
-import { isPlainCliOutput } from '../lib/cliOutputFormat'
+import type { TurnEventKind, TurnEventPayload, TurnEventRow } from '../lib/turnEvents.ts'
+import { isPlainCliOutput } from '../lib/cliOutputFormat.ts'
 
 export type { TurnEventKind, TurnEventPayload, TurnEventRow }
 export { isPlainCliOutput }

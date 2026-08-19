@@ -1,6 +1,6 @@
 /**
  * Augment process.env.PATH with common user-install directories so agent CLIs
- * (claude, codex, gemini, …) resolve when the Node process was started from a
+ * (claude, codex, gemini, fx, …) resolve when the Node process was started from a
  * GUI / IDE without a login-shell PATH (typical on macOS Cursor, Windows
  * Explorer, Linux desktop launchers).
  *

@@ -14,16 +14,16 @@ import {
   findModel,
   modelsForKind,
   type RuntimeModelKind,
-} from '../lib/models'
-import { parseArgsTemplate } from '../lib/argsTemplate'
-import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
-import { isSupervised } from '../lib/supervisedPolicy'
-import { buildStreamJsonUserMessage } from '../lib/claudeControl'
+} from '../lib/models.ts'
+import { parseArgsTemplate } from '../lib/argsTemplate.ts'
+import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode.ts'
+import { isSupervised } from '../lib/supervisedPolicy.ts'
+import { buildStreamJsonUserMessage } from '../lib/claudeControl.ts'
 import { extractGrokAssistantText } from '../lib/agentEvents/grok.ts'
-import { isAcpTransport } from '../lib/acpTransport'
+import { isAcpTransport } from '../lib/acpTransport.ts'
 import type { EventRuntimeKind } from '../lib/agentEvents/types.ts'
-import type { RuntimeRow } from './db'
-import { ensureMachineReadableArgs } from './turnEvents'
+import type { RuntimeRow } from './db.ts'
+import { ensureMachineReadableArgs } from './turnEvents.ts'
 
 const STREAM_JSON = '--input-format'
 const PERMISSION_PROMPT_TOOL = '--permission-prompt-tool'
@@ -58,6 +58,7 @@ export function runtimeKind(bin: string): RuntimeKind {
   // its own — over the CLI transport it stays single-shot (see supportsResume).
   if (name.includes('gemini')) return 'gemini'
   if (name === 'agy' || name.includes('antigravity')) return 'antigravity'
+  if (name === 'fx' || name === 'fx.exe') return 'fx'
   return 'generic'
 }
 
@@ -67,7 +68,9 @@ export function runtimeKind(bin: string): RuntimeKind {
  * reuses Claude's stdout adapter rather than getting a near-identical copy.
  */
 export function eventKindFor(kind: RuntimeKind): EventRuntimeKind {
-  return kind === 'antigravity' ? 'claude' : (kind as EventRuntimeKind)
+  if (kind === 'antigravity') return 'claude'
+  if (kind === 'claude' || kind === 'codex' || kind === 'grok' || kind === 'gemini') return kind
+  return 'generic'
 }
 
 export type TurnCommand = {
@@ -97,6 +100,8 @@ export type TurnCommand = {
   acpPrompt: string
   /** ACP session to `session/load` before prompting; empty starts a new one. */
   acpSessionId: string
+  /** Extra env merged into the child (fx uses FX_MODEL / FX_PERMISSION_MODE). */
+  extraEnv?: Record<string, string>
 }
 
 /** Expand {prompt} / {cwd} placeholders in an argument template token. */
@@ -147,11 +152,12 @@ function appendModelEffortArgs(
 }
 
 /** Strip known permission / sandbox flags so we can re-apply from RuntimeMode. */
-function stripPermissionFlags(args: string[]): string[] {
+function stripPermissionFlags(args: string[], kind: RuntimeKind): string[] {
   const out: string[] = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!
     if (a === SKIP_PERMISSIONS || a === ALWAYS_APPROVE) continue
+    if (kind === 'fx' && (a === '--yolo' || a === '--auto')) continue
     if (a === '--permission-mode' || a === '--sandbox' || a === '--full-auto' || a === '--mode') {
       if (a !== '--full-auto') i += 1
       continue
@@ -176,7 +182,7 @@ function applyRuntimeModeFlags(
   kind: RuntimeKind,
   runtimeMode: RuntimeMode,
 ): string[] {
-  const cleaned = stripPermissionFlags(args)
+  const cleaned = stripPermissionFlags(args, kind)
   const stdinIdx = cleaned.lastIndexOf('-')
   const insertAt = stdinIdx >= 0 ? stdinIdx : cleaned.length
   const flags: string[] = []
@@ -202,8 +208,13 @@ function applyRuntimeModeFlags(
     if (runtimeMode === 'full-access') {
       flags.push(SKIP_PERMISSIONS)
     } else if (runtimeMode === 'auto-accept-edits') {
-      // `agy` spells Claude's `--permission-mode acceptEdits` as `--mode`.
       flags.push('--mode', 'accept-edits')
+    }
+  } else if (kind === 'fx') {
+    if (runtimeMode === 'full-access') {
+      flags.push('--yolo')
+    } else if (runtimeMode === 'auto-accept-edits') {
+      flags.push('--auto')
     }
   }
 
@@ -223,6 +234,11 @@ function isResumeOwnedFlag(arg: string, next: string | undefined, kind: RuntimeK
     arg === '--single' ||
     arg === '--verbose' ||
     arg === '--json' ||
+    arg === '--yolo' ||
+    arg === '--auto' ||
+    arg === '--no-save' ||
+    arg === '--no-color' ||
+    arg === 'ask' ||
     arg === '--skip-git-repo-check' ||
     arg === '--resume' ||
     arg === '-r' ||
@@ -248,6 +264,7 @@ function isResumeOwnedFlag(arg: string, next: string | undefined, kind: RuntimeK
   }
   if (arg === '--reasoning-effort' || arg === '--session-id' || arg === '-s') return true
   if (arg === '--prompt-file' || arg === '--permission-mode' || arg === '--sandbox') return true
+  if (arg === '--resume-id' || arg === '--continue-recovery') return true
   if (kind === 'antigravity' && (arg === '--mode' || arg === '--conversation')) return true
   if (arg.startsWith('-c') && next?.includes('model_reasoning_effort')) return true
   if (arg.startsWith('-c') && next?.includes('approval_policy')) return true
@@ -278,6 +295,7 @@ function extractPreservedTemplateArgs(template: string[], kind: RuntimeKind): st
         a === '--sandbox' ||
         a === '--resume' ||
         a === '-r' ||
+        a === '--resume-id' ||
         a === '--conversation' ||
         a === '--mode' ||
         a === PERMISSION_PROMPT_TOOL ||
@@ -299,6 +317,44 @@ function mergePreservedArgs(base: string[], preserved: string[]): string[] {
   const stdinIdx = next.lastIndexOf('-')
   const insertAt = stdinIdx >= 0 ? stdinIdx : next.length
   next.splice(insertAt, 0, ...preserved)
+  return next
+}
+
+function fxProcessEnv(
+  model: string | undefined,
+  runtimeMode: RuntimeMode,
+): Record<string, string> | undefined {
+  const extraEnv: Record<string, string> = {}
+  if (model) extraEnv.FX_MODEL = model
+  if (runtimeMode === 'full-access') extraEnv.FX_PERMISSION_MODE = 'yolo'
+  else if (runtimeMode === 'auto-accept-edits') extraEnv.FX_PERMISSION_MODE = 'auto'
+  else if (runtimeMode === 'approval-required') extraEnv.FX_PERMISSION_MODE = 'ask'
+  return Object.keys(extraEnv).length > 0 ? extraEnv : undefined
+}
+
+function appendNamedFlag(args: string[], flag: string, value: string): string[] {
+  const next = [...args]
+  const idx = next.indexOf(flag)
+  if (idx >= 0) {
+    const current = next[idx + 1]
+    if (current && !current.startsWith('-')) {
+      next[idx + 1] = value
+    } else {
+      next.splice(idx + 1, 0, value)
+    }
+    return next
+  }
+  next.push(flag, value)
+  return next
+}
+
+function ensureFxAskArgs(args: string[]): string[] {
+  const next = args.length === 0 ? ['ask'] : [...args]
+  if (!next.includes('ask')) next.unshift('ask')
+  if (!next.includes('--json')) {
+    const i = next.indexOf('ask')
+    next.splice(i >= 0 ? i + 1 : 0, 0, '--json')
+  }
   return next
 }
 
@@ -330,23 +386,27 @@ export function buildTurnCommand(input: {
   const supervisedClaude = kind === 'claude' && isSupervised(runtimeMode)
   const template = parseArgsTemplate(runtime.argsTemplate)
   const machineReadable = input.machineReadable !== false
+  const extraEnv = kind === 'fx' ? fxProcessEnv(model, runtimeMode) : undefined
 
   // ACP runtimes: the args template only launches the agent (`gemini
-  // --experimental-acp`, an adapter process, …). Everything the branches below
-  // fight over — output format, resume flags, permission flags, prompt
-  // delivery — is the protocol's job once the process is up.
+  // --experimental-acp`, `fx acp`, an adapter process, …). Everything the
+  // branches below fight over — output format, resume flags, permission flags,
+  // prompt delivery — is the protocol's job once the process is up. fx is the
+  // exception that still takes `--model` on the launch line so a picker change
+  // overrides the model stored in a loaded session.
   if (isAcpTransport(runtime.transport)) {
-    const args = template.map((t) => expandToken(t, prompt, cwd))
+    let args = template.map((t) => expandToken(t, prompt, cwd))
+    if (kind === 'fx' && model) args = appendNamedFlag(args, '--model', model)
     return {
       args,
       stdin: null,
       promptFileContents: null,
       display: display(runtime.bin, args),
-      // `session/load` is part of the protocol, so every ACP agent can resume.
       canResume: true,
       keepStdinOpen: false,
       acpPrompt: prompt,
       acpSessionId: isFollowUp ? sessionId : '',
+      extraEnv,
     }
   }
 
@@ -361,6 +421,7 @@ export function buildTurnCommand(input: {
     args = applyRuntimeModeFlags(args, kind, runtimeMode)
     if (machineReadable) {
       args = ensureMachineReadableArgs(args, eventKindFor(kind))
+      if (kind === 'fx') args = ensureFxAskArgs(args)
     }
 
     const promptFileContents = needsPromptFile(args) ? prompt : null
@@ -376,6 +437,7 @@ export function buildTurnCommand(input: {
         keepStdinOpen: true,
         acpPrompt: prompt,
         acpSessionId: '',
+        extraEnv,
       }
     }
 
@@ -388,6 +450,7 @@ export function buildTurnCommand(input: {
       keepStdinOpen: false,
       acpPrompt: prompt,
       acpSessionId: '',
+      extraEnv,
     }
   }
 
@@ -493,6 +556,24 @@ export function buildTurnCommand(input: {
     }
   }
 
+  if (kind === 'fx') {
+    if (!sessionId) return notResumable(runtime.bin)
+    let args = ['ask', '--json', '--resume', sessionId]
+    args = mergePreservedArgs(args, preserved)
+    args = applyRuntimeModeFlags(args, kind, runtimeMode)
+    return {
+      args,
+      stdin: prompt,
+      promptFileContents: null,
+      display: display(runtime.bin, args),
+      canResume: true,
+      keepStdinOpen: false,
+      acpPrompt: prompt,
+      acpSessionId: sessionId,
+      extraEnv,
+    }
+  }
+
   return notResumable(runtime.bin)
 }
 
@@ -529,22 +610,46 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
  * ("session id: <uuid>") and in its JSONL events; Claude/Grok assign up front.
  */
 export function extractSessionId(stdout: string): string | null {
+  const trimmedAll = stdout.trim()
+  if (trimmedAll.startsWith('{') && trimmedAll.endsWith('}')) {
+    try {
+      const obj = JSON.parse(trimmedAll) as Record<string, unknown>
+      const fromObject = sessionIdFromObject(obj)
+      if (fromObject) return fromObject
+    } catch {
+      // Fall through to the line scanner.
+    }
+  }
+
   const labelled = stdout.match(
     new RegExp(`(?:session[_ -]?id|thread[_ -]?id)"?\\s*[:=]\\s*"?(${UUID.source})`, 'i'),
   )
   if (labelled?.[1]) return labelled[1]
+
+  const labelledAny = stdout.match(
+    /(?:session[_ -]?id|thread[_ -]?id)"?\s*[:=]\s*"?([A-Za-z0-9._:-]+)/i,
+  )
+  if (labelledAny?.[1] && labelledAny[1] !== 'null') return labelledAny[1]
 
   for (const line of stdout.split('\n').slice(0, 20)) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('{')) continue
     try {
       const obj = JSON.parse(trimmed) as Record<string, unknown>
-      for (const key of ['session_id', 'sessionId', 'thread_id', 'conversation_id']) {
-        const value = obj[key]
-        if (typeof value === 'string' && UUID.test(value)) return value
-      }
+      const fromObject = sessionIdFromObject(obj)
+      if (fromObject) return fromObject
     } catch {
       // Not JSON — ignore.
+    }
+  }
+  return null
+}
+
+function sessionIdFromObject(obj: Record<string, unknown>): string | null {
+  for (const key of ['session_id', 'sessionId', 'thread_id', 'conversation_id']) {
+    const value = obj[key]
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim()
     }
   }
   return null
@@ -567,7 +672,7 @@ export function parseAssistantText(stdout: string): string {
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       const obj = JSON.parse(trimmed) as Record<string, unknown>
-      const direct = obj.result ?? obj.text ?? obj.content ?? obj.message
+      const direct = obj.result ?? obj.output ?? obj.text ?? obj.content ?? obj.message
       if (typeof direct === 'string') return direct.trim()
     } catch {
       // Fall through to the raw text.

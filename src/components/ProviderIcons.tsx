@@ -63,12 +63,31 @@ export function ProviderIcon({
   if (kind === 'codex') return <OpenAIIcon className={className} />
   if (kind === 'grok') return <GrokIcon className={className} />
   if (kind === 'antigravity') return <AntigravityIcon className={className} />
+  if (kind === 'fx') return <FxIcon className={className} />
   return (
     <span
       className={`inline-flex items-center justify-center rounded-sm bg-secondary text-[9px] font-semibold text-muted-foreground ${className}`}
     >
       AI
     </span>
+  )
+}
+
+export function FxIcon({ className, ...props }: IconProps) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <text
+        x="12"
+        y="16.5"
+        textAnchor="middle"
+        fill="currentColor"
+        fontSize="11"
+        fontWeight="700"
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+      >
+        fx
+      </text>
+    </svg>
   )
 }
 

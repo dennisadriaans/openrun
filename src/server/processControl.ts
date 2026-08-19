@@ -12,7 +12,7 @@
  * try the group first; if the pid is not a group leader, the kernel returns
  * ESRCH and we fall through to the single-pid kill.
  */
-import type { ChildProcess } from 'node:child_process'
+import { spawnSync, type ChildProcess } from 'node:child_process'
 import { RUN_KILL_GRACE_MS } from '../lib/runBudget.ts'
 
 const g = globalThis as unknown as {
@@ -41,14 +41,19 @@ export function isPidAlive(pid: number | null | undefined): boolean {
 /** Send a signal to a process, preferring its process group when it is the leader. */
 export function signalPid(pid: number, signal: NodeJS.Signals): boolean {
   if (!Number.isFinite(pid) || pid <= 0) return false
+  if (process.platform === 'win32') {
+    const res = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    return res.status === 0 || !isPidAlive(pid)
+  }
   let sent = false
-  if (process.platform !== 'win32') {
-    try {
-      process.kill(-pid, signal)
-      sent = true
-    } catch {
-      // Not a group leader, or already gone — try the single pid.
-    }
+  try {
+    process.kill(-pid, signal)
+    sent = true
+  } catch {
+    // Not a group leader, or already gone — try the single pid.
   }
   try {
     process.kill(pid, signal)
@@ -95,8 +100,29 @@ export function killPidTree(pid: number, opts?: { graceMs?: number }): boolean {
   return true
 }
 
+/**
+ * Env for a spawned agent. A plain `{ ...process.env, ...extra }` on Windows
+ * drops `PATH`: `process.env` is case-insensitive, but the spread object only
+ * keeps the enumerable `Path` key, and the child then has no PATH.
+ */
+export function spawnEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  if (!extraEnv || Object.keys(extraEnv).length === 0) return process.env
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv }
+  if (process.platform === 'win32') {
+    const pathVal = extraEnv.PATH ?? extraEnv.Path ?? process.env.PATH ?? process.env.Path
+    if (pathVal !== undefined) {
+      env.PATH = pathVal
+      env.Path = pathVal
+    }
+  }
+  return env
+}
+
 /** Spawn options so agent grandchildren can be torn down with the parent. */
-export function agentSpawnOptions(cwd: string): {
+export function agentSpawnOptions(
+  cwd: string,
+  extraEnv?: Record<string, string>,
+): {
   cwd: string
   env: NodeJS.ProcessEnv
   stdio: ['pipe', 'pipe', 'pipe']
@@ -104,10 +130,8 @@ export function agentSpawnOptions(cwd: string): {
 } {
   return {
     cwd,
-    env: process.env,
+    env: spawnEnv(extraEnv),
     stdio: ['pipe', 'pipe', 'pipe'],
-    // Own process group on Unix so cancel/timeout can kill the whole tree
-    // (tool shells the agent started). Windows uses taskkill-style single-pid.
     detached: process.platform !== 'win32',
   }
 }

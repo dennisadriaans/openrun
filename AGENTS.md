@@ -6,7 +6,7 @@ three files your prompt actually needs.
 ## What this is
 
 A **TanStack Start** proof-of-concept that plans and schedules **local coding-agent CLIs**
-(`claude`, `codex`, `grok`, `gemini`, `agy`) as child
+(`claude`, `codex`, `grok`, `gemini`, `agy`, `fx`) as child
 processes. No model APIs, no cloud, no keys — it drives the CLIs the user is already logged into.
 
 Each runtime has a **transport**: `cli` parses the binary's own JSON output, `acp` drives it
@@ -32,7 +32,7 @@ pnpm test            # unit tests
 pnpm generate-routes # tsr generate  (see the routeTree gotcha — prefer `pnpm build`)
 ```
 
-`pnpm test` is `node --experimental-strip-types --test $(find src -name '*.test.ts' | sort)` —
+`pnpm test` is `node --experimental-strip-types --test "src/**/*.test.ts"` —
 **node's built-in runner, no Vitest/Jest.** Count `*.test.ts` under `src/` rather than
 trusting a hard-coded number here.
 

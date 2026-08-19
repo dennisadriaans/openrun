@@ -105,7 +105,7 @@ with a pointer here.
   reachable. Setting `OPENRUN_HOST` to a non-loopback address is an explicit,
   warned-about choice.
 - Vulnerabilities in the agent CLIs themselves (`claude`, `codex`, `grok`,
-  `gemini`) — report those to their vendors.
+  `gemini`, `fx`) — report those to their vendors.
 - Denial of service by running a very large number of automations locally.
 - Missing security headers on a loopback-only development server.
 

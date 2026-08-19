@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, normalize } from 'node:path'
 import { describe, it } from 'node:test'
 import {
   commonUserBinDirs,
@@ -73,9 +73,9 @@ describe('findOnPath', () => {
     mkdirSync(binDir, { recursive: true })
     const target = join(binDir, 'fakecli')
     writeFileSync(target, '#!/bin/sh\n')
-    chmodSync(target, 0o755)
+    if (process.platform !== 'win32') chmodSync(target, 0o755)
     try {
-      const found = findOnPath('fakecli', binDir, 'darwin')
+      const found = findOnPath('fakecli', binDir, process.platform)
       assert.equal(found, target)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -92,15 +92,18 @@ describe('ensureProcessPathAugmented', () => {
     const root = join(tmpdir(), `agentops-aug-${process.pid}-${Date.now()}`)
     const localBin = join(root, '.local', 'bin')
     mkdirSync(localBin, { recursive: true })
+    const platform = process.platform
+    const delim = platform === 'win32' ? ';' : ':'
+    const suffix = platform === 'win32' ? 'C:\\Windows\\System32' : '/usr/bin:/bin'
     try {
-      const env: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' }
-      const once = ensureProcessPathAugmented(env, 'linux', root)
+      const env: NodeJS.ProcessEnv = { PATH: suffix }
+      const once = ensureProcessPathAugmented(env, platform, root)
       assert.ok(once.startsWith(localBin))
-      assert.match(once, /\/usr\/bin:\/bin$/)
+      assert.ok(once.endsWith(suffix))
 
-      const twice = ensureProcessPathAugmented(env, 'linux', root)
+      const twice = ensureProcessPathAugmented(env, platform, root)
       assert.equal(twice, once)
-      assert.equal(twice.split(localBin).length - 1, 1)
+      assert.equal(twice.split(delim).filter((p) => normalize(p) === normalize(localBin)).length, 1)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
