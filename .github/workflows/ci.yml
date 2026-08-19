@@ -62,12 +62,10 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # `pnpm test` globs with `find`, so it needs a POSIX shell. Windows
-      # runners have one, and node itself still runs as a Windows process —
-      # which is the point: `server/userPath.ts` has real win32 branches.
+      # node itself still runs as a Windows process — which is the point:
+      # `server/userPath.ts` has real win32 branches.
       - name: Test
         run: pnpm test
-        shell: bash
 
       - name: Build
         run: pnpm build

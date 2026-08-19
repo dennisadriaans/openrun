@@ -32,7 +32,7 @@ pnpm test            # unit tests
 pnpm generate-routes # tsr generate  (see the routeTree gotcha — prefer `pnpm build`)
 ```
 
-`pnpm test` is `node --experimental-strip-types --test $(find src -name '*.test.ts' | sort)` —
+`pnpm test` is `node --experimental-strip-types --test "src/**/*.test.ts"` —
 **node's built-in runner, no Vitest/Jest.** Count `*.test.ts` under `src/` rather than
 trusting a hard-coded number here.
 

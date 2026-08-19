@@ -32,7 +32,7 @@
     "lint": "biome check src scripts",
     "lint:fix": "biome check --write src scripts",
     "format": "biome format --write src scripts",
-    "test": "node --experimental-strip-types --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
