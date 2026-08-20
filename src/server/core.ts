@@ -1436,40 +1436,26 @@ export type { NotificationDeliveryRow, NotifierRow } from './db'
 
 export {
   createIntegration,
+  deleteIntegration,
+  getAutomationSetupContext,
   getIntegrationPublic,
   listDeliveriesForIntegration,
   listIntegrations,
   listProviderCatalog,
   listRecentDeliveries,
-  rotateIntegrationSecret,
   updateIntegration,
-  getInstallContext,
+  type AutomationSetupContext,
   type CreateIntegrationAutomationInput,
   type CreateIntegrationInput,
   type IntegrationPublic,
   type UpdateIntegrationInput,
-  type InstallContext,
-  type InstallIntegrationResult,
 } from './integrations'
 import {
-  cleanupRemoteWebhook,
   createIntegrationAutomation as createIntegrationAutomationRow,
-  deleteIntegration as deleteIntegrationRow,
-  installIntegration as installIntegrationRow,
   type CreateIntegrationAutomationInput,
-  type InstallIntegrationResult as InstallResult,
 } from './integrations'
-import type { InstallIntegrationInput } from '../lib/integrations/install'
 
-export function deleteIntegration(integrationId: string) {
-  cleanupRemoteWebhook(integrationId)
-  deleteIntegrationRow(integrationId)
-}
-
-/**
- * The one place an integration turns into a task row, shared by the local
- * install path and the "finish setup" step after a hosted connect.
- */
+/** The one place an integration turns into a task row. */
 function writeIntegrationAutomation(args: {
   name: string
   description: string
@@ -1495,11 +1481,6 @@ function writeIntegrationAutomation(args: {
     webhookFilters: args.webhookFilters ?? {},
   })
   return { id: task.id }
-}
-
-/** One-click install: local endpoint, optional remote webhook + automation. */
-export async function installIntegration(input: InstallIntegrationInput): Promise<InstallResult> {
-  return installIntegrationRow(input, { createAutomation: writeIntegrationAutomation })
 }
 
 /** Wire an already-connected integration to a workspace and runtime. */

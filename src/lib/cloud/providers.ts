@@ -1,6 +1,6 @@
 /**
  * Which integrations this control plane can actually connect, and what the
- * install panel should therefore offer.
+ * connect panel should therefore offer.
  *
  * Browser-safe and dependency-free, like every gate module: the same rules run
  * in the panel that renders the button and in the copy that explains why there
@@ -61,22 +61,19 @@ export function cloudProvider(
 }
 
 /**
- * What the install panel leads with.
+ * What the connect panel leads with.
  *
- * `connect` is the only path that needs no secrets from the user; everything
- * else is a reason it is unavailable. `offerLocal` is deliberately separate —
- * self-managing a webhook is a real answer for a self-hoster, but it is never
- * the headline, because pasting an API token is the thing this feature exists
- * to remove.
+ * `connect` is the only path there is; everything else is a reason it is
+ * unavailable. Connecting always runs through the control plane, so a provider
+ * whose OAuth app this deployment never registered simply cannot be connected
+ * here.
  */
 export type IntegrationConnectPlan = {
   kind: 'loading' | 'connect' | 'sign-in' | 'unsupported' | 'cloud-off' | 'unreachable'
-  /** Empty for `connect`; otherwise a sentence for the person who clicked. */
+  /** Empty for `connect`; a short status label when unavailable. */
   reason: string
   /** True when connecting detours through a project picker on the way back. */
   picksTarget: boolean
-  /** True when the self-managed webhook path is worth showing as a fallback. */
-  offerLocal: boolean
 }
 
 export function planIntegrationConnect(input: {
@@ -87,24 +84,17 @@ export function planIntegrationConnect(input: {
   /** Null while the catalog query is still in flight. */
   catalog: CloudProviderCatalog | null | undefined
   provider: string
-  /** From the app catalog: does this provider have a local verify/parse path? */
-  supportsLocalInstall: boolean
 }): IntegrationConnectPlan {
-  const local = input.supportsLocalInstall
-
   if (!input.cloudUrl) {
     return {
       kind: 'cloud-off',
-      reason: local
-        ? 'Open Run Cloud is turned off, so this connects with a webhook you host yourself.'
-        : 'Open Run Cloud is turned off. Turn it back on to connect this provider.',
+      reason: 'Open Run Cloud is turned off. Turn it back on to connect this provider.',
       picksTarget: false,
-      offerLocal: local,
     }
   }
 
   if (!input.catalog) {
-    return { kind: 'loading', reason: '', picksTarget: false, offerLocal: false }
+    return { kind: 'loading', reason: '', picksTarget: false }
   }
 
   if (!input.catalog.reachable) {
@@ -112,7 +102,6 @@ export function planIntegrationConnect(input: {
       kind: 'unreachable',
       reason: `Could not reach Open Run Cloud to check whether ${input.label} is available. Check your connection and reload.`,
       picksTarget: false,
-      offerLocal: local,
     }
   }
 
@@ -122,7 +111,6 @@ export function planIntegrationConnect(input: {
       kind: 'unsupported',
       reason: `${input.label} is not available on this Open Run Cloud deployment yet.`,
       picksTarget: false,
-      offerLocal: local,
     }
   }
 
@@ -133,9 +121,8 @@ export function planIntegrationConnect(input: {
       kind: 'sign-in',
       reason: `Sign in to Open Run to connect ${input.label}. There is nothing to paste and no public URL to set up.`,
       picksTarget: remote.picksTarget,
-      offerLocal: local,
     }
   }
 
-  return { kind: 'connect', reason: '', picksTarget: remote.picksTarget, offerLocal: local }
+  return { kind: 'connect', reason: '', picksTarget: remote.picksTarget }
 }

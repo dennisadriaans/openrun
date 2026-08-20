@@ -30,7 +30,6 @@ function plan(overrides: Partial<Parameters<typeof planIntegrationConnect>[0]> =
     signedIn: true,
     catalog: CATALOG,
     provider: 'jira',
-    supportsLocalInstall: true,
     ...overrides,
   })
 }
@@ -111,19 +110,11 @@ describe('planIntegrationConnect', () => {
     const result = plan({ catalog: null })
     assert.equal(result.kind, 'loading')
     assert.equal(result.reason, '')
-    // Nothing is offered yet — a flash of "unavailable" would be a lie.
-    assert.equal(result.offerLocal, false)
   })
 
-  it('falls back to the self-managed path when the cloud is turned off', () => {
+  it('says the cloud is off rather than offering a path that no longer exists', () => {
     const result = plan({ cloudUrl: null })
     assert.equal(result.kind, 'cloud-off')
-    assert.equal(result.offerLocal, true)
-  })
-
-  it('does not promise a local path a provider cannot do', () => {
-    const result = plan({ cloudUrl: null, supportsLocalInstall: false })
-    assert.equal(result.offerLocal, false)
     assert.match(result.reason, /Turn it back on/)
   })
 
@@ -131,7 +122,5 @@ describe('planIntegrationConnect', () => {
     const result = plan({ catalog: UNREACHABLE_CATALOG })
     assert.equal(result.kind, 'unreachable')
     assert.match(result.reason, /Could not reach/)
-    // Still offered: a self-hoster whose plane is down can wire the hook itself.
-    assert.equal(result.offerLocal, true)
   })
 })

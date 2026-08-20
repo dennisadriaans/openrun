@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { NeedProjectEmpty } from '../components/NeedProjectEmpty'
 import { TaskForm } from '../components/TaskForm'
-import { defaultAutomationPrompt } from '../lib/integrations/install'
+import { defaultAutomationPrompt } from '../lib/integrations/automation'
 import type { IntegrationProviderId } from '../lib/integrations/types'
 import { hasProjects } from '../lib/projectGate'
 import { useIntegrations, useProjects } from '../lib/queries'

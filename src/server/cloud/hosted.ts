@@ -22,7 +22,7 @@ import {
   getIntegrationPublic,
   type IntegrationPublic,
 } from '../integrations/connections.ts'
-import { cloudConnectionIdFromConfig } from '../../lib/integrations/install.ts'
+import { cloudConnectionIdFromConfig } from '../../lib/integrations/automation.ts'
 import { ingestCanonicalEvent } from '../integrations/dispatcher.ts'
 import { hostedDisconnectDecision } from '../../lib/cloud/hostedDisconnect.ts'
 import { configuredCloudUrl, currentAccessToken } from './login.ts'

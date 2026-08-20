@@ -3,15 +3,14 @@
  *
  * Connecting a provider is only half the job the user came for: until some
  * automation binds the connection, every delivery arrives and matches nothing.
- * This is the second half, kept separate from `install.ts` because a hosted
- * connection is created by the control plane round-trip, not by the local
- * install path — but both end here.
+ * The connection itself is made by the control-plane round-trip; this is what
+ * turns it into something that runs.
  */
 import {
   bindAutomationEvents,
   defaultAutomationName,
   defaultAutomationPrompt,
-} from '../../lib/integrations/install.ts'
+} from '../../lib/integrations/automation.ts'
 import { providerMeta } from '../../lib/integrations/catalog.ts'
 import {
   compileTrigger,
@@ -20,7 +19,46 @@ import {
 } from '../../lib/integrations/triggers.ts'
 import type { WebhookFilters } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow } from '../db.ts'
+import { checkRuntimeInstalled } from '../runtimePath.ts'
+import { listProjects } from '../workspaces.ts'
 import { getIntegration } from './connections.ts'
+
+export type AutomationSetupContext = {
+  runtimes: Array<{ id: string; label: string; bin: string; installed: boolean }>
+  projects: Array<{
+    id: string
+    name: string
+    remoteUrl: string
+    workspaces: Array<{ id: string; name: string; status: string; kind: string }>
+  }>
+}
+
+/** Everything the "finish setup" form picks from: runtimes and workspaces. */
+export function getAutomationSetupContext(): AutomationSetupContext {
+  const projects: AutomationSetupContext['projects'] = listProjects().map((p) => ({
+    id: p.id,
+    name: p.name,
+    remoteUrl: p.remoteUrl,
+    workspaces: getDb()
+      .prepare(
+        `SELECT id, name, status, kind FROM workspaces
+         WHERE projectId = ? AND status != 'archived'
+         ORDER BY kind = 'main' DESC, createdAt ASC`,
+      )
+      .all(p.id) as Array<{ id: string; name: string; status: string; kind: string }>,
+  }))
+
+  const runtimes = (
+    getDb().prepare('SELECT * FROM runtimes ORDER BY createdAt ASC').all() as RuntimeRow[]
+  ).map((r) => ({
+    id: r.id,
+    label: r.label,
+    bin: r.bin,
+    installed: checkRuntimeInstalled(r.bin).installed,
+  }))
+
+  return { runtimes, projects }
+}
 
 export type CreateIntegrationAutomationInput = {
   integrationId: string

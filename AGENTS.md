@@ -97,8 +97,8 @@ Neither hook may open an `EventSource` of its own.
   settles the bind address before the socket opens. Both apply the same tested rules from
   `lib/serverAccess.ts`. **Never add a per-route auth check** — a new server function is
   covered the moment it is written, and a second mechanism is how one endpoint gets
-  forgotten. Signed webhook routes are exempt via `pathAuthenticatesItself()`
-  because they authenticate by HMAC; that list is the only place exemptions live.
+  forgotten. There are no exemptions: every provider webhook lands on the control
+  plane and arrives over the outbound relay, so nothing inbound is unauthenticated.
   The same middleware runs `hostHeaderRefusal()` **before** the token check: on a
   loopback bind, a request that addresses us by a non-loopback name is a rebound
   DNS answer, and it is refused whether or not a token is configured.
@@ -153,9 +153,9 @@ Neither hook may open an `EventSource` of its own.
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |
 | How a diff line looks (git panel **and** chat edit hunks) | `components/DiffRows.tsx`; tokens from `lib/highlight.ts`; agent-supplied hunks via `lib/lineDiff.ts` |
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
-| Webhooks (GitHub / Jira / Linear) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx`, `routes/api/webhooks/$integrationId.ts` |
-| Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationInstall.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
-| Binding a connection to a workspace + runtime | `server/integrations/automation.ts`, `components/IntegrationAutomationSetup.tsx`; event narrowing in `lib/integrations/install.ts` |
+| Webhooks (relayed from the control plane) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx` |
+| Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationConnect.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
+| Binding a connection to a workspace + runtime | `server/integrations/automation.ts`, `components/IntegrationAutomationSetup.tsx`; event narrowing in `lib/integrations/automation.ts` |
 | "When a ticket moves to X" → events + filters | `lib/integrations/triggers.ts` — compiled on the server write path too, so the form's preview *is* the binding |
 | Named automation starting points (trigger + prompt) | `lib/integrations/recipes.ts`; gated on `ProviderMeta.emitsCommentText` and on the trigger existing |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |

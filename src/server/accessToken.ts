@@ -24,7 +24,6 @@ import {
   insecureHostWarning,
   isDocumentRequest,
   parseAllowedHosts,
-  pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
@@ -277,18 +276,6 @@ export function accessDecision(request: Request): AccessDecision {
   if (bindRefusal) return refuse(bindRefusal, 503)
 
   const config = serverAccessConfig()
-
-  let pathname = '/'
-  try {
-    pathname = new URL(request.url).pathname
-  } catch {
-    // Unparseable URL: fall through and require the token.
-  }
-
-  // Signed webhook endpoints authenticate their callers themselves.
-  // They are also the endpoints a third party addresses by a tunnel hostname,
-  // so they sit ahead of the Host check as well as the token check.
-  if (pathAuthenticatesItself(pathname)) return PROCEED
 
   // Runs before the token check: a rebound page is refused whether or not a
   // token is configured, and the default install has none.

@@ -597,45 +597,11 @@ export function useUpdateIntegration() {
   })
 }
 
-export function useRotateIntegrationSecret() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => fns.rotateIntegrationSecret({ data: { id } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations'] }),
-  })
-}
-
-export function useRemoveIntegration() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => fns.removeIntegration({ data: { id } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['integrations'] })
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-      qc.invalidateQueries({ queryKey: ['webhookDeliveries'] })
-    },
-  })
-}
-
-export function useInstallContext() {
+export function useAutomationSetupContext() {
   return useQuery({
-    queryKey: ['installContext'],
-    queryFn: () => fns.getInstallContext(),
+    queryKey: ['automationSetupContext'],
+    queryFn: () => fns.getAutomationSetupContext(),
     staleTime: 30_000,
-  })
-}
-
-export function useInstallIntegration() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (data: Parameters<typeof fns.installIntegration>[0]['data']) =>
-      fns.installIntegration({ data }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['integrations'] })
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-      qc.invalidateQueries({ queryKey: ['webhookDeliveries'] })
-      qc.invalidateQueries({ queryKey: ['installContext'] })
-    },
   })
 }
 
@@ -831,7 +797,7 @@ export function useCompleteHostedConnect() {
     }) => fns.completeHostedConnect({ data }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['integrations'] })
-      qc.invalidateQueries({ queryKey: ['installContext'] })
+      qc.invalidateQueries({ queryKey: ['automationSetupContext'] })
       qc.invalidateQueries({ queryKey: ['hostedConnections'] })
     },
   })

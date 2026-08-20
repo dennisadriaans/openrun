@@ -3,12 +3,11 @@ import { test } from 'node:test'
 import {
   INTEGRATION_PROVIDER_IDS,
   INTEGRATION_PROVIDERS,
-  isHostedOnlyProvider,
   isIntegrationProviderId,
   providerMeta,
   providerPageTitle,
 } from './catalog.ts'
-import { DEFAULT_INSTALL_EVENTS } from './install.ts'
+import { DEFAULT_INSTALL_EVENTS } from './automation.ts'
 
 test('isIntegrationProviderId accepts catalog ids only', () => {
   for (const id of INTEGRATION_PROVIDER_IDS) {
@@ -45,12 +44,4 @@ test('default install events are all bindable', () => {
       assert.ok(ids.has(event), `${id} default ${event} is not in the catalog`)
     }
   }
-})
-
-test('hosted-only providers are the ones with no local webhook support', () => {
-  assert.deepEqual(INTEGRATION_PROVIDER_IDS.filter(isHostedOnlyProvider), [
-    'gitlab',
-    'bitbucket',
-    'azure-devops',
-  ])
 })

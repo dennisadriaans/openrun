@@ -464,9 +464,9 @@ export function getDb(): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
-  // Webhook signing secrets are stored here in the
-  // clear, so file permissions are the only thing protecting them from other
-  // accounts on the machine. Applied after open so the file exists, and to the
+  // Prompts, run output, and device tokens are stored here in the clear, so
+  // file permissions are the only thing protecting them from other accounts on
+  // the machine. Applied after open so the file exists, and to the
   // WAL sidecars too — they hold the same rows before a checkpoint.
   // Best-effort: Windows and some network filesystems ignore POSIX modes.
   for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {

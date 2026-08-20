@@ -16,7 +16,6 @@ import type {
 } from '../server/core'
 import type { PlanProposal } from '../lib/planProposals'
 import type { IntegrationProviderId, WebhookFilters } from '../lib/integrations/types'
-import type { InstallIntegrationInput } from '../lib/integrations/install'
 import type { CheckDef } from '../lib/checks'
 
 export type { PlanProposal } from '../lib/planProposals'
@@ -383,11 +382,8 @@ export const listIntegrations = createServerFn({ method: 'GET' }).handler(async 
 )
 
 export const getIntegration = createServerFn({ method: 'GET' })
-  .validator((d: { id: string; revealSecret?: boolean }) => d)
-  .handler(
-    async ({ data }) =>
-      (await core()).getIntegrationPublic(data.id, Boolean(data.revealSecret)) ?? null,
-  )
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).getIntegrationPublic(data.id) ?? null)
 
 export const createIntegration = createServerFn({ method: 'POST' })
   .validator((d: CreateIntegrationInput) => d)
@@ -396,17 +392,6 @@ export const createIntegration = createServerFn({ method: 'POST' })
 export const updateIntegration = createServerFn({ method: 'POST' })
   .validator((d: UpdateIntegrationInput) => d)
   .handler(async ({ data }) => (await core()).updateIntegration(data))
-
-export const rotateIntegrationSecret = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => (await core()).rotateIntegrationSecret(data.id))
-
-export const removeIntegration = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => {
-    ;(await core()).deleteIntegration(data.id)
-    return { ok: true }
-  })
 
 export const listWebhookDeliveries = createServerFn({ method: 'GET' })
   .validator((d: { integrationId?: string; limit?: number }) => d)
@@ -418,13 +403,9 @@ export const listWebhookDeliveries = createServerFn({ method: 'GET' })
     return c.listRecentDeliveries(data.limit ?? 50)
   })
 
-export const getInstallContext = createServerFn({ method: 'GET' }).handler(async () =>
-  (await core()).getInstallContext(),
+export const getAutomationSetupContext = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getAutomationSetupContext(),
 )
-
-export const installIntegration = createServerFn({ method: 'POST' })
-  .validator((d: InstallIntegrationInput) => d)
-  .handler(async ({ data }) => (await core()).installIntegration(data))
 
 /** Bind a connected integration to a workspace + runtime so deliveries run. */
 export const createIntegrationAutomation = createServerFn({ method: 'POST' })
@@ -433,7 +414,6 @@ export const createIntegrationAutomation = createServerFn({ method: 'POST' })
 
 /** Soft type re-export for UI forms. */
 export type { IntegrationProviderId }
-export type { InstallIntegrationInput }
 
 // --- Mobile devices --------------------------------------------------------
 

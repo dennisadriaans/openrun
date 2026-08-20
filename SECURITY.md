@@ -72,15 +72,15 @@ to. There is no bug bounty.
 - Escaping the workspace path boundary in `src/server/files.ts` — reading or
   writing outside the run's working directory via traversal, absolute paths or
   symlinks.
-- Forging a webhook so that an unauthenticated request starts a run
-  (`src/server/integrations/`, HMAC verification in `crypto.ts`).
+- Getting a forged event onto the cloud relay so that it starts a run
+  (`src/server/cloud/relay.ts`, `src/server/integrations/dispatcher.ts`).
 - Bypassing a supervised-mode approval (`src/lib/approvals.ts`,
   `src/lib/supervisedPolicy.ts`) so a tool call executes without the decision it
   required.
 - Argument injection into a spawned CLI via a runtime args template, prompt, or
   workspace name that escapes the intended argv.
-- Leaking stored secrets (webhook secrets) to the client bundle,
-  to logs, or to a notification payload.
+- Leaking stored secrets (cloud session tokens, device tokens) to the client
+  bundle, to logs, or to a notification payload.
 - Any path that lets a *remote, unauthenticated* request cause code execution.
 
 ## Out of scope

@@ -1,6 +1,6 @@
 /**
  * First-run screen. Signing in links this machine to an Open Run account so
- * hosted integrations can reach it; skipping keeps every local feature.
+ * integrations can reach it; skipping keeps every local feature except those.
  */
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { Cloud, Loader2, ShieldCheck, Webhook } from 'lucide-react'

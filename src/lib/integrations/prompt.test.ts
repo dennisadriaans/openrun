@@ -46,7 +46,10 @@ test('renderWebhookPrompt appends context when no placeholders', () => {
 })
 
 test('renderWebhookPrompt keeps the ticket URL out of the prompt', () => {
-  const out = renderWebhookPrompt('Look at {{issue.key}}\n{{issue.url}}\n\n{{issue.body}}', sampleEvent())
+  const out = renderWebhookPrompt(
+    'Look at {{issue.key}}\n{{issue.url}}\n\n{{issue.body}}',
+    sampleEvent(),
+  )
   assert.equal(out.includes('https://github.com/acme/app/issues/12'), false)
   assert.match(out, /Look at #12\n\nIt flakes on CI/)
 })

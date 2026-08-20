@@ -1,16 +1,14 @@
 /**
- * Shared install/detail template for every provider.
+ * Shared connect/detail template for every provider.
  *
- * A hosted connection lives on the control plane and receives events over the
- * relay. A local install creates an endpoint on this machine, and additionally
- * registers the webhook at the provider when a public URL and credentials are
- * present.
+ * A connection lives on the control plane and receives events over the relay —
+ * this machine never exposes a webhook URL and holds no vendor credential.
  */
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router'
-import { Check, Copy, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { IntegrationAutomationSetup } from '../components/IntegrationAutomationSetup'
-import { IntegrationInstallPanel } from '../components/IntegrationInstall'
+import { IntegrationBrandIcon } from '../components/IntegrationCard'
+import { IntegrationConnectPanel } from '../components/IntegrationConnect'
 import { IntegrationPage, IntegrationStatusBanner } from '../components/IntegrationPage'
 import { Button, Card } from '../components/ui'
 import {
@@ -27,8 +25,6 @@ import {
   useHostedConnections,
   useIngestTestEvent,
   useIntegrations,
-  useRemoveIntegration,
-  useRotateIntegrationSecret,
   useTasks,
   useUpdateIntegration,
   useWebhookDeliveries,
@@ -49,40 +45,6 @@ export const Route = createFileRoute('/integrations/$provider')({
   },
   component: IntegrationProviderPage,
 })
-
-function CopyField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <div className="space-y-1">
-      <div className="text-ui-sm text-tier-tertiary">{label}</div>
-      <div className="flex items-center gap-2">
-        <code className="mono min-w-0 flex-1 truncate rounded-md border border-border bg-transparent px-2.5 py-1.5 text-ui-sm text-foreground">
-          {value}
-        </code>
-        <button
-          type="button"
-          aria-label={`Copy ${label}`}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-tier-tertiary hover:bg-hover hover:text-foreground"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(value)
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1500)
-            } catch {
-              // ignore
-            }
-          }}
-        >
-          {copied ? (
-            <Check className="h-3.5 w-3.5 text-success" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function IntegrationProviderPage() {
   const { provider: raw } = Route.useParams()
@@ -105,19 +67,15 @@ function ProviderDetail({
   const { data: tasks } = useTasks()
   const { data: deliveries } = useWebhookDeliveries()
   const update = useUpdateIntegration()
-  const rotate = useRotateIntegrationSecret()
-  const remove = useRemoveIntegration()
   const disconnectHosted = useDisconnectHostedIntegration()
   const testEvent = useIngestTestEvent()
   const { data: cloud } = useCloudStatus()
   const { data: hostedConnections } = useHostedConnections()
 
   const [adding, setAdding] = useState(false)
-  const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [remoteNote, setRemoteNote] = useState<string | null>(null)
-  const [dismissedSetup, setDismissedSetup] = useState<string[]>([])
+  const [deliveriesOpen, setDeliveriesOpen] = useState(false)
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
   const rows = (integrations ?? []).filter((row) => row.provider === provider)
   const configured = rows.length > 0
   const enabledCount = rows.filter((row) => row.enabled).length
@@ -132,9 +90,7 @@ function ProviderDetail({
    * and matches nothing, so this is the difference between "connected" and
    * "working".
    */
-  const needsAutomation = rows.find(
-    (row) => !boundIntegrationIds.has(row.id) && !dismissedSetup.includes(row.id),
-  )
+  const needsAutomation = rows.find((row) => !boundIntegrationIds.has(row.id))
 
   const providerDeliveries = (deliveries ?? []).filter((d) =>
     rows.some((row) => row.id === d.integrationId),
@@ -150,9 +106,26 @@ function ProviderDetail({
     )
   }
 
-  const banner = !configured
-    ? { tone: 'idle' as const, text: 'Not installed.' }
-    : enabledCount > 0
+  // Nothing connected yet: one centered lockup instead of a page of empty chrome.
+  if (!configured) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center px-6">
+        <Card className="w-full max-w-sm p-8 text-center">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-xl border border-border bg-white">
+            <IntegrationBrandIcon id={provider} className="size-7" />
+          </div>
+          <h1 className="mt-4 text-ui-lg font-medium tracking-tight text-foreground">{title}</h1>
+          <p className="mt-1 text-ui-sm text-tier-tertiary">{meta.description}</p>
+          <div className="mt-6">
+            <IntegrationConnectPanel provider={provider} autoConnect={autoConnect} compact />
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
+  const banner =
+    enabledCount > 0
       ? {
           tone: 'good' as const,
           text: `Connected · ${rows.length} endpoint${rows.length === 1 ? '' : 's'}.`,
@@ -171,43 +144,33 @@ function ProviderDetail({
 
       {showInstall ? (
         <Card className="space-y-4 p-4">
-          <IntegrationInstallPanel
+          <IntegrationConnectPanel
             provider={provider}
             autoConnect={autoConnect}
             onCancel={configured ? () => setAdding(false) : undefined}
-            onInstalled={(result) => {
-              if (result.secret) {
-                setRevealed((prev) => ({ ...prev, [result.integrationId]: result.secret! }))
-              }
-              setRemoteNote(result.remoteError ?? null)
-              setAdding(false)
-            }}
           />
         </Card>
       ) : null}
 
       {!showInstall && needsAutomation ? (
-        <Card className="space-y-4 p-4">
-          <IntegrationAutomationSetup
-            provider={provider}
-            integrationId={needsAutomation.id}
-            integrationName={needsAutomation.name}
-            onCreated={({ taskId }) => navigate({ to: '/tasks/$taskId', params: { taskId } })}
-            onDismiss={() => setDismissedSetup((prev) => [...prev, needsAutomation.id])}
-          />
+        <Card className="p-4">
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() =>
+              navigate({ to: '/tasks/new', search: { webhookIntegrationId: needsAutomation.id } })
+            }
+          >
+            Create automation
+          </Button>
         </Card>
       ) : null}
 
       {rows.length > 0 ? (
         <div className={`space-y-4 ${showInstall ? 'mt-4' : ''}`}>
           {rows.map((integ) => {
-            const secret = revealed[integ.id]
-            const url = `${origin}${integ.webhookPath}`
-            const hosted = integ.hosted
             // The vendor's own words when a hook failed to register or renew.
-            const remote = hosted
-              ? (hostedConnections ?? []).find((c) => c.id === integ.cloudConnectionId)
-              : undefined
+            const remote = (hostedConnections ?? []).find((c) => c.id === integ.cloudConnectionId)
             const remoteProblem =
               remote && remote.status !== 'active'
                 ? remote.statusMessage || `Connection is ${remote.status}.`
@@ -216,18 +179,16 @@ function ProviderDetail({
               <Card key={integ.id} className="space-y-4 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-ui-base text-foreground">{integ.name}</div>
-                    <div className="mt-0.5 text-ui-sm text-tier-quaternary">
-                      {hosted
-                        ? integ.enabled
-                          ? cloud?.relay.connected
-                            ? 'Hosted · receiving via cloud relay'
-                            : 'Hosted · waiting for cloud relay'
-                          : 'Paused'
-                        : integ.enabled
-                          ? 'Receiving events'
-                          : 'Paused'}
-                      {remote?.target ? ` · ${remote.target.name}` : ''}
+                    <div className="truncate text-ui-base text-foreground">{integ.name}</div>
+                    <div className="mt-0.5 truncate text-ui-sm text-tier-quaternary">
+                      {integ.enabled
+                        ? cloud?.relay.connected
+                          ? 'Receiving via cloud relay'
+                          : 'Waiting for cloud relay'
+                        : 'Paused'}
+                      {remote?.target && remote.target.name !== integ.name
+                        ? ` · ${remote.target.name}`
+                        : ''}
                     </div>
                     {remoteProblem ? (
                       <div className="mt-1 text-ui-sm text-warn">{remoteProblem}</div>
@@ -273,34 +234,13 @@ function ProviderDetail({
                     >
                       {integ.enabled ? 'Pause' : 'Enable'}
                     </Button>
-                    {hosted ? null : (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={async () => {
-                          const row = await rotate.mutateAsync(integ.id)
-                          if (row.secret) {
-                            setRevealed((prev) => ({ ...prev, [integ.id]: row.secret! }))
-                          }
-                        }}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Rotate secret
-                      </Button>
-                    )}
                     <Button
                       type="button"
                       variant="ghost"
                       disabled={disconnectHosted.isPending}
                       onClick={() => {
-                        const warning = hosted
-                          ? `Disconnect ${integ.name}? The webhook is removed at ${title} and automations will be unbound.`
-                          : `Delete ${integ.name}? Automations will be unbound.`
+                        const warning = `Disconnect ${integ.name}? The webhook is removed at ${title} and automations will be unbound.`
                         if (!confirm(warning)) return
-                        if (!hosted) {
-                          void remove.mutateAsync(integ.id)
-                          return
-                        }
                         void disconnectHosted.mutateAsync(integ.id).then((result) => {
                           if (!result.ok) {
                             setRemoteNote(result.remoteError ?? 'Disconnect failed')
@@ -315,22 +255,9 @@ function ProviderDetail({
                   </div>
                 </div>
 
-                {hosted ? (
-                  <p className="text-ui-sm text-tier-tertiary">
-                    {title} posts to the control plane. This machine does not expose a webhook URL.
-                  </p>
-                ) : (
-                  <>
-                    <CopyField label="Webhook URL" value={url} />
-                    {secret ? (
-                      <CopyField label="Signing secret (shown once)" value={secret} />
-                    ) : (
-                      <p className="text-ui-sm text-tier-tertiary">
-                        Signing secret is only shown when created or rotated.
-                      </p>
-                    )}
-                  </>
-                )}
+                <p className="text-ui-sm text-tier-tertiary">
+                  {title} posts to the control plane. This machine does not expose a webhook URL.
+                </p>
               </Card>
             )
           })}
@@ -347,10 +274,27 @@ function ProviderDetail({
 
       {configured ? (
         <Card className="mt-4">
-          <div className="border-b border-[var(--border-quaternary)] px-4 py-3 text-ui-base text-foreground">
+          <button
+            type="button"
+            onClick={() => setDeliveriesOpen((v) => !v)}
+            aria-expanded={deliveriesOpen}
+            className={
+              deliveriesOpen
+                ? 'flex w-full items-center gap-1.5 border-b border-[var(--border-quaternary)] px-4 py-3 text-left text-ui-base text-foreground'
+                : 'flex w-full items-center gap-1.5 px-4 py-3 text-left text-ui-base text-foreground'
+            }
+          >
+            {deliveriesOpen ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-tier-quaternary" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-tier-quaternary" />
+            )}
             Recent deliveries
-          </div>
-          {!providerDeliveries.length ? (
+            {providerDeliveries.length ? (
+              <span className="text-ui-sm text-tier-quaternary">({providerDeliveries.length})</span>
+            ) : null}
+          </button>
+          {!deliveriesOpen ? null : !providerDeliveries.length ? (
             <p className="px-4 py-8 text-center text-ui-sm text-tier-quaternary">
               No webhook deliveries yet.
             </p>

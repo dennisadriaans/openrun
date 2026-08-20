@@ -1,11 +1,11 @@
 /**
  * Provider catalog for the UI (no Node crypto / signature code).
  *
- * Event ids here are the contract with whatever produces a
- * `CanonicalWebhookEvent`: a local webhook handled by `server/integrations/`,
- * or the hosted control plane relaying one in. An automation can only bind an
- * id that appears in this file, so a provider whose events are missing here is
- * unusable even when deliveries arrive.
+ * Event ids here are the contract with the control plane, which verifies and
+ * normalizes every vendor delivery before relaying a `CanonicalWebhookEvent`
+ * in. An automation can only bind an id that appears in this file, so a
+ * provider whose events are missing here is unusable even when deliveries
+ * arrive.
  */
 import type { IntegrationProviderId, ProviderMeta } from './types.ts'
 
@@ -29,12 +29,8 @@ export function providerPageTitle(id: IntegrationProviderId): string {
 
 /**
  * How a connection is made. Identical for every provider on purpose — Connect
- * is the only path a user should have to know about, and the differences
- * between vendors (who picks a project, who signs how) are handled for them.
- *
- * A provider with `supportsLocalInstall` can also be wired by hand, but that is
- * a fallback for self-hosters and lives behind a disclosure in the install
- * panel, not in the steps.
+ * is the only path there is, and the differences between vendors (who picks a
+ * project, who signs how) are handled for the user.
  */
 const CONNECT_STEPS = [
   'Click Connect. Open Run sends you to the provider to approve access.',
@@ -48,7 +44,6 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     label: 'GitHub Issues',
     description: 'Open, edit, label, assign, close, and reopen issue events from a GitHub repo.',
     docsUrl: 'https://docs.github.com/en/webhooks/webhook-events-and-payloads#issues',
-    supportsLocalInstall: true,
     emitsCommentText: true,
     events: [
       { id: 'issues.opened', label: 'Opened', description: 'A new issue was created' },
@@ -82,7 +77,6 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     label: 'GitLab',
     description: 'GitLab issue open, close, reopen, update, and comment events for one project.',
     docsUrl: 'https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html',
-    supportsLocalInstall: false,
     emitsCommentText: true,
     events: [
       { id: 'issue.open', label: 'Opened' },
@@ -112,7 +106,6 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     label: 'Bitbucket',
     description: 'Bitbucket Cloud issue create, update, and comment events for one repository.',
     docsUrl: 'https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/',
-    supportsLocalInstall: false,
     emitsCommentText: true,
     events: [
       { id: 'issue:created', label: 'Created' },
@@ -141,7 +134,6 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     description:
       'Jira Cloud issue webhooks — pick a project (or a whole site), then status changes, create, update, assign, and more.',
     docsUrl: 'https://developer.atlassian.com/cloud/jira/platform/webhooks/',
-    supportsLocalInstall: true,
     emitsCommentText: true,
     events: [
       { id: 'jira:issue_created', label: 'Created' },
@@ -171,7 +163,6 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     label: 'Linear',
     description: 'Linear issue create, update, remove, and status-change events.',
     docsUrl: 'https://linear.app/developers/webhooks',
-    supportsLocalInstall: true,
     emitsCommentText: false,
     events: [
       { id: 'Issue.create', label: 'Created' },
@@ -202,7 +193,6 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     label: 'Azure DevOps',
     description: 'Azure Boards work-item created, updated, and status-change events.',
     docsUrl: 'https://learn.microsoft.com/azure/devops/service-hooks/events',
-    supportsLocalInstall: false,
     emitsCommentText: false,
     events: [
       { id: 'workitem.created', label: 'Created' },
@@ -224,9 +214,4 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
 
 export function providerMeta(id: string): ProviderMeta | undefined {
   return INTEGRATION_PROVIDERS.find((p) => p.id === id)
-}
-
-/** Providers that can only be connected through the control plane. */
-export function isHostedOnlyProvider(id: IntegrationProviderId): boolean {
-  return providerMeta(id)?.supportsLocalInstall === false
 }

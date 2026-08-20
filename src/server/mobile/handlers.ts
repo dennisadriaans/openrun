@@ -1,7 +1,6 @@
 /**
  * Mobile endpoint logic. Route files under `routes/api/mobile/**` stay thin
- * shells over these, matching how `routes/api/webhooks/$integrationId.ts`
- * delegates to `integrations/dispatcher.ts`.
+ * shells over these.
  *
  * Two rules hold the scope boundary:
  *  - everything reaches the app through `server/core.ts`, never past it;
