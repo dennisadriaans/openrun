@@ -1,2 +1,4 @@
-onlyBuiltDependencies:
-  - better-sqlite3
+# better-sqlite3 13 ships N-API prebuilds and sets `gypfile: false`. Listing it
+# here made pnpm run `node-gyp rebuild` anyway, which fails on GitHub's
+# windows-latest image (Visual Studio 2026 / node-gyp 11).
+onlyBuiltDependencies: []

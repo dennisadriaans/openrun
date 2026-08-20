@@ -19,6 +19,12 @@ describe('processControl', () => {
     assert.equal(opts.detached, process.platform !== 'win32')
   })
 
+  it('merges extra env onto the process environment', () => {
+    const opts = agentSpawnOptions('/tmp', { FX_MODEL: 'zai/glm-5.2-fast' })
+    assert.equal(opts.env.FX_MODEL, 'zai/glm-5.2-fast')
+    assert.equal(opts.env.PATH, process.env.PATH)
+  })
+
   it('tracks the process-wide shutting-down flag', () => {
     const before = isShuttingDown()
     setShuttingDown(true)

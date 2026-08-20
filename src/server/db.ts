@@ -19,7 +19,7 @@ import { ensureProcessPathAugmented } from './userPath.ts'
 export type RuntimeRow = {
   id: string
   label: string
-  /** The binary to invoke, e.g. "claude", "codex", "grok". */
+  /** The binary to invoke, e.g. "claude", "codex", "grok", "fx". */
   bin: string
   /**
    * Argument template as a JSON array of tokens. Tokens support the

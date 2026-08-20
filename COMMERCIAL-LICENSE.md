@@ -52,7 +52,7 @@ no source-disclosure obligation, and no AGPL conflict for your legal team.
 Everything in this repository is AGPLv3 and stays that way.
 
 **In this repository, free forever:** the scheduler, every runtime adapter
-(Claude Code, Codex, Grok, Gemini, ACP), the executor, git actions and PR
+(Claude Code, Codex, Grok, Gemini, fx, ACP), the executor, git actions and PR
 creation, verification checks and verdicts, racing attempts, supervised
 approvals, webhook integrations, the planner, and the entire UI.
 

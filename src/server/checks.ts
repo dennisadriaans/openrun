@@ -21,9 +21,9 @@ import {
   parseChecks,
   type CheckDef,
 } from '../lib/checks.ts'
-import { RUN_KILL_GRACE_MS } from '../lib/runBudget.ts'
 import type { CheckOutcome } from '../lib/verdict.ts'
 import { getDb, type CheckResultRow } from './db.ts'
+import { killChildTree } from './processControl.ts'
 import { publishRunLive } from './runLive.ts'
 
 /**
@@ -99,20 +99,8 @@ export function executeCheck(input: {
       return
     }
 
-    const killTree = (signal: NodeJS.Signals) => {
-      try {
-        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal)
-        else child.kill(signal)
-      } catch {
-        // Already gone.
-      }
-    }
-
     const stop = () => {
-      killTree('SIGTERM')
-      setTimeout(() => {
-        if (!settled) killTree('SIGKILL')
-      }, RUN_KILL_GRACE_MS)
+      killChildTree(child, { stillLive: () => !settled })
     }
 
     const timer = setTimeout(() => {

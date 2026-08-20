@@ -41,3 +41,11 @@ test('user-added runtimes keep createdAt order among themselves', () => {
   const sorted = [...rows].sort(compareRuntimesForDisplay).map((r) => r.id)
   assert.deepEqual(sorted, ['claude', 'alpha-cli', 'zeta-cli'])
 })
+
+test('fx ships as an ACP builtin', () => {
+  const fx = RUNTIME_PRESETS.find((p) => p.id === 'fx')
+  assert.equal(fx?.bin, 'fx')
+  assert.equal(fx?.transport, 'acp')
+  assert.deepEqual(fx?.argsTemplate, ['acp'])
+  assert.equal(fx?.promptViaStdin, false)
+})

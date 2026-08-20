@@ -5,7 +5,7 @@
  * scoped to the CLIs Open Run actually drives. Values map to CLI flags in
  * `server/resume.ts` (`claude --model/--effort`, `codex -m` +
  * `model_reasoning_effort`, `grok -m` + `--reasoning-effort`,
- * `agy --model/--effort`).
+ * `agy --model/--effort`, `fx acp --model` / `FX_MODEL`).
  *
  * **These lists are a fallback, not the source of truth.** At runtime
  * `server/modelCatalog.ts` reads the models the *installed* CLI actually knows
@@ -15,7 +15,14 @@
  * roughly current, but do not treat it as authoritative.
  */
 
-export type RuntimeModelKind = 'claude' | 'codex' | 'grok' | 'gemini' | 'antigravity' | 'generic'
+export type RuntimeModelKind =
+  | 'claude'
+  | 'codex'
+  | 'grok'
+  | 'gemini'
+  | 'antigravity'
+  | 'fx'
+  | 'generic'
 
 export type EffortOption = {
   value: string
@@ -188,6 +195,27 @@ const ANTIGRAVITY_EFFORTS: EffortOption[] = [
 ]
 
 /**
+ * fx is model-agnostic via Vercel AI Gateway. The compiled default is
+ * `zai/glm-5.2-fast`; discovery via `fx models --json` replaces this seed.
+ */
+export const FX_MODELS: ModelOption[] = [
+  {
+    slug: 'zai/glm-5.2-fast',
+    name: 'GLM 5.2 Fast',
+    shortName: 'GLM 5.2 Fast',
+    efforts: [],
+    provider: 'fx',
+  },
+  {
+    slug: 'zai/glm-5.2',
+    name: 'GLM 5.2',
+    shortName: 'GLM 5.2',
+    efforts: [],
+    provider: 'fx',
+  },
+]
+
+/**
  * Antigravity ships a long, account-dependent list and prints the real one via
  * `agy models`, so this seed is deliberately minimal — it only has to keep the
  * picker non-empty until the first discovery lands.
@@ -220,6 +248,7 @@ export function modelKindForBin(bin: string): RuntimeModelKind {
   // Antigravity's binary is `agy`; match the product name too for users who
   // pointed the runtime at an explicit path.
   if (name === 'agy' || name.includes('antigravity')) return 'antigravity'
+  if (name === 'fx' || name === 'fx.exe') return 'fx'
   return 'generic'
 }
 
@@ -229,6 +258,7 @@ export function modelsForKind(kind: RuntimeModelKind): ModelOption[] {
   if (kind === 'grok') return GROK_MODELS
   if (kind === 'gemini') return GEMINI_MODELS
   if (kind === 'antigravity') return ANTIGRAVITY_MODELS
+  if (kind === 'fx') return FX_MODELS
   return []
 }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
@@ -7,6 +7,13 @@ import { CHECK_OUTPUT_TAIL_CHARS } from '../lib/checks.ts'
 import { executeCheck } from './checks.ts'
 
 const dirs: string[] = []
+
+/** Quote a node invocation so `shell: true` works on Windows paths with spaces. */
+function nodeFile(dir: string, name: string, source: string): string {
+  const file = join(dir, name)
+  writeFileSync(file, source)
+  return `"${process.execPath}" "${file}"`
+}
 
 function workdir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'agentops-checks-'))
@@ -27,9 +34,10 @@ afterEach(() => {
 
 describe('executeCheck', () => {
   it('passes on a zero exit and captures stdout', async () => {
+    const dir = workdir()
     const result = await executeCheck({
-      command: 'echo all-green',
-      cwd: workdir(),
+      command: nodeFile(dir, 'ok.js', "process.stdout.write('all-green\\n')\n"),
+      cwd: dir,
       timeoutMs: 30_000,
     })
     assert.equal(result.outcome, 'passed')
@@ -38,9 +46,10 @@ describe('executeCheck', () => {
   })
 
   it('fails on a non-zero exit and keeps the exit code', async () => {
+    const dir = workdir()
     const result = await executeCheck({
-      command: 'echo boom >&2; exit 3',
-      cwd: workdir(),
+      command: nodeFile(dir, 'fail.js', "console.error('boom'); process.exit(3)\n"),
+      cwd: dir,
       timeoutMs: 30_000,
     })
     assert.equal(result.outcome, 'failed')
@@ -49,9 +58,14 @@ describe('executeCheck', () => {
   })
 
   it('captures stderr as well as stdout', async () => {
+    const dir = workdir()
     const result = await executeCheck({
-      command: 'echo to-out; echo to-err >&2; exit 1',
-      cwd: workdir(),
+      command: nodeFile(
+        dir,
+        'both.js',
+        "console.log('to-out'); console.error('to-err'); process.exit(1)\n",
+      ),
+      cwd: dir,
       timeoutMs: 30_000,
     })
     assert.match(result.output, /to-out/)
@@ -61,7 +75,15 @@ describe('executeCheck', () => {
   it('runs in the given working directory', async () => {
     const dir = workdir()
     writeFileSync(join(dir, 'marker.txt'), 'here')
-    const result = await executeCheck({ command: 'cat marker.txt', cwd: dir, timeoutMs: 30_000 })
+    const result = await executeCheck({
+      command: nodeFile(
+        dir,
+        'read.js',
+        "process.stdout.write(require('fs').readFileSync('marker.txt'))\n",
+      ),
+      cwd: dir,
+      timeoutMs: 30_000,
+    })
     assert.equal(result.outcome, 'passed')
     assert.match(result.output, /here/)
   })
@@ -77,44 +99,48 @@ describe('executeCheck', () => {
   })
 
   it('times out a hanging command instead of waiting forever', async () => {
+    const dir = workdir()
     const started = Date.now()
     const result = await executeCheck({
-      command: 'sleep 60',
-      cwd: workdir(),
+      command: nodeFile(dir, 'hang.js', 'setTimeout(() => {}, 60_000)\n'),
+      cwd: dir,
       timeoutMs: 300,
     })
     assert.equal(result.outcome, 'timeout')
     assert.match(result.output, /timed out/)
-    // Well under the 60s the command asked for — the kill actually landed.
     assert.ok(Date.now() - started < 20_000, 'timed-out check should settle promptly')
   })
 
   it('kills grandchildren, not just the shell', async () => {
     const dir = workdir()
-    // The shell backgrounds a child that would outlive a naive child.kill().
-    // If the process group is killed, the marker file is never written.
-    const script = join(dir, 'spawn.sh')
-    writeFileSync(script, `sleep 2 && echo leaked > ${join(dir, 'leaked.txt')}\n`)
+    const leaked = join(dir, 'leaked.txt')
+    const child = join(dir, 'child.js')
+    writeFileSync(
+      child,
+      `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(leaked)}, 'leaked') }, 2000)\n`,
+    )
     const result = await executeCheck({
-      command: `sh ${script}`,
+      command: nodeFile(
+        dir,
+        'parent.js',
+        `require('child_process').spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(child)}], { stdio: 'ignore', cwd: ${JSON.stringify(dir)} })
+setTimeout(() => {}, 60_000)
+`,
+      ),
       cwd: dir,
       timeoutMs: 300,
     })
     assert.equal(result.outcome, 'timeout')
     await new Promise((r) => setTimeout(r, 2_500))
-    const listing = await executeCheck({
-      command: 'ls',
-      cwd: dir,
-      timeoutMs: 10_000,
-    })
-    assert.doesNotMatch(listing.output, /leaked\.txt/)
+    assert.equal(existsSync(leaked), false)
   })
 
   it('stops early and reports skipped when aborted', async () => {
+    const dir = workdir()
     const controller = new AbortController()
     const promise = executeCheck({
-      command: 'sleep 30',
-      cwd: workdir(),
+      command: nodeFile(dir, 'sleep.js', 'setTimeout(() => {}, 30_000)\n'),
+      cwd: dir,
       timeoutMs: 30_000,
       signal: controller.signal,
     })
@@ -125,10 +151,14 @@ describe('executeCheck', () => {
   })
 
   it('keeps the tail of a very chatty command', async () => {
+    const dir = workdir()
     const result = await executeCheck({
-      // ~200k of output — far past the retained tail.
-      command: 'for i in $(seq 1 4000); do echo "line-$i padding padding padding padding"; done',
-      cwd: workdir(),
+      command: nodeFile(
+        dir,
+        'chatty.js',
+        'for (let i = 1; i <= 4000; i++) console.log("line-" + i + " padding padding padding padding")\n',
+      ),
+      cwd: dir,
       timeoutMs: 60_000,
     })
     assert.equal(result.outcome, 'passed')
@@ -136,15 +166,15 @@ describe('executeCheck', () => {
       result.output.length <= CHECK_OUTPUT_TAIL_CHARS + 40,
       `expected bounded output, got ${result.output.length}`,
     )
-    // The end of the stream is what a compiler / test runner puts the summary in.
     assert.match(result.output, /line-4000/)
     assert.doesNotMatch(result.output, /line-1 /)
   })
 
   it('measures how long the check took', async () => {
+    const dir = workdir()
     const result = await executeCheck({
-      command: 'sleep 0.2',
-      cwd: workdir(),
+      command: nodeFile(dir, 'pause.js', 'setTimeout(() => {}, 200)\n'),
+      cwd: dir,
       timeoutMs: 30_000,
     })
     assert.ok(result.durationMs >= 150, `expected a measured duration, got ${result.durationMs}`)
