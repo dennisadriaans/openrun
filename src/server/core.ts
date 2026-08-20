@@ -1131,6 +1131,10 @@ export function writeWorkspaceFile(input: { runId: string; path: string; content
   return files.writeWorkspaceFile(runCwd(input.runId), input.path, input.content)
 }
 
+export function restoreWorkspaceFile(input: { runId: string; path: string; content: string }) {
+  return files.putWorkspaceFile(runCwd(input.runId), input.path, input.content)
+}
+
 /**
  * Paths still dirty vs HEAD that are also part of the run delta. Used so
  * commit only stages run-owned changes (already-committed mid-run work is
@@ -1169,6 +1173,17 @@ export function discardChanges(input: { runId: string; paths?: string[] }) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
   return git.discard(run.cwd, input.paths, run.baseSnapshot || undefined)
+}
+
+export function discardHunk(input: { runId: string; path: string; hunkIndex: number }) {
+  const run = getRun(input.runId)
+  if (!run) throw new Error('Run not found')
+  const since = run.baseSnapshot || undefined
+  const delta = git.changedFiles(run.cwd, since)
+  if (!delta.some((file) => file.path === input.path)) {
+    throw new Error("File is not part of this run's changes")
+  }
+  return git.discardHunk(run.cwd, input.path, input.hunkIndex, since)
 }
 
 export function createBranch(input: { runId: string; name: string }) {

@@ -232,6 +232,10 @@ export const writeWorkspaceFile = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; path: string; content: string }) => d)
   .handler(async ({ data }) => (await core()).writeWorkspaceFile(data))
 
+export const restoreWorkspaceFile = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string; path: string; content: string }) => d)
+  .handler(async ({ data }) => (await core()).restoreWorkspaceFile(data))
+
 export const commitChanges = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; message: string; paths?: string[] }) => d)
   .handler(async ({ data }) => (await core()).commitChanges(data))
@@ -243,6 +247,10 @@ export const pushChanges = createServerFn({ method: 'POST' })
 export const discardChanges = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; paths?: string[] }) => d)
   .handler(async ({ data }) => (await core()).discardChanges(data))
+
+export const discardHunk = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string; path: string; hunkIndex: number }) => d)
+  .handler(async ({ data }) => (await core()).discardHunk(data))
 
 export const createBranch = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; name: string }) => d)

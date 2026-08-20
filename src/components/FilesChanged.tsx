@@ -1,17 +1,14 @@
 /**
- * "Files Changed" summary box.
+ * Changed-files card — Cursor-style summary above the composer / in the panel.
  *
- * Lists every file the run's workspace differs from HEAD on, collapsed to a few
- * rows with a "Show N more" expander. Clicking a file opens the diff panel.
- *
- * Layout adapted from the t3code run view (MIT, T3 Tools Inc.).
+ * Chevron toggles the file list; composer starts collapsed. Review and a file
+ * row open the fullscreen diff viewer. Undo All is the run-scoped discard of
+ * every remaining path.
  */
 import { useState } from 'react'
-import { FileDiff, MoreHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { DiffFile } from '../server/git'
 import { FileTypeIcon } from './FileTypeIcon'
-
-const COLLAPSED_COUNT = 4
 
 const statusTone: Record<DiffFile['status'], string> = {
   added: '',
@@ -44,101 +41,116 @@ export function FilesChanged({
   activePath,
   onSelect,
   onReview,
+  onUndoAll,
+  undoDisabled = false,
+  undoDisabledReason,
+  variant = 'panel',
 }: {
   files: DiffFile[]
   activePath: string | null
   onSelect: (path: string) => void
   onReview?: () => void
+  onUndoAll?: () => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  variant?: 'panel' | 'composer'
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const attached = variant === 'composer'
+  const [expanded, setExpanded] = useState(!attached)
 
   if (files.length === 0) return null
 
-  const visible = expanded ? files : files.slice(0, COLLAPSED_COUNT)
-  const hidden = files.length - visible.length
-  const additions = files.reduce((n, f) => n + f.additions, 0)
-  const deletions = files.reduce((n, f) => n + f.deletions, 0)
+  const openReview = onReview ?? (() => onSelect(files[0]!.path))
 
   return (
-    <div className="rounded-2xl border border-border bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--bg-chrome))] p-2 pt-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-2 px-2">
-        <p className="flex items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
+    <div
+      className={
+        attached
+          ? 'chat-files-glass rounded-t-[16px] border border-b-0 border-border'
+          : 'overflow-hidden rounded-xl border border-border bg-elevated shadow-sm'
+      }
+    >
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-0.5 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-secondary/60"
+        >
+          {expanded ? (
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
           <span>
-            {files.length} changed file{files.length === 1 ? '' : 's'}
+            {files.length} {files.length === 1 ? 'File' : 'Files'}
           </span>
-          {additions > 0 || deletions > 0 ? (
-            <DiffStat additions={additions} deletions={deletions} className="text-xs leading-4" />
+        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {onUndoAll ? (
+            <button
+              type="button"
+              onClick={onUndoAll}
+              disabled={undoDisabled}
+              title={undoDisabled ? undoDisabledReason : 'Undo all changes from this run'}
+              className="h-6 rounded-md px-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Undo All
+            </button>
           ) : null}
-        </p>
-        {onReview ? (
           <button
             type="button"
-            onClick={onReview}
-            className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            onClick={openReview}
+            className="h-6 rounded-md border border-border bg-secondary/80 px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-secondary"
           >
             Review
           </button>
-        ) : null}
+        </div>
       </div>
 
-      <div className="space-y-px">
-        {visible.map((file) => {
-          const name = file.path.split('/').pop() ?? file.path
-          const dir = file.path.slice(0, file.path.length - name.length).replace(/\/$/, '')
-          const active = activePath === file.path
-          return (
-            <button
-              type="button"
-              key={file.path}
-              onClick={() => onSelect(file.path)}
-              className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 ${
-                active ? 'bg-secondary' : 'hover:bg-secondary/60'
-              }`}
-            >
-              <span className="flex size-5 shrink-0 items-center justify-center">
-                <FileTypeIcon path={file.path} className="size-3.5" />
-              </span>
-              <span className="min-w-0 flex-1 truncate">
-                {dir ? <span className="text-muted-foreground">{dir}/</span> : null}
+      {expanded ? (
+        <div
+          className={`scroll-thin space-y-px overflow-y-auto px-1.5 pb-1.5 ${
+            attached ? 'max-h-[min(32vh,16rem)]' : 'max-h-[min(40vh,20rem)]'
+          }`}
+        >
+          {files.map((file) => {
+            const name = file.path.split('/').pop() ?? file.path
+            const active = activePath === file.path
+            return (
+              <button
+                type="button"
+                key={file.path}
+                onClick={() => onSelect(file.path)}
+                title={file.path}
+                className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 ${
+                  active ? 'bg-secondary' : 'hover:bg-secondary/60'
+                }`}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center">
+                  <FileTypeIcon path={file.path} className="size-3.5" />
+                </span>
                 <span
-                  className={`${active ? 'font-medium' : ''} ${
+                  className={`min-w-0 flex-1 truncate ${
                     statusTone[file.status] || (active ? 'text-foreground' : 'text-foreground/82')
-                  }`}
+                  } ${active ? 'font-medium' : ''}`}
                 >
                   {name}
                 </span>
-              </span>
-              {file.binary ? (
-                <span className="pe-1 mono text-[11px] text-muted-foreground">bin</span>
-              ) : (
-                <DiffStat additions={file.additions} deletions={file.deletions} className="pe-1" />
-              )}
-            </button>
-          )
-        })}
-
-        {hidden > 0 ? (
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="flex w-full items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
-          >
-            <MoreHorizontal className="size-4 shrink-0" />
-            Show {hidden} more
-          </button>
-        ) : null}
-
-        {expanded && files.length > COLLAPSED_COUNT ? (
-          <button
-            type="button"
-            onClick={() => setExpanded(false)}
-            className="flex w-full items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
-          >
-            <FileDiff className="size-4 shrink-0" />
-            Show less
-          </button>
-        ) : null}
-      </div>
+                {file.binary ? (
+                  <span className="pe-1 mono text-[11px] text-muted-foreground">bin</span>
+                ) : (
+                  <DiffStat
+                    additions={file.additions}
+                    deletions={file.deletions}
+                    className="pe-1"
+                  />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }

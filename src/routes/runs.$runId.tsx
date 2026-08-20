@@ -6,10 +6,11 @@
  */
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ArrowLeft, Ban, ChevronRight } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
 import { Chat, ChatBootSkeleton } from '../components/Chat'
+import { DiffPanel } from '../components/DiffPanel'
 import { EmptyState, Modal } from '../components/ui'
 import { Button } from '../components/ui'
 import { RightPanelToggleControl } from '../components/workspace/PanelLayoutControls'
@@ -43,16 +44,32 @@ type LayoutState = {
   rightPanelWidth: number
 }
 
-function loadLayout(runId: string): LayoutState {
-  const fallback: LayoutState = {
+function layoutStorageKey(runId: string) {
+  return `agentops:layout:${runId}`
+}
+
+function defaultLayout(): LayoutState {
+  return {
     terminalOpen: false,
-    rightPanelOpen: true,
+    rightPanelOpen: false,
     maximized: false,
     terminalHeight: 220,
     rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
   }
+}
+
+function hasStoredLayout(runId: string): boolean {
   try {
-    const raw = sessionStorage.getItem(`agentops:layout:${runId}`)
+    return sessionStorage.getItem(layoutStorageKey(runId)) != null
+  } catch {
+    return false
+  }
+}
+
+function loadLayout(runId: string): LayoutState {
+  const fallback = defaultLayout()
+  try {
+    const raw = sessionStorage.getItem(layoutStorageKey(runId))
     if (!raw) return fallback
     const parsed = { ...fallback, ...JSON.parse(raw) } as LayoutState
     parsed.rightPanelWidth = Math.min(
@@ -72,7 +89,10 @@ function RunDetail() {
   const { data: workspacePanel } = useRunWorkspace(runId, { streamHealthy })
   const { open: sidebarOpen } = useSidebar()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [reviewPath, setReviewPath] = useState<string | null>(null)
+  const [confirmUndoAll, setConfirmUndoAll] = useState(false)
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout(runId))
+  const layoutChosenRef = useRef(hasStoredLayout(runId))
   const [newBranchOpen, setNewBranchOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
   const qc = useQueryClient()
@@ -85,21 +105,46 @@ function RunDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
+    layoutChosenRef.current = hasStoredLayout(runId)
     setLayout(loadLayout(runId))
     setSelectedPath(null)
+    setReviewPath(null)
+    setConfirmUndoAll(false)
   }, [runId])
 
+  const patchLayout = useCallback((partial: Partial<LayoutState>) => {
+    layoutChosenRef.current = true
+    setLayout((prev) => ({ ...prev, ...partial }))
+  }, [])
+
   useEffect(() => {
+    if (!layoutChosenRef.current) return
     try {
-      sessionStorage.setItem(`agentops:layout:${runId}`, JSON.stringify(layout))
+      sessionStorage.setItem(layoutStorageKey(runId), JSON.stringify(layout))
     } catch {
       // ignore quota / private mode
     }
   }, [runId, layout])
 
-  const patchLayout = useCallback((partial: Partial<LayoutState>) => {
-    setLayout((prev) => ({ ...prev, ...partial }))
-  }, [])
+  useEffect(() => {
+    if (!reviewPath) return
+    const currentFiles = workspacePanel?.files ?? []
+    if (currentFiles.length === 0) {
+      setReviewPath(null)
+      return
+    }
+    if (!currentFiles.some((file) => file.path === reviewPath)) {
+      setReviewPath(currentFiles[0]?.path ?? null)
+    }
+  }, [workspacePanel?.files, reviewPath])
+
+  useEffect(() => {
+    const trigger = data?.run?.trigger
+    if (!trigger) return
+    if (layoutChosenRef.current) return
+    if (trigger === 'webhook') patchLayout({ rightPanelOpen: true })
+    layoutChosenRef.current = true
+  }, [data?.run?.trigger, patchLayout])
 
   // Keep the workspace chrome mounted while conversation loads — only the
   // chat column waits. "Not found" waits until the first fetch settles.
@@ -152,6 +197,15 @@ function RunDetail() {
 
   const showRight = layout.rightPanelOpen || layout.maximized
   const showChat = !layout.maximized
+  const runBusy = run?.status === 'running'
+  const undoFilesReason = runBusy
+    ? 'Wait for the agent to finish before undoing changes.'
+    : undefined
+  const openReview = (path: string) => setReviewPath(path)
+  const openReviewAll = () => {
+    const first = files[0]
+    if (first) setReviewPath(first.path)
+  }
 
   const submitNewBranch = async () => {
     if (!project || !newBranchName.trim()) return
@@ -225,6 +279,7 @@ function RunDetail() {
                   followUpReason={followUpReason}
                   pending={sendMessage.isPending}
                   running={run!.status === 'running'}
+                  checkResults={checkResults}
                   models={data!.models ?? []}
                   runId={runId}
                   runtimeId={data!.runtime?.id}
@@ -246,10 +301,16 @@ function RunDetail() {
                   initialModel={data!.model ?? ''}
                   initialEffort={data!.effort ?? ''}
                   initialRuntimeMode={data!.runtimeMode}
+                  changedFiles={files}
                   onSelectFile={(path) => {
                     setSelectedPath(path)
                     patchLayout({ rightPanelOpen: true, maximized: false })
                   }}
+                  onReviewFile={openReview}
+                  onReviewFiles={openReviewAll}
+                  onUndoAllFiles={() => setConfirmUndoAll(true)}
+                  undoFilesDisabled={runBusy}
+                  undoFilesReason={undoFilesReason}
                   onStop={() => void cancel()}
                   onSend={(input) => sendMessage.mutate(input)}
                 />
@@ -283,7 +344,11 @@ function RunDetail() {
               runBusy={run?.status === 'running'}
               selectedPath={selectedPath}
               onSelectPath={setSelectedPath}
-              onDiscardPath={(path) => discard.mutate({ paths: [path] })}
+              onReviewFile={openReview}
+              onUndoAllFiles={() => setConfirmUndoAll(true)}
+              reviewPath={reviewPath}
+              undoDisabled={runBusy}
+              undoDisabledReason={undoFilesReason}
               terminalOpen={layout.terminalOpen}
               onToggleTerminal={() => patchLayout({ terminalOpen: !layout.terminalOpen })}
               onToggleRightPanel={() => patchLayout({ rightPanelOpen: false, maximized: false })}
@@ -304,6 +369,62 @@ function RunDetail() {
           </div>
         ) : null}
       </div>
+
+      {reviewPath ? (
+        <DiffPanel
+          variant="overlay"
+          runId={runId}
+          files={files}
+          path={reviewPath}
+          discardDisabled={runBusy}
+          discardDisabledReason={undoFilesReason}
+          onClose={() => setReviewPath(null)}
+          onSelect={setReviewPath}
+          onDiscardAll={() => setConfirmUndoAll(true)}
+        />
+      ) : null}
+
+      {confirmUndoAll ? (
+        <Modal
+          title="Undo all changes"
+          onClose={() => setConfirmUndoAll(false)}
+          className="z-[110]"
+        >
+          <div className="space-y-4">
+            <p className="text-ui-base text-tier-secondary">
+              Restore every file this run changed to the snapshot taken when it started. This cannot
+              be undone.
+            </p>
+            {discard.isError ? (
+              <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">
+                {discard.error instanceof Error ? discard.error.message : String(discard.error)}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setConfirmUndoAll(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                disabled={discard.isPending || runBusy}
+                onClick={() =>
+                  discard.mutate(
+                    {},
+                    {
+                      onSuccess: () => {
+                        setConfirmUndoAll(false)
+                        setReviewPath(null)
+                      },
+                    },
+                  )
+                }
+              >
+                {discard.isPending ? 'Undoing…' : 'Undo all'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
 
       {/*
         Spans the full workspace width rather than the chat column, so the

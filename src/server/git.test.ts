@@ -10,6 +10,7 @@ import {
   commit,
   createPullRequest,
   discard,
+  discardHunk,
   fileDiff,
   push,
 } from './git.ts'
@@ -179,6 +180,38 @@ describe('fileDiff since snapshot', () => {
     assert.doesNotMatch(diff, /^-base/)
   })
 })
+
+describe('discardHunk', () => {
+  it('reverts one hunk and leaves the other', () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'multi.txt'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n')
+    git(cwd, ['add', 'multi.txt'])
+    git(cwd, ['commit', '-m', 'multi'])
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'multi.txt'), 'A\nb\nc\nd\ne\nf\ng\nh\ni\nJ\n')
+
+    const before = parseHunkCount(fileDiff(cwd, 'multi.txt', snap))
+    assert.equal(before, 2)
+
+    discardHunk(cwd, 'multi.txt', 0, snap)
+    assert.equal(readFileSync(join(cwd, 'multi.txt'), 'utf8'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nJ\n')
+
+    discardHunk(cwd, 'multi.txt', 0, snap)
+    assert.equal(readFileSync(join(cwd, 'multi.txt'), 'utf8'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n')
+  })
+
+  it('removes a new file when its only hunk is undone', () => {
+    const cwd = makeRepo()
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'agent.txt'), 'new\n')
+    discardHunk(cwd, 'agent.txt', 0, snap)
+    assert.ok(!existsSync(join(cwd, 'agent.txt')))
+  })
+})
+
+function parseHunkCount(diff: string): number {
+  return diff.split('\n').filter((line) => line.startsWith('@@ ')).length
+}
 
 describe('push / createPullRequest origin gate', () => {
   it('push refuses a repo with no origin remote', () => {

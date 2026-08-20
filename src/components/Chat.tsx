@@ -7,11 +7,13 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, Square, Terminal } from 'lucide-react'
 import type { ChatMessage } from '../server/core'
+import type { DiffFile } from '../server/git'
 import type { ApprovalDecision } from '../lib/claudeControl'
 import type { TurnEventPayload, TurnEventRow } from '../lib/turnEvents'
 import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
 import { formatChatTimestampTooltip, formatShortTimestamp } from '../lib/format'
-import { useAnswerApproval } from '../lib/queries'
+import { useAnswerApproval, useDiscard, useRestoreFile } from '../lib/queries'
+import * as fns from '../fns'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
@@ -33,7 +35,10 @@ import {
   WorkingIndicator,
 } from './chat/index'
 import { latestActivityLabel } from '../lib/turnActivity'
+import { verificationPhase } from '../lib/runPhase'
+import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
 import { foldedRows, planTurnFold, type TurnFoldStage, type TurnRowKind } from '../lib/turnFold'
+import { hasEditHunks } from '../lib/toolCallView'
 
 function isJsonlNoiseLine(line: string): boolean {
   const t = line.trim()
@@ -125,11 +130,31 @@ function turnRows({
   answering,
   onAnswer,
   onSelectFile,
+  onReviewFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
 }: {
   events: TurnEventRow[]
   answering?: boolean
   onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile?: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
 }): TranscriptRow[] {
   const rows: TranscriptRow[] = []
   const push = (id: string, kind: TurnRowKind, node: ReactNode) => rows.push({ id, kind, node })
@@ -172,9 +197,16 @@ function turnRows({
       if (callId) openCalls.set(callId, payload)
       const paired = callId ? resultByCallId.get(callId) : undefined
       if (paired) consumedResults.add(paired.id)
+      const editCard = hasEditHunks({
+        name: payload.name,
+        title: payload.title,
+        toolKind: payload.toolKind,
+        toolInput: payload.input,
+        locations: paired?.payload.locations ?? payload.locations,
+      })
       push(
         ev.id,
-        'work',
+        editCard ? 'edit' : 'work',
         <CallEvent
           name={payload.name}
           title={payload.title}
@@ -190,15 +222,32 @@ function turnRows({
           result={paired?.payload.content ?? ''}
           locations={paired?.payload.locations ?? payload.locations}
           onSelectFile={onSelectFile}
+          onReviewFile={onReviewFile}
+          onUndoFile={onUndoFile}
+          onRedoFile={onRedoFile}
+          undoDisabled={undoDisabled}
+          undoDisabledReason={undoDisabledReason}
+          undoBusyPath={undoBusyPath}
+          redoBusyPath={redoBusyPath}
+          changedPaths={changedPaths}
+          undonePaths={undonePaths}
+          redoablePaths={redoablePaths}
         />,
       )
     } else if (ev.kind === 'tool_result') {
       if (consumedResults.has(ev.id)) continue
       const callId = payload.toolCallId
       const opened = callId ? openCalls.get(callId) : undefined
+      const editCard = hasEditHunks({
+        name: payload.name || opened?.name,
+        title: payload.title || opened?.title,
+        toolKind: payload.toolKind ?? opened?.toolKind,
+        toolInput: opened?.input,
+        locations: payload.locations,
+      })
       push(
         ev.id,
-        'work',
+        editCard ? 'edit' : 'work',
         <CallEvent
           name={payload.name || opened?.name}
           title={payload.title || opened?.title}
@@ -210,6 +259,16 @@ function turnRows({
           result={payload.content || ''}
           locations={payload.locations}
           onSelectFile={onSelectFile}
+          onReviewFile={onReviewFile}
+          onUndoFile={onUndoFile}
+          onRedoFile={onRedoFile}
+          undoDisabled={undoDisabled}
+          undoDisabledReason={undoDisabledReason}
+          undoBusyPath={undoBusyPath}
+          redoBusyPath={redoBusyPath}
+          changedPaths={changedPaths}
+          undonePaths={undonePaths}
+          redoablePaths={redoablePaths}
         />,
       )
     } else if (ev.kind === 'error') {
@@ -298,8 +357,11 @@ function TranscriptRows({ rows }: { rows: TranscriptRow[] }) {
   const groups: { id: string; kind: TurnRowKind; rows: TranscriptRow[] }[] = []
   for (const row of rows) {
     const last = groups.at(-1)
-    if (row.kind === 'work' && last?.kind === 'work') last.rows.push(row)
-    else groups.push({ id: row.id, kind: row.kind, rows: [row] })
+    if (last && row.kind === last.kind && (row.kind === 'work' || row.kind === 'edit')) {
+      last.rows.push(row)
+    } else {
+      groups.push({ id: row.id, kind: row.kind, rows: [row] })
+    }
   }
 
   return (
@@ -307,6 +369,12 @@ function TranscriptRows({ rows }: { rows: TranscriptRow[] }) {
       {groups.map((group) =>
         group.kind === 'work' ? (
           <WorkGroup key={group.id} rows={group.rows} />
+        ) : group.kind === 'edit' ? (
+          <div key={group.id} className="space-y-2 py-1">
+            {group.rows.map((row) => (
+              <div key={row.id}>{row.node}</div>
+            ))}
+          </div>
         ) : (
           <div key={group.id}>{group.rows[0]?.node}</div>
         ),
@@ -382,10 +450,19 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
 
 const AssistantMessage = memo(function AssistantMessage({
   message,
-  activePath,
   answering,
   onAnswer,
   onSelectFile,
+  onReviewFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
   runId,
   runtimeId,
   runTrigger,
@@ -397,10 +474,19 @@ const AssistantMessage = memo(function AssistantMessage({
   installWorkspaceLabel,
 }: {
   message: ChatMessage
-  activePath: string | null
   answering?: boolean
   onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
   runId: string
   runtimeId?: string
   runTrigger?: string
@@ -452,6 +538,16 @@ const AssistantMessage = memo(function AssistantMessage({
         answering,
         ...(onAnswer ? { onAnswer } : {}),
         onSelectFile,
+        ...(onReviewFile ? { onReviewFile } : {}),
+        ...(onUndoFile ? { onUndoFile } : {}),
+        ...(onRedoFile ? { onRedoFile } : {}),
+        ...(undoDisabled ? { undoDisabled } : {}),
+        ...(undoDisabledReason ? { undoDisabledReason } : {}),
+        ...(undoBusyPath ? { undoBusyPath } : {}),
+        ...(redoBusyPath ? { redoBusyPath } : {}),
+        ...(changedPaths ? { changedPaths } : {}),
+        ...(undonePaths ? { undonePaths } : {}),
+        ...(redoablePaths ? { redoablePaths } : {}),
       })
     : []
   const fold = planTurnFold(rows, !running)
@@ -546,10 +642,6 @@ const AssistantMessage = memo(function AssistantMessage({
           </div>
         ) : null}
       </div>
-
-      {!running && message.diffSummary.length > 0 ? (
-        <FilesChanged files={message.diffSummary} activePath={activePath} onSelect={onSelectFile} />
-      ) : null}
     </div>
   )
 })
@@ -590,6 +682,7 @@ export function Composer({
   leading,
   pending,
   running,
+  runningLabel,
   models,
   model,
   effort,
@@ -600,6 +693,7 @@ export function Composer({
   onRuntimeModeChange,
   onSend,
   onStop,
+  className,
 }: {
   disabled: boolean
   disabledReason?: string
@@ -609,6 +703,8 @@ export function Composer({
   leading?: ReactNode
   pending: boolean
   running: boolean
+  /** Overrides the busy placeholder — e.g. which check is running. */
+  runningLabel?: string
   models: ModelOption[]
   model: string
   effort: string
@@ -619,6 +715,7 @@ export function Composer({
   onRuntimeModeChange: (mode: RuntimeMode) => void
   onSend: (text: string) => void
   onStop?: () => void
+  className?: string
 }) {
   const [value, setValue] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -640,13 +737,14 @@ export function Composer({
   const canSend = !disabled && !pending && !running && value.trim().length > 0
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2">
-      <div className="rounded-[22px] p-px">
+    <div className={className ?? 'mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2'}>
+      <div className="chat-composer-shell rounded-[22px] p-px">
         <div
           className={`chat-composer-glass rounded-[20px] border transition-[background-color,border-color] duration-200 focus-within:border-ring/45 ${
             disabled ? 'border-border opacity-75' : 'border-border'
           }`}
         >
+          <div aria-hidden="true" className="chat-glass-fill" />
           <div className="relative px-3 pb-2 pt-3 sm:px-3.5 sm:pt-3.5">
             <textarea
               ref={ref}
@@ -655,14 +753,14 @@ export function Composer({
               disabled={disabled || running}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey) { 
                   e.preventDefault()
                   submit()
                 }
               }}
               placeholder={
                 running
-                  ? 'Agent is working…'
+                  ? (runningLabel ?? 'Agent is working…')
                   : disabled
                     ? (disabledReason ?? 'Follow-up unavailable')
                     : (placeholder ?? 'Ask for follow-up changes…')
@@ -732,6 +830,7 @@ export function Chat({
   followUpReason,
   pending,
   running,
+  checkResults,
   models,
   runId,
   runtimeId,
@@ -747,7 +846,13 @@ export function Chat({
   initialModel,
   initialEffort,
   initialRuntimeMode,
+  changedFiles,
   onSelectFile,
+  onReviewFile,
+  onReviewFiles,
+  onUndoAllFiles,
+  undoFilesDisabled,
+  undoFilesReason,
   onSend,
   onStop,
 }: {
@@ -757,6 +862,8 @@ export function Chat({
   followUpReason?: string
   pending: boolean
   running: boolean
+  /** Verification results for the run; drives the post-turn status line. */
+  checkResults?: CachedCheckResult[]
   models: ModelOption[]
   /** Run id — required for supervised Allow/Deny. */
   runId: string
@@ -778,7 +885,13 @@ export function Chat({
   initialModel: string
   initialEffort: string
   initialRuntimeMode?: string
+  changedFiles?: DiffFile[]
   onSelectFile: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onReviewFiles?: () => void
+  onUndoAllFiles?: () => void
+  undoFilesDisabled?: boolean
+  undoFilesReason?: string
   onSend: (input: {
     prompt: string
     model: string
@@ -800,6 +913,66 @@ export function Chat({
     parseRuntimeMode(initialRuntimeMode ?? DEFAULT_RUNTIME_MODE),
   )
   const canSupervise = supportsSupervised({ bin: runtimeBin, transport: runtimeTransport })
+  const discardFile = useDiscard(runId)
+  const restoreFile = useRestoreFile(runId)
+  const [undoneFiles, setUndoneFiles] = useState(() => new Map<string, string | null>())
+  const [undoPendingPath, setUndoPendingPath] = useState<string | null>(null)
+  const changedPaths = changedFiles?.map((file) => file.path)
+  const undonePaths = [...undoneFiles.keys()]
+  const redoablePaths = [...undoneFiles.entries()]
+    .filter(([, content]) => content !== null)
+    .map(([path]) => path)
+  const undoBusyPath =
+    undoPendingPath ?? (discardFile.isPending ? (discardFile.variables?.paths?.[0] ?? null) : null)
+  const redoBusyPath = restoreFile.isPending ? (restoreFile.variables?.path ?? null) : null
+
+  const undoChatFile = (path: string) => {
+    setUndoPendingPath(path)
+    void fns
+      .readWorkspaceFile({ data: { runId, path } })
+      .then((file) => {
+        const snapshot = file.readOnly ? null : file.content
+        discardFile.mutate(
+          { paths: [path] },
+          {
+            onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, snapshot)),
+            onSettled: () => setUndoPendingPath(null),
+          },
+        )
+      })
+      .catch(() => {
+        discardFile.mutate(
+          { paths: [path] },
+          {
+            onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, null)),
+            onSettled: () => setUndoPendingPath(null),
+          },
+        )
+      })
+  }
+
+  const redoChatFile = (path: string) => {
+    const content = undoneFiles.get(path)
+    if (content == null) return
+    restoreFile.mutate(
+      { path, content },
+      {
+        onSuccess: () => {
+          setUndoneFiles((prev) => {
+            const next = new Map(prev)
+            next.delete(path)
+            return next
+          })
+        },
+      },
+    )
+  }
+
+  // The run stays `running` while its checks execute, but the assistant
+  // message is already final — that gap is the verification pass, and saying
+  // "Working…" there reads as if the agent were still typing.
+  const verifying = running && !messages.some((m) => m.status === 'running')
+  const phase = verifying ? verificationPhase(checkResults ?? []) : undefined
   const answerApproval = useAnswerApproval(runId)
 
   useEffect(() => {
@@ -889,10 +1062,19 @@ export function Chat({
               <AssistantMessage
                 key={message.id}
                 message={message}
-                activePath={activePath}
                 answering={answerApproval.isPending}
                 onAnswer={(input) => answerApproval.mutate(input)}
                 onSelectFile={onSelectFile}
+                onReviewFile={onReviewFile}
+                onUndoFile={undoChatFile}
+                onRedoFile={redoChatFile}
+                undoDisabled={undoFilesDisabled}
+                undoDisabledReason={undoFilesReason}
+                undoBusyPath={undoBusyPath}
+                redoBusyPath={redoBusyPath}
+                changedPaths={changedPaths}
+                undonePaths={undonePaths}
+                redoablePaths={redoablePaths}
                 runId={runId}
                 runtimeId={runtimeId}
                 runTrigger={runTrigger}
@@ -905,6 +1087,15 @@ export function Chat({
               />
             ),
           )}
+          {phase ? (
+            <div className="px-1">
+              <WorkingIndicator
+                verb={phase.label}
+                {...(phase.startedAt ? { startedAt: phase.startedAt } : {})}
+                {...(phase.command ? { step: phase.command } : {})}
+              />
+            </div>
+          ) : null}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -913,32 +1104,45 @@ export function Chat({
         ref={composerOverlayRef}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
       >
-        <div
-          aria-hidden="true"
-          className="chat-composer-horizontal-inset pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 sm:top-2"
-        >
-          <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
-            <div className="chat-composer-shared-blur absolute -inset-8" />
+        <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10">
+          <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
+            {changedFiles && changedFiles.length > 0 && onReviewFile ? (
+              <div className="relative z-10 mx-auto -mb-1.22 w-[92%]">
+                <FilesChanged
+                  variant="composer"
+                  files={changedFiles}
+                  activePath={activePath}
+                  onSelect={onReviewFile}
+                  onReview={onReviewFiles}
+                  onUndoAll={onUndoAllFiles}
+                  undoDisabled={undoFilesDisabled}
+                  undoDisabledReason={undoFilesReason}
+                />
+              </div>
+            ) : null}
+            <Composer
+              className={
+                changedFiles && changedFiles.length > 0 && onReviewFile
+                  ? 'relative z-0 w-full'
+                  : 'w-full pt-2'
+              }
+              disabled={!canFollowUp && !running}
+              disabledReason={followUpReason}
+              pending={pending}
+              running={running}
+              {...(phase ? { runningLabel: `${phase.label}…` } : {})}
+              models={models}
+              model={model}
+              effort={effort}
+              runtimeMode={runtimeMode}
+              supportsSupervised={canSupervise}
+              onModelChange={handleModelChange}
+              onEffortChange={handleEffortChange}
+              onRuntimeModeChange={handleRuntimeModeChange}
+              onStop={onStop}
+              onSend={(text) => onSend({ prompt: text, model, effort, runtimeMode })}
+            />
           </div>
-        </div>
-
-        <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10 isolate">
-          <Composer
-            disabled={!canFollowUp && !running}
-            disabledReason={followUpReason}
-            pending={pending}
-            running={running}
-            models={models}
-            model={model}
-            effort={effort}
-            runtimeMode={runtimeMode}
-            supportsSupervised={canSupervise}
-            onModelChange={handleModelChange}
-            onEffortChange={handleEffortChange}
-            onRuntimeModeChange={handleRuntimeModeChange}
-            onStop={onStop}
-            onSend={(text) => onSend({ prompt: text, model, effort, runtimeMode })}
-          />
           <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
         </div>
       </div>

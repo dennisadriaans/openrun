@@ -127,3 +127,20 @@ export function collapseContext(
   })
   return out
 }
+
+/** One Cursor-style change card per distant edit; a gap in context starts a new block. */
+export function splitChangeBlocks(lines: DiffLine[], context = 3): DiffLine[][] {
+  const rows = collapseContext(lines, context)
+  if (rows.length === 0) return []
+  const blocks: DiffLine[][] = []
+  let current: DiffLine[] = []
+  for (const row of rows) {
+    if (row.skippedBefore > 0 && current.length > 0) {
+      blocks.push(current)
+      current = []
+    }
+    current.push(row.line)
+  }
+  if (current.length > 0) blocks.push(current)
+  return blocks
+}

@@ -166,6 +166,15 @@ function ToolCallBody({
   result,
   status,
   onSelectFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
 }: {
   view: ToolCallView
   role: ToolCallRole
@@ -174,6 +183,15 @@ function ToolCallBody({
   result: string
   status?: ToolCallStatus
   onSelectFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
 }) {
   const running = status !== undefined && !isSettledToolStatus(status)
   const showResult = Boolean(result) && !(view.hunks.length > 0 && isGenericEditResult(result))
@@ -216,6 +234,15 @@ function ToolCallBody({
         hunks={view.hunks}
         {...(view.target.type === 'path' ? { path: view.target.path.path } : {})}
         {...(onSelectFile ? { onSelectFile } : {})}
+        {...(onUndoFile ? { onUndoFile } : {})}
+        {...(onRedoFile ? { onRedoFile } : {})}
+        {...(undoDisabled ? { undoDisabled } : {})}
+        {...(undoDisabledReason ? { undoDisabledReason } : {})}
+        {...(undoBusyPath ? { undoBusyPath } : {})}
+        {...(redoBusyPath ? { redoBusyPath } : {})}
+        {...(changedPaths ? { changedPaths } : {})}
+        {...(undonePaths ? { undonePaths } : {})}
+        {...(redoablePaths ? { redoablePaths } : {})}
       />,
     )
     if (showResult) {
@@ -277,6 +304,16 @@ export function ToolCall({
   result,
   locations,
   onSelectFile,
+  onReviewFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
 }: {
   name?: string
   title?: string
@@ -288,6 +325,16 @@ export function ToolCall({
   result: string
   locations?: ToolCallLocation[]
   onSelectFile?: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
 }) {
   const [open, setOpen] = useState(false)
   const role = resolveCallRole({ callRole, name, toolInput: input, mcpServer })
@@ -311,6 +358,25 @@ export function ToolCall({
     toolInput: input,
     locations,
   })
+  if (role === 'tool' && view.hunks.length > 0) {
+    const openFile = onReviewFile ?? onSelectFile
+    return (
+      <EditDiff
+        hunks={view.hunks}
+        {...(view.target.type === 'path' ? { path: view.target.path.path } : {})}
+        {...(openFile ? { onSelectFile: openFile } : {})}
+        {...(onUndoFile ? { onUndoFile } : {})}
+        {...(onRedoFile ? { onRedoFile } : {})}
+        {...(undoDisabled ? { undoDisabled } : {})}
+        {...(undoDisabledReason ? { undoDisabledReason } : {})}
+        {...(undoBusyPath ? { undoBusyPath } : {})}
+        {...(redoBusyPath ? { redoBusyPath } : {})}
+        {...(changedPaths ? { changedPaths } : {})}
+        {...(undonePaths ? { undonePaths } : {})}
+        {...(redoablePaths ? { redoablePaths } : {})}
+      />
+    )
+  }
   const eyebrow = eyebrowForCallRole(role)
   const settled = status === undefined ? true : isSettledToolStatus(status)
   const failed = status === 'failed'
@@ -405,6 +471,15 @@ export function ToolCall({
           result={result}
           status={status}
           onSelectFile={onSelectFile}
+          onUndoFile={onUndoFile}
+          onRedoFile={onRedoFile}
+          undoDisabled={undoDisabled}
+          undoDisabledReason={undoDisabledReason}
+          undoBusyPath={undoBusyPath}
+          redoBusyPath={redoBusyPath}
+          changedPaths={changedPaths}
+          undonePaths={undonePaths}
+          redoablePaths={redoablePaths}
         />
       ) : null}
     </div>

@@ -197,3 +197,13 @@ export function toolCallView(input: {
     locations,
   }
 }
+
+export function hasEditHunks(input: {
+  name?: string
+  title?: string
+  toolKind?: ToolKind
+  toolInput?: unknown
+  locations?: ToolCallLocation[]
+}): boolean {
+  return toolCallView(input).hunks.length > 0
+}

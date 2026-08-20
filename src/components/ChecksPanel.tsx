@@ -117,8 +117,11 @@ export function ChecksPanel({
   const passed = latest.filter((r) => r.outcome === 'passed')
   const running = latest.some((r) => r.outcome === 'running') || rerun.isPending
 
+  const active = latest.find((r) => r.outcome === 'running')
   const headline = running
-    ? 'Running checks…'
+    ? active
+      ? `Running ${active.name}…`
+      : 'Running checks…'
     : failed.length > 0
       ? `${failed.length} check${failed.length === 1 ? '' : 's'} failing`
       : `${passed.length} check${passed.length === 1 ? '' : 's'} passing`

@@ -15,6 +15,7 @@ import { ensureProcessPathAugmented, findOnPath } from './userPath.ts'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { extractHunkPatch, parseUnifiedDiff } from '../lib/diff.ts'
 import {
   ghNotAuthenticatedMessage,
   ghNotInstalledMessage,
@@ -57,6 +58,7 @@ function git(
   cwd: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
+  input?: string,
 ): { ok: boolean; stdout: string; stderr: string } {
   try {
     const res = spawnSync('git', args, {
@@ -64,6 +66,7 @@ function git(
       encoding: 'utf8',
       maxBuffer: MAX_BUFFER,
       env: env ?? gitEnv(),
+      input,
     })
     return {
       ok: res.status === 0,
@@ -479,6 +482,46 @@ export function discard(
     }
   }
   return { discarded: paths.length }
+}
+
+/**
+ * Reverse one hunk of the run delta, like `git apply -R` on a `git log -p`
+ * slice. A file whose remaining diff is a single hunk is restored wholesale.
+ */
+export function discardHunk(
+  cwd: string,
+  path: string,
+  hunkIndex: number,
+  since?: string,
+): { discarded: number } {
+  if (!isRepo(cwd)) throw new Error('Not a git repository')
+  if (!Number.isInteger(hunkIndex) || hunkIndex < 0) {
+    throw new Error('That change is no longer in the diff')
+  }
+
+  const diff = fileDiff(cwd, path, since)
+  const parsed = parseUnifiedDiff(diff)
+  if (parsed.binary) throw new Error('Binary files can only be undone as a whole')
+  if (hunkIndex >= parsed.hunks.length) {
+    throw new Error('That change is no longer in the diff')
+  }
+  if (parsed.hunks.length === 1) {
+    discard(cwd, [path], since)
+    return { discarded: 1 }
+  }
+
+  const patch = extractHunkPatch(diff, hunkIndex)
+  if (!patch) throw new Error('That change is no longer in the diff')
+
+  const attempt = (args: string[]) => git(cwd, args, undefined, patch)
+  const first = attempt(['apply', '-R', '--whitespace=nowarn', '--recount'])
+  if (first.ok) return { discarded: 1 }
+
+  const retry = attempt(['apply', '-R', '--whitespace=nowarn', '--unidiff-zero', '-C0'])
+  if (!retry.ok) {
+    throw new Error(gitErrorMessage(retry.stderr, 'Could not undo that change'))
+  }
+  return { discarded: 1 }
 }
 
 const GH_STATUS_TTL_MS = 60_000

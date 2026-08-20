@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { collapseContext, diffLines, lineDiffStats } from './lineDiff.ts'
+import { collapseContext, diffLines, lineDiffStats, splitChangeBlocks } from './lineDiff.ts'
 
 test('identical text is all context', () => {
   const lines = diffLines('a\nb\n', 'a\nb\n')
@@ -62,4 +62,15 @@ test('collapseContext elides unchanged runs and reports the gap', () => {
 test('collapseContext keeps everything when the diff is small', () => {
   const lines = diffLines('a\nb', 'a\nc')
   assert.equal(collapseContext(lines, 3).length, lines.length)
+})
+
+test('splitChangeBlocks yields one card per distant edit', () => {
+  const lines = diffLines(
+    ['A', '2', '3', '4', '5', '6', '7', '8', 'B'].join('\n'),
+    ['a', '2', '3', '4', '5', '6', '7', '8', 'b'].join('\n'),
+  )
+  const blocks = splitChangeBlocks(lines, 1)
+  assert.equal(blocks.length, 2)
+  assert.ok(blocks[0]!.some((line) => line.content === 'A'))
+  assert.ok(blocks[1]!.some((line) => line.content === 'B'))
 })

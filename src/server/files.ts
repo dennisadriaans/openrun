@@ -8,6 +8,7 @@
  */
 import {
   existsSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -191,6 +192,24 @@ export function writeWorkspaceFile(
   if (st.isDirectory()) throw new Error('Path is a directory')
   if (st.size > MAX_EDITABLE_BYTES) throw new Error('File is too large to edit')
 
+  writeFileSync(absolute, content, 'utf8')
+  return { path, size: Buffer.byteLength(content, 'utf8') }
+}
+
+/**
+ * Write a file, creating it when missing. Used to redo a chat Undo after the
+ * run had added the file and discard removed it.
+ */
+export function putWorkspaceFile(
+  cwd: string,
+  path: string,
+  content: string,
+): { path: string; size: number } {
+  const absolute = safeResolve(cwd, path)
+  if (existsSync(absolute) && statSync(absolute).isDirectory()) {
+    throw new Error('Path is a directory')
+  }
+  mkdirSync(dirname(absolute), { recursive: true })
   writeFileSync(absolute, content, 'utf8')
   return { path, size: Buffer.byteLength(content, 'utf8') }
 }

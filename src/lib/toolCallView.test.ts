@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { displayPath, editHunksFromInput, toolCallVerb, toolCallView } from './toolCallView.ts'
+import {
+  displayPath,
+  editHunksFromInput,
+  hasEditHunks,
+  toolCallVerb,
+  toolCallView,
+} from './toolCallView.ts'
 
 describe('displayPath', () => {
   it('keeps the last two directories of an absolute path', () => {
@@ -114,6 +120,15 @@ describe('toolCallView', () => {
     })
     assert.equal(view.verb, 'Edited')
     assert.deepEqual(view.hunks, [{ oldString: 'const x = 1', newString: 'const x = 2' }])
+    assert.equal(
+      hasEditHunks({
+        name: 'Edit',
+        toolKind: 'edit',
+        toolInput: { old_string: 'const x = 1', new_string: 'const x = 2' },
+      }),
+      true,
+    )
+    assert.equal(hasEditHunks({ name: 'Bash', toolKind: 'execute' }), false)
   })
 
   it('falls back to the title detail when input is missing', () => {

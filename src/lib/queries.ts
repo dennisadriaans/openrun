@@ -289,6 +289,18 @@ export function useDiscard(runId: string) {
   )
 }
 
+export function useRestoreFile(runId: string) {
+  return useGitMutation(runId, (vars: { path: string; content: string }) =>
+    fns.restoreWorkspaceFile({ data: { runId, ...vars } }),
+  )
+}
+
+export function useDiscardHunk(runId: string) {
+  return useGitMutation(runId, (vars: { path: string; hunkIndex: number }) =>
+    fns.discardHunk({ data: { runId, ...vars } }),
+  )
+}
+
 export function useCreateBranch(runId: string) {
   return useGitMutation(runId, (vars: { name: string }) =>
     fns.createBranch({ data: { runId, ...vars } }),

@@ -3,15 +3,16 @@
  *
  * Stacked per-file cards with sticky headers, expand/collapse, and
  * unified/split hunk rendering from parsed unified-diff (see lib/diff.ts).
- * Optional fullscreen modal for wider split reading.
+ * Overlay mode fills the viewport for chat Review; each hunk can be undone
+ * with a reverse patch, the same way `git apply -R` undoes a `git log -p` slice.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronRight, Columns2, Copy, List, Maximize2, Minimize2, Rows2, X } from 'lucide-react'
 import type { DiffFile } from '../server/git'
 import { parseUnifiedDiff, toSplitRows, type DiffHunk } from '../lib/diff'
 import { highlightHunk } from '../lib/highlight'
-import { useFileDiff } from '../lib/queries'
+import { useDiscard, useDiscardHunk, useFileDiff } from '../lib/queries'
 import { CodeCell, LineNumber } from './DiffRows'
 import { FileTypeIcon } from './FileTypeIcon'
 
@@ -52,18 +53,58 @@ function SplitHunk({ hunk, path }: { hunk: DiffHunk; path: string }) {
   )
 }
 
+function UndoButton({
+  label,
+  disabled,
+  pending,
+  title,
+  onClick,
+}: {
+  label: string
+  disabled: boolean
+  pending: boolean
+  title?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || pending}
+      title={title}
+      className="h-[22px] rounded-md px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {pending ? 'Undoing…' : label}
+    </button>
+  )
+}
+
 function DiffFileCard({
   runId,
   file,
   expanded,
   mode,
+  canUndo,
+  undoReason,
+  undoBusy,
+  pendingHunk,
+  hunkError,
   onToggle,
+  onUndoFile,
+  onUndoHunk,
 }: {
   runId: string
   file: DiffFile
   expanded: boolean
   mode: ViewMode
+  canUndo: boolean
+  undoReason?: string
+  undoBusy: boolean
+  pendingHunk: number | null
+  hunkError: { index: number; message: string } | null
   onToggle: () => void
+  onUndoFile: () => void
+  onUndoHunk: (index: number) => void
 }) {
   const { data, isLoading } = useFileDiff(runId, expanded ? file.path : null)
   const parsed = useMemo(() => parseUnifiedDiff(data?.diff ?? ''), [data?.diff])
@@ -78,7 +119,7 @@ function DiffFileCard({
   }
 
   return (
-    <div className="pb-3">
+    <div className="pb-3" data-diff-path={file.path}>
       <div className="w-full overflow-clip rounded-lg [clip-path:inset(0_round_0.5rem)] [isolation:isolate] bg-elevated">
         <div className="sticky top-0 z-[60] bg-elevated p-[1px] pb-0">
           <div className="rounded-t-lg border border-border bg-elevated py-1.5 pl-1 pr-3">
@@ -135,6 +176,15 @@ function DiffFileCard({
                         New
                       </span>
                     ) : null}
+                    {canUndo ? (
+                      <UndoButton
+                        label="Undo file"
+                        disabled={!canUndo}
+                        pending={undoBusy && pendingHunk === null}
+                        title={undoReason ?? "Restore this file to the run's starting snapshot"}
+                        onClick={onUndoFile}
+                      />
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -159,9 +209,23 @@ function DiffFileCard({
                 ) : (
                   parsed.hunks.map((hunk, i) => (
                     <div key={i} className="border-b border-border last:border-b-0">
-                      <div className="sticky top-0 z-10 bg-[var(--bg-luminous-quaternary)] px-3 py-1 mono text-[10px] text-muted-foreground">
-                        @@ −{hunk.oldStart} +{hunk.newStart} @@ {hunk.header}
+                      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-[var(--bg-luminous-quaternary)] px-3 py-1">
+                        <span className="min-w-0 truncate mono text-[10px] text-muted-foreground">
+                          @@ −{hunk.oldStart} +{hunk.newStart} @@ {hunk.header}
+                        </span>
+                        {canUndo ? (
+                          <UndoButton
+                            label="Undo"
+                            disabled={!canUndo}
+                            pending={undoBusy && pendingHunk === i}
+                            title={undoReason ?? 'Undo this hunk'}
+                            onClick={() => onUndoHunk(i)}
+                          />
+                        ) : null}
                       </div>
+                      {hunkError?.index === i ? (
+                        <div className="px-3 py-1 text-[11px] text-danger">{hunkError.message}</div>
+                      ) : null}
                       {mode === 'split' ? (
                         <SplitHunk hunk={hunk} path={file.path} />
                       ) : (
@@ -183,19 +247,46 @@ export function DiffPanel({
   runId,
   files,
   path,
+  variant = 'panel',
+  discardDisabled = false,
+  discardDisabledReason,
   onClose,
   onSelect,
+  onDiscard,
+  onDiscardAll,
 }: {
   runId: string
   files: DiffFile[]
   path: string
+  variant?: 'panel' | 'overlay'
+  discardDisabled?: boolean
+  discardDisabledReason?: string
   onClose: () => void
   onSelect: (path: string) => void
   onDiscard?: (path: string) => void
+  onDiscardAll?: () => void
 }) {
+  const overlay = variant === 'overlay'
   const [mode, setMode] = useState<ViewMode>('unified')
-  const [fullscreen, setFullscreen] = useState(false)
+  const [fullscreen, setFullscreen] = useState(overlay)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([path]))
+  const [fileListOpen, setFileListOpen] = useState(false)
+  const [hunkError, setHunkError] = useState<{
+    path: string
+    index: number
+    message: string
+  } | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const fileListRef = useRef<HTMLDivElement | null>(null)
+  const discard = useDiscard(runId)
+  const discardHunk = useDiscardHunk(runId)
+  const undoBusy = discard.isPending || discardHunk.isPending
+  const pendingHunk =
+    discardHunk.isPending && discardHunk.variables?.path
+      ? { path: discardHunk.variables.path, index: discardHunk.variables.hunkIndex }
+      : null
+  const canUndo = !discardDisabled
+  const undoReason = discardDisabled ? discardDisabledReason : undefined
 
   useEffect(() => {
     setExpanded((prev) => {
@@ -207,9 +298,23 @@ export function DiffPanel({
   }, [path])
 
   useEffect(() => {
+    if (!fileListOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (fileListRef.current?.contains(e.target as Node)) return
+      setFileListOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [fileListOpen])
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (fullscreen) {
+      if (fileListOpen) {
+        setFileListOpen(false)
+        return
+      }
+      if (fullscreen && !overlay) {
         setFullscreen(false)
         return
       }
@@ -217,7 +322,7 @@ export function DiffPanel({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fullscreen, onClose])
+  }, [fileListOpen, fullscreen, overlay, onClose])
 
   useEffect(() => {
     if (!fullscreen) return
@@ -238,6 +343,48 @@ export function DiffPanel({
     onSelect(filePath)
   }
 
+  const jumpTo = (filePath: string) => {
+    setExpanded((prev) => {
+      if (prev.has(filePath)) return prev
+      const next = new Set(prev)
+      next.add(filePath)
+      return next
+    })
+    onSelect(filePath)
+    setFileListOpen(false)
+    requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector(`[data-diff-path="${CSS.escape(filePath)}"]`)
+        ?.scrollIntoView({ block: 'start' })
+    })
+  }
+
+  const undoFile = (filePath: string) => {
+    setHunkError(null)
+    discard.mutate(
+      { paths: [filePath] },
+      {
+        onSuccess: () => onDiscard?.(filePath),
+      },
+    )
+  }
+
+  const undoHunk = (filePath: string, hunkIndex: number) => {
+    setHunkError(null)
+    discardHunk.mutate(
+      { path: filePath, hunkIndex },
+      {
+        onError: (err) => {
+          setHunkError({
+            path: filePath,
+            index: hunkIndex,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        },
+      },
+    )
+  }
+
   const panel = (
     <aside className="flex h-full w-full flex-col overflow-hidden rounded-[12px] border border-border bg-elevated shadow-2xl shadow-[var(--shadow-primary)]">
       <div className="flex h-full flex-col">
@@ -248,10 +395,21 @@ export function DiffPanel({
                 Files changed
               </span>
             </div>
+            {onDiscardAll && canUndo ? (
+              <button
+                type="button"
+                onClick={onDiscardAll}
+                disabled={undoBusy}
+                title={undoReason ?? 'Undo all changes from this run'}
+                className="h-[26px] rounded-md px-2 text-[12px] text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Undo All
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => (fullscreen ? setFullscreen(false) : onClose())}
-              aria-label={fullscreen ? 'Exit fullscreen' : 'Close diff'}
+              onClick={() => (fullscreen && !overlay ? setFullscreen(false) : onClose())}
+              aria-label={fullscreen && !overlay ? 'Exit fullscreen' : 'Close diff'}
               className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" />
@@ -283,37 +441,71 @@ export function DiffPanel({
                   <Columns2 className="h-3 w-3" aria-hidden />
                 )}
               </button>
-              <button
-                type="button"
-                onClick={() => setFullscreen((v) => !v)}
-                aria-label={fullscreen ? 'Exit fullscreen diff' : 'Open fullscreen diff'}
-                aria-pressed={fullscreen}
-                title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                className={`relative flex h-[26px] w-[26px] items-center justify-center rounded-md border border-transparent outline-none transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground ${
-                  fullscreen
-                    ? 'bg-[var(--bg-luminous-tertiary)] text-foreground'
-                    : 'bg-transparent text-muted-foreground'
-                }`}
-              >
-                {fullscreen ? (
-                  <Minimize2 className="h-3.5 w-3.5" aria-hidden />
-                ) : (
-                  <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+              {overlay ? null : (
+                <button
+                  type="button"
+                  onClick={() => setFullscreen((v) => !v)}
+                  aria-label={fullscreen ? 'Exit fullscreen diff' : 'Open fullscreen diff'}
+                  aria-pressed={fullscreen}
+                  title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                  className={`relative flex h-[26px] w-[26px] items-center justify-center rounded-md border border-transparent outline-none transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground ${
+                    fullscreen
+                      ? 'bg-[var(--bg-luminous-tertiary)] text-foreground'
+                      : 'bg-transparent text-muted-foreground'
+                  }`}
+                >
+                  {fullscreen ? (
+                    <Minimize2 className="h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                </button>
+              )}
+              <div className="relative" ref={fileListRef}>
+                <button
+                  type="button"
+                  onClick={() => setFileListOpen((v) => !v)}
+                  aria-label="File list"
+                  aria-expanded={fileListOpen}
+                  className={`relative flex h-[26px] w-[26px] items-center justify-center rounded-md border border-transparent outline-none transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground ${
+                    fileListOpen
+                      ? 'bg-[var(--bg-luminous-tertiary)] text-foreground'
+                      : 'bg-transparent text-muted-foreground'
+                  }`}
+                >
+                  <List className="h-3.5 w-3.5" />
+                </button>
+                {fileListOpen && (
+                  <div className="absolute right-0 top-[30px] z-[80] max-h-[320px] w-[280px] overflow-y-auto rounded-lg border border-border bg-elevated p-1 shadow-2xl shadow-[var(--shadow-primary)]">
+                    {files.map((file) => (
+                      <button
+                        key={file.path}
+                        type="button"
+                        onClick={() => jumpTo(file.path)}
+                        title={file.path}
+                        className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[12px] text-foreground transition-colors hover:bg-[var(--bg-luminous-tertiary)]"
+                      >
+                        <FileTypeIcon path={file.path} className="size-3.5 shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">{file.path}</span>
+                        {!file.binary && (
+                          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                            +{file.additions} -{file.deletions}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 )}
-              </button>
-              <button
-                type="button"
-                className="relative flex h-[26px] w-[26px] items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground outline-none transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground"
-                aria-label="File list"
-              >
-                <List className="h-3.5 w-3.5" aria-hidden />
-              </button>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="h-full min-h-0 min-w-0 overflow-y-auto bg-transparent [scrollbar-gutter:stable]">
+          <div
+            ref={scrollRef}
+            className="h-full min-h-0 min-w-0 overflow-y-auto bg-transparent [scrollbar-gutter:stable]"
+          >
             <div className="flex min-h-0 flex-col">
               <div className="min-h-full px-3 pt-3">
                 {files.map((file) => (
@@ -323,7 +515,22 @@ export function DiffPanel({
                     file={file}
                     expanded={expanded.has(file.path)}
                     mode={mode}
+                    canUndo={canUndo}
+                    undoReason={undoReason}
+                    undoBusy={
+                      undoBusy &&
+                      (discard.variables?.paths?.[0] === file.path ||
+                        pendingHunk?.path === file.path)
+                    }
+                    pendingHunk={pendingHunk?.path === file.path ? pendingHunk.index : null}
+                    hunkError={
+                      hunkError?.path === file.path
+                        ? { index: hunkError.index, message: hunkError.message }
+                        : null
+                    }
                     onToggle={() => toggle(file.path)}
+                    onUndoFile={() => undoFile(file.path)}
+                    onUndoHunk={(index) => undoHunk(file.path, index)}
                   />
                 ))}
               </div>
@@ -337,15 +544,17 @@ export function DiffPanel({
   if (fullscreen) {
     return createPortal(
       <div
-        className="fixed inset-0 z-[100] flex items-stretch justify-center bg-scrim p-3 backdrop-blur-sm sm:p-5"
+        className="fixed inset-0 z-[100] flex items-stretch justify-center bg-scrim p-8 backdrop-blur-md"
         role="dialog"
         aria-modal="true"
         aria-label="Fullscreen diff viewer"
-        onClick={() => setFullscreen(false)}
+        onClick={overlay ? undefined : () => setFullscreen(false)}
       >
         <div
-          className="flex min-h-0 w-full max-w-[1600px] flex-1"
-          onClick={(e) => e.stopPropagation()}
+          className={
+            overlay ? 'flex min-h-0 w-full flex-1' : 'flex min-h-0 w-full max-w-[1600px] flex-1'
+          }
+          onClick={overlay ? undefined : (e) => e.stopPropagation()}
         >
           {panel}
         </div>

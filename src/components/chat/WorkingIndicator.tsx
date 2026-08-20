@@ -30,11 +30,14 @@ function Timer({ startedAt }: { startedAt: number }) {
 export function WorkingIndicator({
   startedAt,
   step,
+  verb = 'Working',
 }: {
   /** Turn start; omitted when unknown, which drops the elapsed timer. */
   startedAt?: number
   /** What the agent is doing right now, e.g. the newest tool call. */
   step?: string
+  /** Overrides "Working" for phases that are not the agent typing. */
+  verb?: string
 }) {
   return (
     <div className="flex min-w-0 items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
@@ -46,10 +49,10 @@ export function WorkingIndicator({
       <span className="shrink-0">
         {startedAt ? (
           <>
-            Working for <Timer startedAt={startedAt} />
+            {verb} for <Timer startedAt={startedAt} />
           </>
         ) : (
-          'Working…'
+          `${verb}…`
         )}
       </span>
       {step ? <span className="min-w-0 truncate text-muted-foreground/55">· {step}</span> : null}
