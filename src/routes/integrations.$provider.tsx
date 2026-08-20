@@ -302,7 +302,11 @@ function ProviderDetail({
                           return
                         }
                         void disconnectHosted.mutateAsync(integ.id).then((result) => {
-                          if (!result.ok) setRemoteNote(result.remoteError ?? 'Disconnect failed')
+                          if (!result.ok) {
+                            setRemoteNote(result.remoteError ?? 'Disconnect failed')
+                            return
+                          }
+                          setRemoteNote(result.remoteError ?? null)
                         })
                       }}
                     >
