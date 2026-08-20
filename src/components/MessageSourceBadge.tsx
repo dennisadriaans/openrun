@@ -29,7 +29,7 @@ export function MessageSourceBadge({
       title={label ? `Open ${label}` : 'Open the source ticket'}
       className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
     >
-      <IntegrationBrandIcon id={provider as IntegrationProviderId} className="size-3" />
+      <IntegrationBrandIcon id={provider as IntegrationProviderId} className="size-3" onDark />
       <span>{label || 'Open'}</span>
       <ArrowUpRight className="size-3" />
     </a>

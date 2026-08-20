@@ -89,7 +89,9 @@ function Row({
       </span>
       <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground">{name}</span>
       <span className="shrink-0 font-mono text-[11px] text-tier-secondary">{detail}</span>
-      {meta ? <span className="shrink-0 font-mono text-[11px] text-tier-quaternary">{meta}</span> : null}
+      {meta ? (
+        <span className="shrink-0 font-mono text-[11px] text-tier-quaternary">{meta}</span>
+      ) : null}
     </div>
   )
 }
@@ -131,9 +133,7 @@ function Panel({ streams, now }: { streams: readonly LiveStreamSnapshot[]; now: 
         <Row
           tone={!cloud?.signedIn ? 'warn' : relay?.connected ? 'ok' : 'bad'}
           name="Cloud relay"
-          detail={
-            !cloud?.signedIn ? 'signed out' : relay?.connected ? 'connected' : 'disconnected'
-          }
+          detail={!cloud?.signedIn ? 'signed out' : relay?.connected ? 'connected' : 'disconnected'}
         />
         {relay?.lastError && !relay.connected ? (
           <div className="px-2.5 pb-1.5 text-[11px] text-tier-quaternary">{relay.lastError}</div>
@@ -184,7 +184,9 @@ function DevLiveStatusBadge() {
 
   return (
     <div className="pointer-events-none fixed bottom-3 right-3 z-50 flex flex-col items-start">
-      <div className="pointer-events-auto">{open ? <Panel streams={streams} now={now} /> : null}</div>
+      <div className="pointer-events-auto">
+        {open ? <Panel streams={streams} now={now} /> : null}
+      </div>
       <button
         type="button"
         aria-label={open ? 'Hide live connection status' : 'Show live connection status'}
