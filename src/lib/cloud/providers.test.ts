@@ -17,7 +17,7 @@ import {
 const CATALOG: CloudProviderCatalog = {
   reachable: true,
   providers: [
-    { id: 'jira', label: 'Jira', authKind: 'oauth', configured: true, picksTarget: false },
+    { id: 'jira', label: 'Jira', authKind: 'oauth', configured: true, picksTarget: true },
     { id: 'gitlab', label: 'GitLab', authKind: 'oauth', configured: true, picksTarget: true },
     { id: 'linear', label: 'Linear', authKind: 'oauth', configured: false, picksTarget: false },
   ],
@@ -86,7 +86,7 @@ describe('planIntegrationConnect', () => {
 
   it('flags the providers that stop at a project picker', () => {
     assert.equal(plan({ provider: 'gitlab', label: 'GitLab' }).picksTarget, true)
-    assert.equal(plan().picksTarget, false)
+    assert.equal(plan().picksTarget, true)
   })
 
   it('asks for sign-in only once the provider is known to be connectable', () => {

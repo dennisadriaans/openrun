@@ -138,7 +138,8 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
   {
     id: 'jira',
     label: 'Jira',
-    description: 'Jira Cloud issue webhooks — status changes, create, update, assign, and more.',
+    description:
+      'Jira Cloud issue webhooks — pick a project (or a whole site), then status changes, create, update, assign, and more.',
     docsUrl: 'https://developer.atlassian.com/cloud/jira/platform/webhooks/',
     supportsLocalInstall: true,
     emitsCommentText: true,

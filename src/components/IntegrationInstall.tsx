@@ -13,7 +13,7 @@
  * away: pasting an API token is the thing this feature exists to remove.
  */
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { providerMeta } from '../lib/integrations/catalog'
 import { planIntegrationConnect } from '../lib/cloud/providers'
 import {
@@ -75,7 +75,7 @@ export function IntegrationInstallPanel({
     supportsLocalInstall: meta?.supportsLocalInstall ?? false,
   })
 
-  const connect = async () => {
+  const connect = useCallback(async () => {
     setError(null)
     try {
       const { url } = await startConnect.mutateAsync({ provider, origin })
@@ -83,7 +83,7 @@ export function IntegrationInstallPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }
+  }, [origin, provider, startConnect])
 
   // Returning from sign-in resumes the connect the user actually clicked,
   // rather than dropping them back on a page with a button to press again.
@@ -136,8 +136,7 @@ export function IntegrationInstallPanel({
           </p>
           {plan.picksTarget ? (
             <p className="text-ui-sm text-tier-tertiary">
-              {label} attaches the webhook to one project, so you will pick which one before coming
-              back.
+              {label} asks which project to watch, so you will pick one before coming back.
             </p>
           ) : null}
           {errorBox}
