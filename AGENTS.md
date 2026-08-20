@@ -53,13 +53,21 @@ The **live path** is separate and easy to miss:
 executor → server/runLive.ts + server/activityLive.ts   (in-process pub/sub)
          → routes/api/runs/$runId/stream.ts             (SSE, one run)
            routes/api/activity/stream.ts                (SSE, run started/finished)
-         → lib/useRunLive.ts + lib/useActivityLive.tsx  (EventSource)
+         → lib/useRunLive.ts + lib/useActivityLive.tsx  (hooks)
+         → lib/liveStream.ts                            (EventSource, watchdog, reconnect)
          → lib/applyRunLiveEvent.ts                     (patches the React Query cache)
 ```
 
 HTTP polling is only the **fallback** when a stream is unhealthy. That is why hooks in
 `lib/queries.ts` read `useActivityStreamHealthy()` and set
 `refetchInterval: streamHealthy ? false : 3000`. Don't "fix" a hook by hardcoding an interval.
+
+**`EventSource` is not the judge of liveness — the heartbeat is.** A socket that dies while
+the machine sleeps stays `readyState === OPEN` and never fires `error`, which would pin
+`streamHealthy` to `true` and switch every fallback poll off for good. `lib/liveStream.ts`
+owns that: both SSE routes ping on `DEFAULT_PING_MS`, and a stream silent past
+`STALE_AFTER_MS` is closed and redialled. Change one of those constants and change the other.
+Neither hook may open an `EventSource` of its own.
 
 ## Hard rules
 
@@ -154,6 +162,7 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 | First-run account gate | `routes/welcome.tsx`; the redirect lives in `AppLayout` in `routes/__root.tsx`, the remembered skip in `server/cloud/onboarding.ts` |
 | Runtime binary on PATH, args templates, transport | `server/runtimePath.ts`, `server/userPath.ts`, `lib/runtimeBinary.ts`, `lib/argsTemplate.ts`, `lib/runtimePresets.ts`, `lib/acpTransport.ts` |
 | Live updates | the modules in the live-path diagram above |
+| SSE reconnect, heartbeat watchdog, dev connection overlay | `lib/liveStream.ts`; `components/DevLiveStatus.tsx` (dev-only, mounted in `routes/__root.tsx`) |
 | Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
 | Chat transcript / composer pickers | `components/Chat.tsx`, `components/ComposerControls.tsx` |
 | Assistant prose: markdown, code fences, file chips | `components/chat/ChatMarkdown.tsx`; `lib/codeLanguage.ts`, `lib/filePathToken.ts`; `.chat-markdown` / `.chat-code` in `styles.css` |

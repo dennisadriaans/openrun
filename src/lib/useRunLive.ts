@@ -1,10 +1,11 @@
 /**
  * Browser-side live tail for a run detail page.
  *
- * Opens EventSource against `/api/runs/$runId/stream`. Log, turn_event, and
- * turn_started frames patch the conversation query cache in place; terminal
- * status still invalidates for a full refetch. While the stream is healthy,
- * HTTP polling stays off; on stream error it resumes 1s / 5s.
+ * Opens an SSE connection against `/api/runs/$runId/stream` through
+ * `liveStream.ts`, which owns reconnect and the heartbeat watchdog. Log,
+ * turn_event, and turn_started frames patch the conversation query cache in
+ * place; terminal status still invalidates for a full refetch. While the stream
+ * is healthy, HTTP polling stays off; on stream loss it resumes 1s / 5s.
  */
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -13,10 +14,9 @@ import {
   applyRunLiveEventToRunRow,
   type ConversationCacheSlice,
 } from './applyRunLiveEvent'
+import { openLiveStream } from './liveStream.ts'
 import type { RunLiveEvent } from './runLive'
 import { runLiveStreamPath } from './runLive'
-
-const RECONNECT_MS = 2_000
 
 export function useRunLive(runId: string): { streamHealthy: boolean } {
   const qc = useQueryClient()
@@ -24,10 +24,6 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
 
   useEffect(() => {
     if (typeof EventSource === 'undefined') return
-
-    let closed = false
-    let es: EventSource | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
     const refetchConversation = () => {
       void qc.invalidateQueries({ queryKey: ['conversation', runId] })
@@ -70,50 +66,29 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
       }
     }
 
-    const connect = () => {
-      if (closed) return
-      es = new EventSource(runLiveStreamPath(runId))
-
-      es.onopen = () => {
-        if (!closed) setStreamHealthy(true)
-      }
-
-      es.onmessage = (msg) => {
-        if (closed) return
+    const stream = openLiveStream({
+      id: `run:${runId}`,
+      label: 'Run tail',
+      path: runLiveStreamPath(runId),
+      onHealthyChange: setStreamHealthy,
+      // In-place patching only holds if every frame arrived; after a gap the
+      // cache is missing chunks that will never be republished.
+      onResume: refetchConversation,
+      onMessage: (data) => {
         let event: RunLiveEvent
         try {
-          event = JSON.parse(msg.data) as RunLiveEvent
+          event = JSON.parse(data) as RunLiveEvent
         } catch {
           // Malformed frame — ignore; keep the socket. Polling covers gaps.
-          return
+          return false
         }
-        if (event.type === 'ping') return
-        if (event.type === 'hello') {
-          setStreamHealthy(true)
-          return
-        }
-        setStreamHealthy(true)
+        if (event.type === 'ping' || event.type === 'hello') return false
         applyFrame(event)
-      }
+        return true
+      },
+    })
 
-      es.onerror = () => {
-        setStreamHealthy(false)
-        es?.close()
-        es = null
-        if (closed) return
-        if (reconnectTimer) clearTimeout(reconnectTimer)
-        reconnectTimer = setTimeout(connect, RECONNECT_MS)
-      }
-    }
-
-    connect()
-
-    return () => {
-      closed = true
-      setStreamHealthy(false)
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      es?.close()
-    }
+    return () => stream.close()
   }, [runId, qc])
 
   return { streamHealthy }

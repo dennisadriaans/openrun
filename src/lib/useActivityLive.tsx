@@ -1,17 +1,19 @@
 /**
  * Browser-side live feed for list pages.
  *
- * Opens EventSource against `/api/activity/stream`. While healthy, dashboard
- * and run-history polling stop; on stream error they resume their timers.
- * Frames map to React Query prefixes via `activityLiveInvalidateKeys` so queue
- * depth and race-group updates do not wait for a coincidental `run_changed`.
+ * Opens an SSE connection against `/api/activity/stream` through
+ * `liveStream.ts`, which owns reconnect and the heartbeat watchdog. While
+ * healthy, dashboard and run-history polling stop; the moment the stream goes
+ * quiet or errors they resume their timers. Frames map to React Query prefixes
+ * via `activityLiveInvalidateKeys` so queue depth and race-group updates do not
+ * wait for a coincidental `run_changed`.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ActivityLiveEvent } from './activityLive.ts'
 import { activityLiveInvalidateKeys, activityLiveStreamPath } from './activityLive.ts'
+import { openLiveStream } from './liveStream.ts'
 
-const RECONNECT_MS = 2_000
 const INVALIDATE_DEBOUNCE_MS = 100
 
 const ActivityLiveContext = createContext(false)
@@ -34,11 +36,7 @@ function useActivityLiveConnection(): boolean {
   useEffect(() => {
     if (typeof EventSource === 'undefined') return
 
-    let closed = false
-    let es: EventSource | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null
-
     let pendingKeys = new Set<string>()
 
     const bump = (keys: readonly string[]) => {
@@ -54,50 +52,31 @@ function useActivityLiveConnection(): boolean {
       }, INVALIDATE_DEBOUNCE_MS)
     }
 
-    const connect = () => {
-      if (closed) return
-      es = new EventSource(activityLiveStreamPath())
-
-      es.onopen = () => {
-        if (!closed) setStreamHealthy(true)
-      }
-
-      es.onmessage = (msg) => {
-        if (closed) return
+    const stream = openLiveStream({
+      id: 'activity',
+      label: 'Activity',
+      path: activityLiveStreamPath(),
+      onHealthyChange: setStreamHealthy,
+      // Frames published while the socket was down are not replayed, so a
+      // reconnect refetches rather than trusting what the cache still holds.
+      onResume: () => bump(['runs', 'dashboard', 'tasks', 'conversation']),
+      onMessage: (data) => {
         let event: ActivityLiveEvent
         try {
-          event = JSON.parse(msg.data) as ActivityLiveEvent
+          event = JSON.parse(data) as ActivityLiveEvent
         } catch {
           // Malformed frame — ignore; keep the socket. Polling covers gaps.
-          return
+          return false
         }
-        if (event.type === 'ping') return
-        if (event.type === 'hello') {
-          setStreamHealthy(true)
-          return
-        }
-        setStreamHealthy(true)
+        if (event.type === 'ping' || event.type === 'hello') return false
         bump(activityLiveInvalidateKeys(event))
-      }
-
-      es.onerror = () => {
-        setStreamHealthy(false)
-        es?.close()
-        es = null
-        if (closed) return
-        if (reconnectTimer) clearTimeout(reconnectTimer)
-        reconnectTimer = setTimeout(connect, RECONNECT_MS)
-      }
-    }
-
-    connect()
+        return true
+      },
+    })
 
     return () => {
-      closed = true
-      setStreamHealthy(false)
-      if (reconnectTimer) clearTimeout(reconnectTimer)
+      stream.close()
       if (invalidateTimer) clearTimeout(invalidateTimer)
-      es?.close()
     }
   }, [qc])
 

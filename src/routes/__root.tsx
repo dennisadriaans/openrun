@@ -18,6 +18,7 @@ import {
   TopBarActionsProvider,
   useSidebar,
 } from '../components/AppChrome'
+import { DevLiveStatus } from '../components/DevLiveStatus'
 import { ActivityLiveProvider } from '../lib/useActivityLive'
 import { useCloudStatus, useSignOutCloud, useStartCloudLogin } from '../lib/queries'
 import appCss from '../styles.css?url'
@@ -352,7 +353,10 @@ function RootDocument({ children }: { children: ReactNode }) {
       </head>
       <body>
         <QueryClientProvider client={getQueryClient()}>
-          <ActivityLiveProvider>{children}</ActivityLiveProvider>
+          <ActivityLiveProvider>
+            {children}
+            <DevLiveStatus />
+          </ActivityLiveProvider>
         </QueryClientProvider>
         <Scripts />
       </body>
