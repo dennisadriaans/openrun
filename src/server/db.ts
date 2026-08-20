@@ -171,6 +171,11 @@ export type MessageRow = {
   exitCode: number | null
   /** JSON array of DiffFile summaries captured after this turn finished. */
   diffSummary: string
+  /** Integration this message was triggered by; empty for anything else. */
+  sourceProvider: string
+  /** The ticket the webhook fired for. Rendered as a badge, never prompted. */
+  sourceUrl: string
+  sourceLabel: string
   createdAt: number
   finishedAt: number | null
 }
@@ -214,6 +219,10 @@ export type RunQueueRow = {
   trigger: string
   /** Rendered prompt for webhook fires; empty means "use the task prompt". */
   prompt: string
+  /** Origin ticket of a parked webhook fire; survives the wait. */
+  sourceProvider: string
+  sourceUrl: string
+  sourceLabel: string
   queuedAt: number
 }
 
@@ -634,6 +643,15 @@ function migrate(db: Database.Database) {
   addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'fireOnce', 'INTEGER NOT NULL DEFAULT 0')
+
+  // Where a webhook-triggered message came from. Held beside the message
+  // rather than inside it so the link never reaches the agent's prompt.
+  addColumn(db, 'messages', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'messages', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'messages', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS check_results (

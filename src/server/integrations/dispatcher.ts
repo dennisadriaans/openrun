@@ -8,7 +8,7 @@ import {
   parseWebhookFilters,
   taskMatchesWebhookEvent,
 } from '../../lib/integrations/match.ts'
-import { renderWebhookPrompt } from '../../lib/integrations/prompt.ts'
+import { renderWebhookPrompt, webhookSourceLink } from '../../lib/integrations/prompt.ts'
 import type { CanonicalWebhookEvent } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow, type TaskRow } from '../db.ts'
 import { startRun } from '../executor.ts'
@@ -103,6 +103,7 @@ function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
   const workspace = getWorkspace(task.workspaceId)
   assertWorkspaceReady(workspace?.status)
   const prompt = renderWebhookPrompt(task.prompt, event)
+  const source = webhookSourceLink(event)
   return startRun({
     runtime,
     taskId: task.id,
@@ -116,6 +117,7 @@ function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
     timeoutMs: task.timeoutMs,
     resumeSessionId: task.resumeSessionId,
     resumeSessionLabel: task.resumeSessionLabel,
+    ...(source ? { source } : {}),
   })
 }
 
@@ -229,6 +231,7 @@ function ingestCanonicalEvents(
     }
 
     const tasks = matchingTasks(integration.id, event)
+    const source = webhookSourceLink(event)
     const runIds: string[] = []
     const queuedTaskIds: string[] = []
     for (const task of tasks) {
@@ -242,6 +245,7 @@ function ingestCanonicalEvents(
           workspaceId: task.workspaceId,
           trigger: 'webhook',
           prompt: renderWebhookPrompt(task.prompt, event),
+          ...(source ? { source } : {}),
         })
         if (queued.queued) {
           queuedTaskIds.push(task.id)

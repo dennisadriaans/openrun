@@ -187,7 +187,15 @@ export type StartRunInput = {
   resumeSessionId?: string
   /** Picker title for the system stub on an adopted native chat. */
   resumeSessionLabel?: string
+  /**
+   * The ticket a webhook fired for. Stored on the opening user message so the
+   * UI can link back to it — deliberately not in `prompt`, because a bare URL
+   * makes agents try to open it instead of reading the body they already have.
+   */
+  source?: MessageSource
 }
+
+export type MessageSource = { provider: string; url: string; label: string }
 
 /**
  * Create a run row and spawn the first turn. Returns the run id immediately;
@@ -327,6 +335,7 @@ export function startRun(input: StartRunInput): string {
     // The opening turn is never someone typing into a conversation. Whether it
     // actually verifies still depends on the automation's settings.
     unattended: true,
+    ...(input.source ? { source: input.source } : {}),
   })
   return runId
 }
@@ -443,8 +452,10 @@ function spawnTurn(input: {
    * see `concludeTurn`.
    */
   unattended: boolean
+  /** Origin badge for the user message; only webhook turns carry one. */
+  source?: MessageSource
 }): { userMessageId: string; assistantMessageId: string } {
-  const { runId, runtime, cwd, prompt, turn, timeoutMs, unattended } = input
+  const { runId, runtime, cwd, prompt, turn, timeoutMs, unattended, source } = input
   const db = getDb()
   const now = Date.now()
 
@@ -452,8 +463,8 @@ function spawnTurn(input: {
   const assistantMsgId = randomId('msg')
 
   const insertMessage = db.prepare(
-    `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
-     VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', @createdAt, @finishedAt)`,
+    `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
+     VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', @sourceProvider, @sourceUrl, @sourceLabel, @createdAt, @finishedAt)`,
   )
   insertMessage.run({
     id: userMsgId,
@@ -461,6 +472,9 @@ function spawnTurn(input: {
     role: 'user',
     content: prompt,
     status: 'success',
+    sourceProvider: source?.provider ?? '',
+    sourceUrl: source?.url ?? '',
+    sourceLabel: source?.label ?? '',
     createdAt: now,
     finishedAt: now,
   })
@@ -470,6 +484,9 @@ function spawnTurn(input: {
     role: 'assistant',
     content: '',
     status: 'running',
+    sourceProvider: '',
+    sourceUrl: '',
+    sourceLabel: '',
     createdAt: now + 1,
     finishedAt: null,
   })
@@ -1747,6 +1764,7 @@ export function runTask(
   runtime: RuntimeRow,
   trigger: 'manual' | 'schedule' | 'webhook',
   promptOverride?: string,
+  source?: MessageSource,
 ) {
   // Task-backed runs must never hit the process.cwd() fallback — that path is
   // reserved for planner (intentional) and other non-task callers.
@@ -1766,5 +1784,6 @@ export function runTask(
     timeoutMs: task.timeoutMs,
     resumeSessionId: task.resumeSessionId,
     resumeSessionLabel: task.resumeSessionLabel,
+    ...(source ? { source } : {}),
   })
 }

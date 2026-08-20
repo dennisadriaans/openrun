@@ -13,7 +13,7 @@ import { isWorkspaceReady } from '../lib/workspaceReady.ts'
 import { queueDecision, type PendingEntry, type QueueTrigger } from '../lib/runQueue.ts'
 import { publishActivityLive } from './activityLive.ts'
 import { getDb, type RunQueueRow, type RuntimeRow, type TaskRow } from './db.ts'
-import { runTask } from './executor.ts'
+import { runTask, type MessageSource } from './executor.ts'
 import { isShuttingDown } from './processControl.ts'
 import { checkRuntimeInstalled } from './runtimePath.ts'
 import { getWorkspace } from './workspaces.ts'
@@ -71,6 +71,7 @@ export function enqueueRun(input: {
   workspaceId: string
   trigger: QueueTrigger | string
   prompt?: string
+  source?: MessageSource
 }): EnqueueResult {
   const pending: PendingEntry[] = listQueue(input.workspaceId).map((row) => ({
     taskId: row.taskId,
@@ -91,8 +92,8 @@ export function enqueueRun(input: {
 
   getDb()
     .prepare(
-      `INSERT INTO run_queue (id, taskId, workspaceId, trigger, prompt, queuedAt)
-       VALUES (@id, @taskId, @workspaceId, @trigger, @prompt, @queuedAt)`,
+      `INSERT INTO run_queue (id, taskId, workspaceId, trigger, prompt, sourceProvider, sourceUrl, sourceLabel, queuedAt)
+       VALUES (@id, @taskId, @workspaceId, @trigger, @prompt, @sourceProvider, @sourceUrl, @sourceLabel, @queuedAt)`,
     )
     .run({
       id: id(),
@@ -100,6 +101,9 @@ export function enqueueRun(input: {
       workspaceId: input.workspaceId,
       trigger: input.trigger,
       prompt: input.prompt ?? '',
+      sourceProvider: input.source?.provider ?? '',
+      sourceUrl: input.source?.url ?? '',
+      sourceLabel: input.source?.label ?? '',
       queuedAt: Date.now(),
     })
 
@@ -183,6 +187,13 @@ export function drainWorkspace(workspaceId: string): void {
         runtime,
         entry.trigger === 'webhook' ? 'webhook' : 'schedule',
         entry.prompt || undefined,
+        entry.sourceUrl
+          ? {
+              provider: entry.sourceProvider,
+              url: entry.sourceUrl,
+              label: entry.sourceLabel,
+            }
+          : undefined,
       )
       return
     } catch (err) {

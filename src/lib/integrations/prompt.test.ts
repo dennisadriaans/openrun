@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { promptHasPlaceholders, renderWebhookPrompt } from './prompt.ts'
+import { promptHasPlaceholders, renderWebhookPrompt, webhookSourceLink } from './prompt.ts'
 import type { CanonicalWebhookEvent } from './types.ts'
 import { emptyActor, emptyIssue } from './types.ts'
 
@@ -42,5 +42,20 @@ test('renderWebhookPrompt appends context when no placeholders', () => {
   assert.match(out, /Triage this issue carefully\./)
   assert.match(out, /Incoming webhook context/)
   assert.match(out, /Title: Fix flaky test/)
-  assert.match(out, /URL: https:\/\/github.com\/acme\/app\/issues\/12/)
+  assert.equal(out.includes('https://github.com/acme/app/issues/12'), false)
+})
+
+test('renderWebhookPrompt keeps the ticket URL out of the prompt', () => {
+  const out = renderWebhookPrompt('Look at {{issue.key}}\n{{issue.url}}\n\n{{issue.body}}', sampleEvent())
+  assert.equal(out.includes('https://github.com/acme/app/issues/12'), false)
+  assert.match(out, /Look at #12\n\nIt flakes on CI/)
+})
+
+test('webhookSourceLink carries the URL the prompt dropped', () => {
+  assert.deepEqual(webhookSourceLink(sampleEvent()), {
+    provider: 'github',
+    url: 'https://github.com/acme/app/issues/12',
+    label: '#12',
+  })
+  assert.equal(webhookSourceLink(sampleEvent({ issue: emptyIssue({ key: '#1' }) })), null)
 })

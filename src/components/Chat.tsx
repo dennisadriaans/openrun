@@ -19,6 +19,7 @@ import { supportsSupervised } from '../lib/supervisedPolicy'
 import { ComposerModelControls } from './ComposerControls'
 import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
+import { MessageSourceBadge } from './MessageSourceBadge'
 import { PlanProposalsInChat } from './PlanProposalsInChat'
 import { looksLikePlanProposalArray, parsePlanProposals } from '../lib/planProposals'
 import {
@@ -367,8 +368,13 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
           </button>
         ) : null}
       </div>
-      <div className="w-full max-w-[80%] pe-1">
+      <div className="flex w-full max-w-[80%] items-center justify-end gap-1.5 pe-1">
         <MessageMeta createdAt={message.createdAt} content={message.content} align="end" />
+        <MessageSourceBadge
+          provider={message.sourceProvider}
+          url={message.sourceUrl}
+          label={message.sourceLabel}
+        />
       </div>
     </div>
   )

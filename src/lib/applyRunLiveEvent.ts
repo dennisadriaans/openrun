@@ -158,6 +158,9 @@ function patchTurnStarted<T extends ConversationCacheSlice>(
     exitCode: null,
     events: [] as TurnEventRow[],
     diffSummary: [],
+    sourceProvider: '',
+    sourceUrl: '',
+    sourceLabel: '',
     createdAt: userCreatedAt,
     finishedAt: userCreatedAt,
   }
@@ -172,6 +175,9 @@ function patchTurnStarted<T extends ConversationCacheSlice>(
     exitCode: null,
     events: [] as TurnEventRow[],
     diffSummary: [],
+    sourceProvider: '',
+    sourceUrl: '',
+    sourceLabel: '',
     createdAt: assistantCreatedAt,
     finishedAt: null,
   }
