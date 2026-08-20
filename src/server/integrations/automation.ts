@@ -8,9 +8,9 @@
  * install path — but both end here.
  */
 import {
+  bindAutomationEvents,
   defaultAutomationName,
   defaultAutomationPrompt,
-  resolveAutomationEvents,
 } from '../../lib/integrations/install.ts'
 import { providerMeta } from '../../lib/integrations/catalog.ts'
 import {
@@ -77,10 +77,11 @@ export function createIntegrationAutomation(
 
   // Narrowed even for a compiled trigger: the table only holds catalog ids
   // today, and this is the one place that guarantees it stays true.
-  const events = resolveAutomationEvents(
+  const events = bindAutomationEvents(
     integration.provider,
     compiled.events,
     meta.events.map((event) => event.id),
+    { allowEmpty: input.trigger?.kind === 'custom' },
   )
   const description = input.trigger
     ? describeTrigger(integration.provider, input.trigger)

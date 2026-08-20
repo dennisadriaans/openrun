@@ -86,11 +86,12 @@ export function IntegrationAutomationSetup({
   const chosenRuntime =
     runtimeId || runtimes.find((runtime) => runtime.installed)?.id || runtimes[0]?.id || ''
 
+  const everyEvent = trigger.kind === 'custom' && compiled.events.length === 0
   const blocked = !workspaces.length
     ? 'Add a project first — an automation needs a workspace to run in.'
     : !runtimes.length
       ? 'Add a runtime first — an automation needs a CLI to run.'
-      : !compiled.events.length
+      : !everyEvent && !compiled.events.length
         ? 'Pick at least one event.'
         : ''
 
@@ -265,6 +266,23 @@ export function IntegrationAutomationSetup({
 
           {trigger.kind === 'custom' ? (
             <div className="max-h-44 space-y-1 overflow-y-auto rounded-md border border-[var(--border-quaternary)] p-2">
+              <label className="flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 hover:bg-hover">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={(trigger.events ?? []).length === 0}
+                  onChange={() => {
+                    setRecipeId(null)
+                    setTrigger({ kind: 'custom', events: [] })
+                  }}
+                />
+                <span className="min-w-0">
+                  <span className="block text-ui-sm text-foreground">All events</span>
+                  <span className="block text-ui-sm text-tier-quaternary">
+                    Every delivery from this connection
+                  </span>
+                </span>
+              </label>
               {meta.events.map((event) => {
                 const checked = (trigger.events ?? []).includes(event.id)
                 return (
@@ -398,7 +416,7 @@ function TriggerPreview({
           <div className="flex gap-2">
             <dt className="shrink-0 text-tier-quaternary">Events</dt>
             <dd className="mono min-w-0 break-words text-tier-secondary">
-              {events.length ? events.join(', ') : 'none — this would never fire'}
+              {events.length ? events.join(', ') : 'every event from this connection'}
             </dd>
           </div>
           <div className="flex gap-2">

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   assertPublicBaseUrl,
+  bindAutomationEvents,
   cloudConnectionIdFromConfig,
   defaultAutomationPrompt,
   defaultInstallEvents,
@@ -87,6 +88,19 @@ test('resolveAutomationEvents keeps only ids the provider can emit', () => {
     'jira:issue_created',
     'jira:issue_status_changed',
   ])
+})
+
+test('bindAutomationEvents can keep an empty list for every-event triggers', () => {
+  const jiraIds = providerMeta('jira')!.events.map((event) => event.id)
+  assert.deepEqual(bindAutomationEvents('jira', [], jiraIds, { allowEmpty: true }), [])
+  assert.deepEqual(
+    bindAutomationEvents('jira', ['issues.opened'], jiraIds, { allowEmpty: true }),
+    [],
+  )
+  assert.deepEqual(
+    bindAutomationEvents('jira', ['jira:issue_created'], jiraIds, { allowEmpty: true }),
+    ['jira:issue_created'],
+  )
 })
 
 test('resolveAutomationEvents trims and de-duplicates', () => {

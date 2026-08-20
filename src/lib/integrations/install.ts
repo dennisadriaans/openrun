@@ -132,23 +132,38 @@ export function defaultInstallEvents(provider: IntegrationProviderId): string[] 
 }
 
 /**
- * Narrow a requested event list to ids this provider actually emits, falling
- * back to the defaults when nothing usable is left.
+ * Narrow a requested event list to ids this provider actually emits.
  *
  * An id outside the catalog can never match a delivery, so binding one produces
  * an automation that looks armed and silently never fires. The setup form and
  * the server write path both run this, so the UI cannot offer a binding the
  * server would drop.
+ *
+ * Empty after filtering normally falls back to the provider defaults — that is
+ * the install path, where "I did not pick" means "use the sensible set".
+ * `allowEmpty` is for the explicit "every event" custom trigger, which stores
+ * `[]` and matches any delivery.
  */
+export function bindAutomationEvents(
+  provider: IntegrationProviderId,
+  requested: string[] | undefined,
+  bindableEventIds: readonly string[],
+  opts?: { allowEmpty?: boolean },
+): string[] {
+  const known = new Set(bindableEventIds)
+  const picked = (requested ?? []).map((id) => id.trim()).filter((id) => known.has(id))
+  const unique = [...new Set(picked)]
+  if (unique.length > 0) return unique
+  if (opts?.allowEmpty) return []
+  return defaultInstallEvents(provider)
+}
+
 export function resolveAutomationEvents(
   provider: IntegrationProviderId,
   requested: string[] | undefined,
   bindableEventIds: readonly string[],
 ): string[] {
-  const known = new Set(bindableEventIds)
-  const picked = (requested ?? []).map((id) => id.trim()).filter((id) => known.has(id))
-  const unique = [...new Set(picked)]
-  return unique.length > 0 ? unique : defaultInstallEvents(provider)
+  return bindAutomationEvents(provider, requested, bindableEventIds)
 }
 
 export function defaultAutomationName(
