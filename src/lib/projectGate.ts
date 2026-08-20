@@ -16,7 +16,7 @@ export function needProjectBeforeAutomationMessage(): string {
 
 /** Hover detail for the info icon beside the one-line gate message. */
 export function needProjectBeforeAutomationDetail(): string {
-  return 'Automations need a workspace to run in — without one, Create / Planner / Run have nowhere safe to spawn the agent.'
+  return 'Automations need a workspace to run in.'
 }
 
 /** Empty-state choice for the Automations list. */

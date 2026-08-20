@@ -1,7 +1,15 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import { isIntegrationProviderId, providerPageTitle } from '../lib/integrations/catalog'
 import { ChevronRight, PanelLeft } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 
 const SIDEBAR_KEY = 'agentops:sidebar'
 
@@ -12,30 +20,47 @@ type SidebarContextValue = {
 
 const SidebarContext = createContext<SidebarContextValue | null>(null)
 
-type TopBarActionsContextValue = {
-  actions: ReactNode | null
-  setActions: (actions: ReactNode | null) => void
-}
-
-const TopBarActionsContext = createContext<TopBarActionsContextValue | null>(null)
+// Value and setter are separate contexts: a page that publishes actions must not
+// re-render when they land, or its freshly built element loops the effect below.
+const TopBarActionsContext = createContext<ReactNode | null>(null)
+const TopBarActionsSetContext = createContext<
+  ((token: object, actions: ReactNode | null) => void) | null
+>(null)
 
 export function TopBarActionsProvider({ children }: { children: ReactNode }) {
   const [actions, setActions] = useState<ReactNode | null>(null)
+  // Routes overlap for a beat: the incoming page publishes before the outgoing
+  // one unmounts, so only the current owner may clear the bar.
+  const owner = useRef<object | null>(null)
+  const publish = useCallback((token: object, next: ReactNode | null) => {
+    if (next === null) {
+      if (owner.current !== token) return
+      owner.current = null
+      setActions(null)
+      return
+    }
+    owner.current = token
+    setActions(next)
+  }, [])
   return (
-    <TopBarActionsContext.Provider value={{ actions, setActions }}>
-      {children}
-    </TopBarActionsContext.Provider>
+    <TopBarActionsSetContext.Provider value={publish}>
+      <TopBarActionsContext.Provider value={actions}>{children}</TopBarActionsContext.Provider>
+    </TopBarActionsSetContext.Provider>
   )
 }
 
 /** Inject actions into the top bar (breadcrumb row) for the current page. */
 export function useTopBarActions(actions: ReactNode | null) {
-  const ctx = useContext(TopBarActionsContext)
+  const publish = useContext(TopBarActionsSetContext)
+  const token = useRef({}).current
   useEffect(() => {
-    if (!ctx) return
-    ctx.setActions(actions)
-    return () => ctx.setActions(null)
-  }, [ctx, actions])
+    if (!publish) return
+    publish(token, actions)
+  }, [publish, token, actions])
+  useEffect(() => {
+    if (!publish) return
+    return () => publish(token, null)
+  }, [publish, token])
 }
 
 export function useSidebar() {
@@ -159,12 +184,11 @@ export function AppBreadcrumb() {
 /** Top chrome for nested pages. Hidden on full-bleed workspace routes and top-level lists. */
 export function AppTopBar() {
   const { open } = useSidebar()
-  const topBar = useContext(TopBarActionsContext)
+  const actions = useContext(TopBarActionsContext)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isWorkspace = /^\/runs\/[^/]+$/.test(pathname)
   const crumbs = crumbsForPath(pathname)
   const showCrumbs = crumbs.length >= 2
-  const actions = topBar?.actions
 
   if (isWorkspace) return null
   if (!showCrumbs && open && !actions) return null
