@@ -10,6 +10,7 @@ import {
 } from '../lib/nativeSessions'
 import { loadNativeSessionPage } from '../lib/queries'
 import { ProviderIcon } from './ProviderIcons'
+import { Tooltip } from './ui'
 
 function useClickOutside(
   open: boolean,
@@ -215,13 +216,12 @@ export function NativeSessionMenu({
       ? (disabledReasonProp ?? 'Select a branch first')
       : undefined
 
-  return (
+  const trigger = (
     <div ref={triggerRef} className="relative min-w-0">
       <button
         ref={buttonRef}
         type="button"
         disabled={Boolean(disabledReason)}
-        title={disabledReason}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Start from existing chat"
@@ -399,5 +399,11 @@ export function NativeSessionMenu({
           )
         : null}
     </div>
+  )
+
+  return (
+    <Tooltip content={disabledReason ?? 'New chat or resume a CLI session'} disabled={open}>
+      {trigger}
+    </Tooltip>
   )
 }
