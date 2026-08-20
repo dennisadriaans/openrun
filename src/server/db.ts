@@ -8,7 +8,7 @@
  */
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, renameSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { dirname, resolve } from 'node:path'
@@ -346,7 +346,17 @@ export function openrunHome(): string {
   if (fromEnv) return fromEnv
   const next = path.join(os.homedir(), '.openrun')
   const legacy = path.join(os.homedir(), '.agentops')
-  if (!existsSync(next) && existsSync(legacy)) return legacy
+  // Move rather than read-through: a fallback that only *reads* the old path
+  // dies the instant anything creates the new one, and the user silently loses
+  // their session. See `adoptLegacyDatabase` for the same reasoning.
+  if (!existsSync(next) && existsSync(legacy)) {
+    try {
+      renameSync(legacy, next)
+    } catch {
+      // Cross-device or permissions — keep serving the old path.
+      return legacy
+    }
+  }
   return next
 }
 
@@ -359,6 +369,78 @@ export function slugify(s: string): string {
     .replace(/^-|-$/g, '')
 }
 
+const DB_SIDECARS = ['-wal', '-shm'] as const
+
+/**
+ * True when `file` is a SQLite database that no one ever finished setting up.
+ *
+ * A healthy boot seeds `runtimes` from `RUNTIME_PRESETS`, so an openable file
+ * with no runtimes and no projects is the residue of a process that died
+ * partway through `getDb()` — not something worth keeping.
+ */
+function isAbandonedDatabase(file: string): boolean {
+  let probe: Database.Database | null = null
+  try {
+    probe = new Database(file, { readonly: true, fileMustExist: true })
+    const counted = (table: string): number => {
+      const row = probe!
+        .prepare(`SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name=?`)
+        .get(table) as { n: number }
+      if (row.n === 0) return 0
+      return (probe!.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n
+    }
+    return counted('runtimes') === 0 && counted('projects') === 0
+  } catch {
+    // Unreadable or not SQLite at all — equally not worth keeping.
+    return true
+  } finally {
+    try {
+      probe?.close()
+    } catch {
+      // Nothing to do; we only ever read.
+    }
+  }
+}
+
+function moveWithSidecars(from: string, to: string): void {
+  renameSync(from, to)
+  for (const suffix of DB_SIDECARS) {
+    if (existsSync(from + suffix)) renameSync(from + suffix, to + suffix)
+  }
+}
+
+/**
+ * Adopt `data/agentops.db` under its new name, once.
+ *
+ * The rename shipped with a read-only fallback ("use legacy if openrun.db is
+ * absent"), which is a one-way trap: anything that creates an empty
+ * `openrun.db` — a build served from a stale cwd, a boot killed mid-migration —
+ * permanently hides a database full of real projects and runs, and the app
+ * comes up looking factory-reset. So move the file instead of reading past it,
+ * and refuse to let an abandoned stub shadow a legacy DB that still has data.
+ */
+function adoptLegacyDatabase(next: string, legacy: string): string {
+  if (!existsSync(legacy)) return next
+
+  if (existsSync(next)) {
+    if (!isAbandonedDatabase(next)) return next
+    try {
+      moveWithSidecars(next, `${next}.abandoned-${Date.now()}`)
+    } catch {
+      return next
+    }
+  }
+
+  try {
+    moveWithSidecars(legacy, next)
+  } catch {
+    // Could not migrate (permissions, open handle) — keep serving the old file
+    // rather than silently starting empty.
+    return legacy
+  }
+  return next
+}
+
 let _db: Database.Database | null = null
 
 export function getDb(): Database.Database {
@@ -366,8 +448,8 @@ export function getDb(): Database.Database {
 
   const next = resolve(process.cwd(), 'data', 'openrun.db')
   const legacy = resolve(process.cwd(), 'data', 'agentops.db')
-  const dbPath = !existsSync(next) && existsSync(legacy) ? legacy : next
-  if (!existsSync(dirname(dbPath))) mkdirSync(dirname(dbPath), { recursive: true })
+  if (!existsSync(dirname(next))) mkdirSync(dirname(next), { recursive: true })
+  const dbPath = adoptLegacyDatabase(next, legacy)
 
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
