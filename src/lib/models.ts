@@ -97,11 +97,14 @@ export const CLAUDE_MODELS: ModelOption[] = [
   },
   {
     // No `effort` capability — passing `--effort` to Haiku is rejected, so the
-    // only knob it gets is our prompt-injected one.
+    // only knob it gets is our prompt-injected one, and it must be opt-in.
     slug: 'claude-haiku-4-5',
     name: 'Claude Haiku 4.5',
     shortName: 'Haiku 4.5',
-    efforts: [{ value: 'ultrathink', label: 'Ultrathink', promptInjected: true }],
+    efforts: [
+      { value: '', label: 'Default', isDefault: true },
+      { value: 'ultrathink', label: 'Ultrathink', promptInjected: true },
+    ],
     provider: 'claude',
   },
 ]
@@ -299,7 +302,10 @@ export function defaultModel(models: ModelOption[]): ModelOption | undefined {
 export function defaultEffort(model: ModelOption | undefined): string {
   if (!model) return ''
   const def = model.efforts.find((e) => e.isDefault) ?? model.efforts[0]
-  return def?.value ?? ''
+  // Never default into a prompt-injected level — rewriting the prompt is
+  // always an explicit choice, never what a model falls back to.
+  if (!def || def.promptInjected) return ''
+  return def.value
 }
 
 export function effortLabel(model: ModelOption | undefined, effort: string): string {

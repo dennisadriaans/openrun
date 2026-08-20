@@ -60,6 +60,8 @@ function shortNames(names: string[]): string[] {
 
 function effortOptions(m: DiscoveredModel, kind: RuntimeModelKind): EffortOption[] {
   if (m.efforts.length === 0) {
+    // The CLI rejects --effort here, so Ultrathink is the only knob — and it
+    // rewrites the prompt, so it must be opt-in rather than the default.
     return kind === 'claude' ? [ULTRATHINK] : []
   }
   const out: EffortOption[] = m.efforts.map((value) => ({
