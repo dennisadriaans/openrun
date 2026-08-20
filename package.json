@@ -59,7 +59,7 @@
     "better-sqlite3": "^13.0.3",
     "cron-parser": "^4.9.0",
     "lucide-react": "^1.31.0",
-    "node-cron": "^3.0.3",
+    "node-cron": "^4.6.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
