@@ -15,7 +15,7 @@ import type {
   UpdateIntegrationInput,
 } from '../server/core'
 import type { PlanProposal } from '../lib/planProposals'
-import type { IntegrationProviderId } from '../lib/integrations/types'
+import type { IntegrationProviderId, WebhookFilters } from '../lib/integrations/types'
 import type { InstallIntegrationInput } from '../lib/integrations/install'
 import type { CheckDef } from '../lib/checks'
 
@@ -94,6 +94,17 @@ export const getTask = createServerFn({ method: 'GET' })
 export const saveTask = createServerFn({ method: 'POST' })
   .validator((d: TaskInput) => d)
   .handler(async ({ data }) => (await core()).upsertTask(data))
+
+export const saveTaskWebhook = createServerFn({ method: 'POST' })
+  .validator(
+    (d: {
+      taskId: string
+      webhookIntegrationId?: string
+      webhookEvents?: string[]
+      webhookFilters?: WebhookFilters
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).updateTaskWebhook(data) ?? null)
 
 export const toggleTask = createServerFn({ method: 'POST' })
   .validator((d: { id: string; enabled: boolean }) => d)

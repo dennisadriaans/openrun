@@ -5,6 +5,7 @@ import { TaskForm } from '../components/TaskForm'
 import { useTopBarActions } from '../components/AppChrome'
 import { Button, Card, EmptyState, StatusBadge, VerdictBadge } from '../components/ui'
 import { duration, relativeTime } from '../lib/format'
+import { parseWebhookEvents, parseWebhookFilters } from '../lib/integrations/match'
 import { useDeleteTask, useRunNow, useRuns, useTask } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
 
@@ -98,6 +99,9 @@ function TaskDetail() {
           prompt: task.prompt,
           workspaceId: task.workspaceId,
           cron: task.cron,
+          webhookIntegrationId: task.webhookIntegrationId,
+          webhookEvents: parseWebhookEvents(task.webhookEvents),
+          webhookFilters: parseWebhookFilters(task.webhookFilters),
           enabled: !!task.enabled,
           model: task.model,
           effort: task.effort,

@@ -68,7 +68,7 @@ function useClickOutside(
   }, [open, onClose, triggerRef, menuRef])
 }
 
-function FooterMenu({
+export function FooterMenu({
   label,
   title,
   disabled,
@@ -95,6 +95,7 @@ function FooterMenu({
     top: number
     left: number
     openUp: boolean
+    maxHeight: number
   } | null>(null)
 
   useClickOutside(open, () => setOpen(false), triggerRef, menuRef)
@@ -109,9 +110,10 @@ function FooterMenu({
       if (!button) return
       const rect = button.getBoundingClientRect()
       const menuWidth = menuRef.current?.offsetWidth ?? 224
-      const menuHeight = menuRef.current?.offsetHeight ?? 260
+      const menuHeight = menuRef.current?.scrollHeight ?? 260
       const spaceBelow = window.innerHeight - rect.bottom
       const openUp = spaceBelow < menuHeight + 12 && rect.top > spaceBelow
+      const maxHeight = Math.max(120, (openUp ? rect.top : spaceBelow) - 14)
       const left =
         align === 'end'
           ? Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8))
@@ -120,6 +122,7 @@ function FooterMenu({
         top: openUp ? rect.top - 6 : rect.bottom + 6,
         left,
         openUp,
+        maxHeight,
       })
     }
     update()
@@ -167,9 +170,10 @@ function FooterMenu({
                   ? { bottom: window.innerHeight - (coords?.top ?? 0) }
                   : { top: coords?.top ?? 0 }),
                 zIndex: 200,
+                maxHeight: coords?.maxHeight,
                 visibility: coords ? 'visible' : 'hidden',
               }}
-              className="min-w-52 overflow-hidden rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
+              className="min-w-52 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
             >
               {children(() => setOpen(false))}
             </div>,
@@ -180,7 +184,7 @@ function FooterMenu({
   )
 }
 
-function MenuItem({
+export function MenuItem({
   active,
   disabled,
   label,

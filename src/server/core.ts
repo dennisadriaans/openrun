@@ -615,6 +615,43 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
   return getTask(tid)!
 }
 
+/**
+ * Persist only the webhook trigger of an existing task. The full upsert
+ * validates cron/prompt/workspace, so an in-progress form edit could not save
+ * its webhook wiring alone — this writes those three columns and nothing else.
+ */
+export function updateTaskWebhook(input: {
+  taskId: string
+  webhookIntegrationId?: string
+  webhookEvents?: string[]
+  webhookFilters?: WebhookFilters
+}): TaskWithMeta | undefined {
+  const db = getDb()
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(input.taskId) as
+    | TaskRow
+    | undefined
+  if (!row) return undefined
+
+  const webhookIntegrationId = (input.webhookIntegrationId ?? '').trim()
+  if (webhookIntegrationId) {
+    const integ = db
+      .prepare('SELECT id FROM integrations WHERE id = ?')
+      .get(webhookIntegrationId) as { id: string } | undefined
+    if (!integ) throw new Error('Webhook integration not found')
+  }
+
+  db.prepare(
+    `UPDATE tasks SET webhookIntegrationId = ?, webhookEvents = ?, webhookFilters = ?, updatedAt = ? WHERE id = ?`,
+  ).run(
+    webhookIntegrationId,
+    JSON.stringify((input.webhookEvents ?? []).filter((e) => typeof e === 'string' && e.trim())),
+    JSON.stringify(input.webhookFilters ?? {}),
+    Date.now(),
+    input.taskId,
+  )
+  return getTask(input.taskId)
+}
+
 export function setTaskEnabled(taskId: string, enabled: boolean) {
   const db = getDb()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined

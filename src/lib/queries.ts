@@ -319,6 +319,18 @@ export function useSaveTask() {
   })
 }
 
+export function useSaveTaskWebhook() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Parameters<typeof fns.saveTaskWebhook>[0]['data']) =>
+      fns.saveTaskWebhook({ data }),
+    onSuccess: (_updated, { taskId }) => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+}
+
 export function useToggleTask() {
   const qc = useQueryClient()
   return useMutation({

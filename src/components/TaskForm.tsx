@@ -10,6 +10,7 @@ import {
   Settings,
   Timer,
   Trash2,
+  Users,
   Webhook,
   Zap,
 } from 'lucide-react'
@@ -39,6 +40,7 @@ import {
   useProjects,
   useRuntimes,
   useSaveTask,
+  useSaveTaskWebhook,
   useWorkspaces,
   useIntegrations,
   useIntegrationProviders,
@@ -71,6 +73,8 @@ import { missingRuntimeBinaryMessage } from '../lib/runtimeBinary'
 import { AddProjectModal } from './AddProjectModal'
 import {
   EffortPicker,
+  FooterMenu,
+  MenuItem,
   ModelPicker,
   ProjectPicker,
   RuntimePicker,
@@ -676,6 +680,7 @@ const empty: TaskFormValues = {
 }
 
 function WebhookTriggerRow({
+  taskId,
   integrationId,
   events,
   filters,
@@ -684,6 +689,7 @@ function WebhookTriggerRow({
   onFiltersChange,
   onRemove,
 }: {
+  taskId?: string
   integrationId: string
   events: string[]
   filters: TaskFormValues['webhookFilters']
@@ -694,122 +700,175 @@ function WebhookTriggerRow({
 }) {
   const { data: integrations } = useIntegrations()
   const { data: providers } = useIntegrationProviders()
+  const saveWebhook = useSaveTaskWebhook()
+  const [savedAt, setSavedAt] = useState(0)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const selected = integrations?.find((i) => i.id === integrationId)
   const catalog = providers?.find((p) => p.id === selected?.provider)
   const enabledIntegrations = (integrations ?? []).filter((i) => i.enabled)
+  const assignees = filters?.assignees ?? []
+
+  const eventsLabel =
+    events.length === 0
+      ? 'Any event'
+      : events.length === 1
+        ? (catalog?.events.find((e) => e.id === events[0])?.label ?? events[0]!)
+        : `${events.length} events`
+
+  const toggleEvent = (id: string) => {
+    onEventsChange(events.includes(id) ? events.filter((e) => e !== id) : [...events, id])
+    setSavedAt(0)
+  }
+
+  const save = () => {
+    if (!taskId) return
+    setSaveError(null)
+    saveWebhook.mutate(
+      {
+        taskId,
+        webhookIntegrationId: integrationId,
+        webhookEvents: events,
+        webhookFilters: filters ?? {},
+      },
+      {
+        onSuccess: () => setSavedAt(Date.now()),
+        onError: (e: unknown) => setSaveError(e instanceof Error ? e.message : 'Save failed'),
+      },
+    )
+  }
 
   return (
-    <div className="space-y-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
-      <div className="flex items-start gap-2">
-        <Webhook className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tier-secondary" />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <div className="text-ui-base text-foreground">Webhook</div>
-            <div className="text-ui-sm text-tier-quaternary">
-              Fires when a connected provider delivers a matching event.
-            </div>
-          </div>
-          {enabledIntegrations.length === 0 ? (
-            <p className="text-[12px] text-amber-200/90">
-              No connections yet.{' '}
-              <a href="/integrations" className="underline-offset-2 hover:underline">
-                Connect an issue tracker
-              </a>{' '}
-              first.
-            </p>
-          ) : (
-            <select
-              className={inputClass}
-              value={integrationId}
-              onChange={(e) => onIntegrationChange(e.target.value)}
-              aria-label="Webhook connection"
-            >
-              <option value="">Select connection…</option>
-              {enabledIntegrations.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name} ({i.providerLabel})
-                </option>
-              ))}
-            </select>
-          )}
-          {catalog ? (
-            <div className="flex flex-wrap gap-1.5">
-              {catalog.events.map((ev) => {
-                const on = events.length === 0 || events.includes(ev.id)
-                const explicit = events.includes(ev.id)
-                return (
-                  <button
-                    key={ev.id}
-                    type="button"
-                    title={ev.description ?? ev.id}
-                    onClick={() => {
-                      if (events.length === 0) {
-                        // Leaving [] means "all". First click narrows to everything
-                        // except this one, or to only this one — prefer toggle-on list.
-                        onEventsChange([ev.id])
-                        return
-                      }
-                      if (explicit) {
-                        const next = events.filter((id) => id !== ev.id)
-                        onEventsChange(next)
-                      } else {
-                        onEventsChange([...events, ev.id])
-                      }
-                    }}
-                    className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
-                      on && (events.length === 0 || explicit)
-                        ? 'bg-[var(--bg-primary)] text-foreground'
-                        : 'text-tier-quaternary hover:bg-hover hover:text-tier-secondary'
-                    }`}
-                  >
-                    {ev.label}
-                  </button>
-                )
-              })}
-              {events.length > 0 ? (
-                <button
-                  type="button"
-                  className="rounded-md px-2 py-1 text-[11px] text-tier-tertiary hover:bg-hover"
-                  onClick={() => onEventsChange([])}
-                >
-                  All events
-                </button>
-              ) : (
-                <span className="px-2 py-1 text-[11px] text-tier-quaternary">All events</span>
-              )}
-            </div>
-          ) : null}
-          <label className="block space-y-1">
-            <span className="text-[11px] text-tier-quaternary">Assignees (optional)</span>
-            <input
-              className={inputClass}
-              value={(filters?.assignees ?? []).join(', ')}
-              onChange={(e) => {
-                const assignees = e.target.value
-                  .split(',')
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-                onFiltersChange({ ...filters, assignees: assignees.length ? assignees : undefined })
-              }}
-              placeholder="Ada, Bob — empty means anyone"
-            />
-          </label>
-          <p className="text-[11px] leading-relaxed text-tier-quaternary">
-            Prompt placeholders: {'{{issue.title}}'}, {'{{issue.body}}'}, {'{{issue.key}}'},{' '}
-            {'{{issue.status}}'}, {'{{issue.previousStatus}}'}, {'{{event.type}}'}. Without
-            placeholders, issue context is appended automatically.
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Remove webhook trigger"
-          onClick={onRemove}
-          className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
+    <div className="rounded-xl border border-border bg-elevated px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-ui-base">
+        <FooterMenu
+          label={selected ? selected.name : 'Select connection'}
+          title={selected ? `${selected.name} (${selected.providerLabel})` : 'Webhook connection'}
+          invalid={!selected}
+          leading={<Webhook className="h-3.5 w-3.5 shrink-0" />}
         >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+          {(close) =>
+            enabledIntegrations.length === 0 ? (
+              <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">
+                No connections yet — connect an issue tracker first
+              </div>
+            ) : (
+              enabledIntegrations.map((i) => (
+                <MenuItem
+                  key={i.id}
+                  active={i.id === integrationId}
+                  label={i.name}
+                  hint={i.providerLabel}
+                  leading={<Webhook className="h-3.5 w-3.5 shrink-0" />}
+                  onSelect={() => {
+                    onIntegrationChange(i.id)
+                    setSavedAt(0)
+                    close()
+                  }}
+                />
+              ))
+            )
+          }
+        </FooterMenu>
+
+        <Divider />
+
+        <FooterMenu
+          label={eventsLabel}
+          title="Events that fire this automation"
+          disabled={!catalog}
+          leading={<Zap className="h-3.5 w-3.5 shrink-0" />}
+        >
+          {() => (
+            <>
+              <MenuItem
+                active={events.length === 0}
+                label="Any event"
+                onSelect={() => {
+                  onEventsChange([])
+                  setSavedAt(0)
+                }}
+              />
+              {(catalog?.events ?? []).map((ev) => (
+                <MenuItem
+                  key={ev.id}
+                  active={events.includes(ev.id)}
+                  label={ev.label}
+                  hint={ev.description ?? ev.id}
+                  onSelect={() => toggleEvent(ev.id)}
+                />
+              ))}
+            </>
+          )}
+        </FooterMenu>
+
+        <Divider />
+
+        <FooterMenu
+          label={assignees.length === 0 ? 'Anyone' : assignees.join(', ')}
+          title="Only fire for these assignees"
+          disabled={!catalog}
+          leading={<Users className="h-3.5 w-3.5 shrink-0" />}
+        >
+          {() => (
+            <div className="p-1">
+              <input
+                className={inputClass}
+                aria-label="Assignees"
+                value={assignees.join(', ')}
+                onChange={(e) => {
+                  const next = e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                  onFiltersChange({ ...filters, assignees: next.length ? next : undefined })
+                  setSavedAt(0)
+                }}
+                placeholder="Anyone"
+              />
+              <p className="px-1 pt-1.5 text-ui-sm text-tier-quaternary">
+                Comma separated. Empty means anyone.
+              </p>
+            </div>
+          )}
+        </FooterMenu>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {savedAt > 0 && !saveWebhook.isPending ? (
+            <span className="flex items-center gap-1 text-ui-sm text-tier-quaternary">
+              <Check className="h-3 w-3" /> Saved
+            </span>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={!taskId || saveWebhook.isPending}
+            title={taskId ? undefined : 'Create the automation first'}
+            onClick={save}
+          >
+            {saveWebhook.isPending ? 'Saving…' : 'Save webhook'}
+          </Button>
+          <button
+            type="button"
+            aria-label="Remove webhook trigger"
+            onClick={onRemove}
+            className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
+
+      {saveError ? <p className="px-1 pb-1 text-ui-sm text-rose-300">{saveError}</p> : null}
     </div>
+  )
+}
+
+function Divider() {
+  return (
+    <span aria-hidden className="text-tier-quaternary">
+      |
+    </span>
   )
 }
 
@@ -923,6 +982,9 @@ export function TaskForm({
   // the last-used choice for that runtime before falling back to the default.
   const seededRuntimeRef = useRef<string | null>(null)
   useEffect(() => {
+    // Runtimes still loading: clearing here would wipe the saved model/effort
+    // and latch the seed, so the catalog arriving later can't restore them.
+    if (!runtimes) return
     if (models.length === 0) {
       setModel('')
       setEffort('')
@@ -953,7 +1015,7 @@ export function TaskForm({
     seededRuntimeRef.current = v.runtimeId
     // Prefs are read once per runtime switch; excluding them keeps the seed stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, model, effort, v.runtimeId])
+  }, [models, model, effort, v.runtimeId, runtimes])
 
   const changeRuntimeId = (id: string) => {
     seededRuntimeRef.current = null
@@ -1353,6 +1415,7 @@ export function TaskForm({
 
             {webhookEnabled ? (
               <WebhookTriggerRow
+                taskId={v.id}
                 integrationId={v.webhookIntegrationId ?? ''}
                 events={v.webhookEvents ?? []}
                 filters={v.webhookFilters ?? {}}
