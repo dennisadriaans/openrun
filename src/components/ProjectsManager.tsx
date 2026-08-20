@@ -24,7 +24,7 @@ import {
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { supportsSupervised } from '../lib/supervisedPolicy'
-import { pickDefaultRuntime } from '../lib/pickRuntime'
+import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import {
   fetchLatestRunForWorkspace,
   useArchiveWorkspace,
@@ -376,9 +376,12 @@ function StartChatModal({
 
   useEffect(() => {
     if (runtimeId || !runtimes?.length) return
-    const preferred = pickDefaultRuntime(runtimes, prefs.runtimeId)
+    const preferred = pickDefaultRuntime(
+      visibleRuntimes(runtimes, prefs.hiddenRuntimes),
+      prefs.runtimeId,
+    )
     if (preferred) setRuntimeId(preferred.id)
-  }, [runtimes, runtimeId, prefs.runtimeId])
+  }, [runtimes, runtimeId, prefs.runtimeId, prefs.hiddenRuntimes])
 
   const selectedRuntime = runtimes?.find((r) => r.id === runtimeId)
   const models = useMemo(

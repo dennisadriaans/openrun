@@ -24,6 +24,7 @@ import {
   type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { toast } from './toast'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
 import { NATIVE_RESUME_DEFAULT_PROMPT, nativeResumeKindFor } from '../lib/nativeSessions'
 import { DEFAULT_RUN_TIMEOUT_MS } from '../lib/runBudget'
@@ -62,7 +63,7 @@ import {
   scheduleLeadIn,
   type ParsedSchedule,
 } from '../lib/schedule'
-import { pickDefaultRuntime } from '../lib/pickRuntime'
+import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
@@ -71,6 +72,7 @@ import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { missingRuntimeBinaryMessage } from '../lib/runtimeBinary'
 import { AddProjectModal } from './AddProjectModal'
+import { IntegrationBrandIcon } from './IntegrationCard'
 import {
   EffortPicker,
   FooterMenu,
@@ -745,7 +747,17 @@ function WebhookTriggerRow({
           label={selected ? selected.name : 'Select connection'}
           title={selected ? `${selected.name} (${selected.providerLabel})` : 'Webhook connection'}
           invalid={!selected}
-          leading={<Webhook className="h-3.5 w-3.5 shrink-0" />}
+          leading={
+            selected ? (
+              <IntegrationBrandIcon
+                id={selected.provider}
+                className="h-3.5 w-3.5 shrink-0"
+                onDark
+              />
+            ) : (
+              <Webhook className="h-3.5 w-3.5 shrink-0" />
+            )
+          }
         >
           {(close) =>
             enabledIntegrations.length === 0 ? (
@@ -759,7 +771,9 @@ function WebhookTriggerRow({
                   active={i.id === integrationId}
                   label={i.name}
                   hint={i.providerLabel}
-                  leading={<Webhook className="h-3.5 w-3.5 shrink-0" />}
+                  leading={
+                    <IntegrationBrandIcon id={i.provider} className="h-3.5 w-3.5 shrink-0" onDark />
+                  }
                   onSelect={() => {
                     onIntegrationChange(i.id)
                     setSavedAt(0)
@@ -905,7 +919,9 @@ export function TaskForm({
   const triggerSeed = invalidTriggerEditorSeed(initial?.cron)
   const [v, setV] = useState<TaskFormValues>(() => ({
     ...empty,
-    ...(isNew && prefs.runtimeId ? { runtimeId: prefs.runtimeId } : {}),
+    ...(isNew && prefs.runtimeId && !prefs.hiddenRuntimes?.includes(prefs.runtimeId)
+      ? { runtimeId: prefs.runtimeId }
+      : {}),
     ...initial,
     cron: triggerSeed.cron,
   }))
@@ -942,6 +958,7 @@ export function TaskForm({
   const [showAddProject, setShowAddProject] = useState(false)
   const [showVerificationSettings, setShowVerificationSettings] = useState(false)
   const [nativeError, setNativeError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
 
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
@@ -959,9 +976,12 @@ export function TaskForm({
     // Keep a still-valid selection (user pick, prefs, or saved task).
     if (v.runtimeId && runtimes.some((r) => r.id === v.runtimeId)) return
     // Missing / deleted / not-yet-seeded: last-used → installed → first.
-    const next = pickDefaultRuntime(runtimes, isNew ? prefs.runtimeId : undefined)
+    const next = pickDefaultRuntime(
+      isNew ? visibleRuntimes(runtimes, prefs.hiddenRuntimes) : runtimes,
+      isNew ? prefs.runtimeId : undefined,
+    )
     if (next) setV((prev) => ({ ...prev, runtimeId: next.id }))
-  }, [runtimes, v.runtimeId, isNew, prefs.runtimeId])
+  }, [runtimes, v.runtimeId, isNew, prefs.runtimeId, prefs.hiddenRuntimes])
 
   const runtime = runtimes?.find((r) => r.id === v.runtimeId) ?? runtimes?.[0]
   const models = useMemo(() => (runtime ? modelsForRuntime(runtime) : []), [runtime])
@@ -1019,6 +1039,7 @@ export function TaskForm({
 
   const changeRuntimeId = (id: string) => {
     seededRuntimeRef.current = null
+    setDirty(true)
     setV((prev) => {
       const nextRuntime = runtimes?.find((r) => r.id === id)
       const prevKind = nativeResumeKindFor(runtimes?.find((r) => r.id === prev.runtimeId) ?? {})
@@ -1034,18 +1055,22 @@ export function TaskForm({
     remember({ runtimeId: id })
   }
   const changeModel = (slug: string) => {
+    setDirty(true)
     setModel(slug)
     const nextEffort = defaultEffort(findModel(models, slug))
     setEffort(nextEffort)
     remember({ forRuntimeId: v.runtimeId, model: slug, effort: nextEffort })
   }
   const changeEffort = (value: string) => {
+    setDirty(true)
     setEffort(value)
     remember({ forRuntimeId: v.runtimeId, effort: value })
   }
 
-  const set = <K extends keyof TaskFormValues>(k: K, val: TaskFormValues[K]) =>
+  const set = <K extends keyof TaskFormValues>(k: K, val: TaskFormValues[K]) => {
+    setDirty(true)
     setV((prev) => ({ ...prev, [k]: val }))
+  }
 
   const selectProject = (pid: string) => {
     setProjectId(pid)
@@ -1098,7 +1123,9 @@ export function TaskForm({
   useEffect(() => {
     if (!projectId || v.workspaceId) return
     const picked = pickDefaultWorkspace(projectWorkspaces ?? [])
-    if (picked) set('workspaceId', picked.id)
+    if (picked) {
+      setV((prev) => ({ ...prev, workspaceId: picked.id }))
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, projectWorkspaces])
 
@@ -1185,18 +1212,27 @@ export function TaskForm({
       workspaceReady: Boolean(selectedWorkspace && isWorkspaceReady(selectedWorkspace.status)),
       workspaceStatus: selectedWorkspace?.status ?? null,
     }) ?? undefined
+  const pristine = Boolean(v.id) && !dirty
   const saveBlockReason = save.isPending
     ? 'Saving…'
     : workspaceBlockReason
       ? workspaceBlockReason
       : !promptUsable
         ? emptyTaskPromptMessage()
-        : undefined
+        : pristine
+          ? 'No changes to save'
+          : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const saved = await persist()
-    if (saved) onSaved(saved.id)
+    if (!saved) return
+    setDirty(false)
+    toast.add({
+      type: 'success',
+      title: v.id ? 'Changes saved' : 'Automation created',
+    })
+    onSaved(saved.id)
   }
 
   return (
@@ -1218,7 +1254,7 @@ export function TaskForm({
               <Button
                 type="submit"
                 variant="primary"
-                disabled={save.isPending || !workspaceUsable || !promptUsable}
+                disabled={save.isPending || !workspaceUsable || !promptUsable || pristine}
               >
                 {save.isPending ? 'Saving…' : v.id ? 'Save changes' : 'Create'}
               </Button>
@@ -1269,10 +1305,12 @@ export function TaskForm({
             disabledReason={!projectId ? 'Select a project first' : 'Select a branch first'}
             onSelectNew={() => {
               setNativeError(null)
+              setDirty(true)
               setV((prev) => ({ ...prev, resumeSessionId: '', resumeSessionLabel: '' }))
             }}
             onSelect={(session, group) => {
               setNativeError(null)
+              setDirty(true)
               seededRuntimeRef.current = null
               setV((prev) => ({
                 ...prev,
@@ -1405,7 +1443,10 @@ export function TaskForm({
                 <button
                   type="button"
                   aria-label="Remove trigger"
-                  onClick={() => setRunOnce(false)}
+                  onClick={() => {
+                    setDirty(true)
+                    setRunOnce(false)
+                  }}
                   className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1426,6 +1467,7 @@ export function TaskForm({
                 onEventsChange={(events) => set('webhookEvents', events)}
                 onFiltersChange={(filters) => set('webhookFilters', filters)}
                 onRemove={() => {
+                  setDirty(true)
                   setWebhookEnabled(false)
                   set('webhookIntegrationId', '')
                   set('webhookEvents', [])
@@ -1524,6 +1566,7 @@ export function TaskForm({
                     setRunOnce(true)
                   }}
                   onWebhook={() => {
+                    setDirty(true)
                     setRunOnce(false)
                     setWebhookEnabled(true)
                     setAddingTrigger(false)
@@ -1555,11 +1598,20 @@ export function TaskForm({
           {showVerificationSettings ? (
             <VerificationSection
               verifyEnabled={verifyEnabled}
-              onVerifyEnabledChange={setVerifyEnabled}
+              onVerifyEnabledChange={(on) => {
+                setDirty(true)
+                setVerifyEnabled(on)
+              }}
               repairAttempts={repairAttempts}
-              onRepairAttemptsChange={setRepairAttempts}
+              onRepairAttemptsChange={(n) => {
+                setDirty(true)
+                setRepairAttempts(n)
+              }}
               timeoutMinutes={timeoutMinutes}
-              onTimeoutMinutesChange={setTimeoutMinutes}
+              onTimeoutMinutesChange={(n) => {
+                setDirty(true)
+                setTimeoutMinutes(n)
+              }}
             />
           ) : null}
         </section>

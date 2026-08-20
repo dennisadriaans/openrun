@@ -28,6 +28,7 @@ import {
   type ModelOption,
 } from '../lib/models'
 import { usePickerPrefs } from '../lib/pickerPrefs'
+import { hiddenRuntimesIn, toggleHiddenRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import {
   DEFAULT_RUNTIME_MODE,
   RUNTIME_MODES,
@@ -35,6 +36,7 @@ import {
   type RuntimeMode,
 } from '../lib/runtimeMode'
 import { ProviderIcon } from './ProviderIcons'
+import { Tooltip } from './ui'
 
 export type RuntimeOption = {
   id: string
@@ -71,6 +73,7 @@ function useClickOutside(
 export function FooterMenu({
   label,
   title,
+  tooltip,
   disabled,
   leading,
   align = 'start',
@@ -80,6 +83,7 @@ export function FooterMenu({
 }: {
   label: string
   title?: string
+  tooltip?: string
   disabled?: boolean
   leading?: ReactNode
   align?: 'start' | 'end'
@@ -136,13 +140,13 @@ export function FooterMenu({
     }
   }, [open, align])
 
-  return (
+  const menu = (
     <div ref={triggerRef} className="relative min-w-0">
       <button
         ref={buttonRef}
         type="button"
         disabled={disabled}
-        title={title}
+        title={tooltip ? undefined : title}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-invalid={invalid || undefined}
@@ -181,6 +185,13 @@ export function FooterMenu({
           )
         : null}
     </div>
+  )
+
+  if (!tooltip) return menu
+  return (
+    <Tooltip content={tooltip} disabled={open}>
+      {menu}
+    </Tooltip>
   )
 }
 
@@ -225,22 +236,30 @@ export function MenuItem({
 }
 
 /**
- * A model row with its own hide / unhide control.
+ * A picker row with its own hide / unhide control.
  *
  * Separate from {@link MenuItem} because the toggle has to be a real button
  * beside the row rather than inside it — nesting buttons is invalid, and the
- * two need different click targets so hiding a model never selects it.
+ * two need different click targets so hiding an item never selects it.
  */
-function ModelMenuItem({
-  model,
+function HideableMenuItem({
+  label,
+  hint,
+  leading,
   active,
   hidden,
+  hideTitle,
+  showTitle,
   onSelect,
   onToggleHidden,
 }: {
-  model: ModelOption
+  label: string
+  hint?: string
+  leading?: ReactNode
   active: boolean
   hidden: boolean
+  hideTitle: string
+  showTitle: string
   onSelect: () => void
   onToggleHidden: () => void
 }) {
@@ -256,25 +275,53 @@ function ModelMenuItem({
             : 'text-foreground/85 hover:bg-hover hover:text-foreground'
         } ${hidden ? 'opacity-50' : ''}`}
       >
-        <span className="shrink-0 text-tier-secondary">
-          <ProviderIcon kind={model.provider} className="h-3.5 w-3.5 shrink-0" />
-        </span>
+        {leading ? <span className="shrink-0 text-tier-secondary">{leading}</span> : null}
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{model.name}</span>
-          <span className="block truncate text-ui-sm text-tier-quaternary">{model.slug}</span>
+          <span className="block truncate">{label}</span>
+          {hint ? (
+            <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
+          ) : null}
         </span>
         {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
       </button>
       <button
         type="button"
-        title={hidden ? `Show ${model.name} again` : `Hide ${model.name} from this list`}
-        aria-label={hidden ? `Show ${model.name}` : `Hide ${model.name}`}
+        title={hidden ? showTitle : hideTitle}
+        aria-label={hidden ? showTitle : hideTitle}
         onClick={onToggleHidden}
         className="absolute right-1 rounded-md p-1.5 text-tier-quaternary opacity-0 transition-colors group-hover/model:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
       >
         {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
       </button>
     </div>
+  )
+}
+
+function ModelMenuItem({
+  model,
+  active,
+  hidden,
+  onSelect,
+  onToggleHidden,
+}: {
+  model: ModelOption
+  active: boolean
+  hidden: boolean
+  onSelect: () => void
+  onToggleHidden: () => void
+}) {
+  return (
+    <HideableMenuItem
+      label={model.name}
+      hint={model.slug}
+      leading={<ProviderIcon kind={model.provider} className="h-3.5 w-3.5 shrink-0" />}
+      active={active}
+      hidden={hidden}
+      hideTitle={`Hide ${model.name} from this list`}
+      showTitle={`Show ${model.name} again`}
+      onSelect={onSelect}
+      onToggleHidden={onToggleHidden}
+    />
   )
 }
 
@@ -416,6 +463,7 @@ export function ProjectPicker({
     <FooterMenu
       label={selected?.name ?? placeholder}
       title={selected?.path || selected?.name || placeholder}
+      tooltip="Git repo to work in"
       disabled={disabled}
       invalid={invalid}
       aria-describedby={ariaDescribedBy}
@@ -501,6 +549,7 @@ export function BranchPicker({
     <FooterMenu
       label={selected?.branch ?? placeholder}
       title={selected?.branch ?? placeholder}
+      tooltip="Branch to check out"
       disabled={disabled}
       leading={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
     >
@@ -555,8 +604,15 @@ export function RuntimePicker({
   align?: 'start' | 'end'
   onChange: (id: string) => void
 }) {
+  const { prefs, remember } = usePickerPrefs()
+  const [showHidden, setShowHidden] = useState(false)
+
   if (runtimes.length === 0) return null
   const selected = runtimes.find((r) => r.id === runtimeId) ?? runtimes[0]!
+  const shown = visibleRuntimes(runtimes, prefs.hiddenRuntimes, selected.id)
+  const hidden = hiddenRuntimesIn(runtimes, prefs.hiddenRuntimes, selected.id)
+  const toggleHidden = (id: string) =>
+    remember({ hiddenRuntimes: toggleHiddenRuntime(prefs.hiddenRuntimes, id) })
 
   return (
     <FooterMenu
@@ -568,23 +624,39 @@ export function RuntimePicker({
         <ProviderIcon kind={modelKindForBin(selected.bin)} className="h-3.5 w-3.5 shrink-0" />
       }
     >
-      {(close) =>
-        runtimes.map((r) => (
-          <MenuItem
-            key={r.id}
-            active={r.id === selected.id}
-            label={r.label}
-            hint={r.bin}
-            leading={
-              <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
-            }
-            onSelect={() => {
-              onChange(r.id)
-              close()
-            }}
-          />
-        ))
-      }
+      {(close) => (
+        <>
+          {(showHidden ? runtimes : shown).map((r) => (
+            <HideableMenuItem
+              key={r.id}
+              label={r.label}
+              hint={r.bin}
+              leading={
+                <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
+              }
+              active={r.id === selected.id}
+              hidden={hidden.some((h) => h.id === r.id)}
+              hideTitle={`Hide ${r.label} from this list`}
+              showTitle={`Show ${r.label} again`}
+              onSelect={() => {
+                onChange(r.id)
+                close()
+              }}
+              onToggleHidden={() => toggleHidden(r.id)}
+            />
+          ))}
+          {hidden.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowHidden((v) => !v)}
+              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2 pb-1 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary"
+            >
+              {showHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {showHidden ? 'Hide hidden runtimes' : `${hidden.length} hidden`}
+            </button>
+          ) : null}
+        </>
+      )}
     </FooterMenu>
   )
 }

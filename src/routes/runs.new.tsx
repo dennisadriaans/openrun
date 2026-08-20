@@ -20,7 +20,7 @@ import {
   modelsForRuntime,
   visibleModels,
 } from '../lib/models'
-import { pickDefaultRuntime } from '../lib/pickRuntime'
+import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { useProjects, useRuntimes, useStartChat, useWorkspaces } from '../lib/queries'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
@@ -69,9 +69,12 @@ function NewRun() {
 
   useEffect(() => {
     if (runtimeId || !runtimes?.length) return
-    const preferred = pickDefaultRuntime(runtimes, prefs.runtimeId)
+    const preferred = pickDefaultRuntime(
+      visibleRuntimes(runtimes, prefs.hiddenRuntimes),
+      prefs.runtimeId,
+    )
     if (preferred) setRuntimeId(preferred.id)
-  }, [runtimes, runtimeId, prefs.runtimeId])
+  }, [runtimes, runtimeId, prefs.runtimeId, prefs.hiddenRuntimes])
 
   const runtime = runtimes?.find((r) => r.id === runtimeId)
   const models = useMemo(() => (runtime ? modelsForRuntime(runtime) : []), [runtime])
@@ -160,15 +163,14 @@ function NewRun() {
           <div className="max-w-md text-center">
             <h1 className="text-ui-lg text-foreground">Start a new run</h1>
             <p className="mt-1.5 text-ui-base text-tier-tertiary">
-              Confirm the project and branch above, pick a runtime, then send the first message. The
-              run appears in history the moment the agent starts.
+              Confirm the project and branch above, pick a runtime, then send the first message.
             </p>
             {error ? <p className="mt-3 text-ui-base text-danger">{error}</p> : null}
           </div>
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2">
-          <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10 isolate">
+          <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10">
             <Composer
               disabled={blockedReason !== null}
               disabledReason={blockedReason ?? undefined}
