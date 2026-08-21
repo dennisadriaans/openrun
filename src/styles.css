@@ -695,12 +695,10 @@ body {
 }
 
 .chat-markdown :not(pre) > code {
-  border-radius: 0.25rem;
-  background: var(--bg-luminous-quaternary);
-  padding: 0.1em 0.3em;
+  padding: 0;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.9em;
-  color: var(--text-primary);
+  color: color-mix(in oklab, var(--syntax-string) 48%, var(--text-primary));
 }
 
 .chat-markdown strong {
