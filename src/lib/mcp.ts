@@ -245,7 +245,10 @@ export function resolveJsonPointer(
   return node
 }
 
-// --- TOML-shaped configs (Codex) -------------------------------------------
+// --- TOML-shaped configs (Codex, Grok) -------------------------------------
+
+/** Codex writes `http_headers`; Grok writes `headers`. Default is Codex. */
+export type TomlHeaderKey = 'http_headers' | 'headers'
 
 type TomlValue = string | string[] | boolean | Record<string, string>
 
@@ -399,11 +402,25 @@ function tomlSectionEntries(lines: string[], section: TomlSection): Record<strin
   return out
 }
 
+function tomlStringRecord(value: TomlValue | undefined): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return Object.keys(value).length > 0 ? value : undefined
+}
+
+function tomlStringEntries(entries: Record<string, TomlValue>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(entries)) {
+    if (typeof value === 'string') out[key] = value
+  }
+  return out
+}
+
 /** Read `[mcp_servers.*]` out of a Codex-style config, sorted by name. */
 export function parseTomlMcpServers(toml: string, table = CODEX_SERVERS_TABLE): McpServerConfig[] {
   const lines = toml.split('\n')
   const byName = new Map<string, McpServerConfig>()
   const envByName = new Map<string, Record<string, string>>()
+  const headersByName = new Map<string, Record<string, string>>()
 
   for (const section of tomlSections(lines)) {
     if (section.path[0] !== table || section.path.length < 2) continue
@@ -411,11 +428,18 @@ export function parseTomlMcpServers(toml: string, table = CODEX_SERVERS_TABLE): 
     const entries = tomlSectionEntries(lines, section)
 
     if (section.path.length === 3 && section.path[2] === 'env') {
-      const env: Record<string, string> = {}
-      for (const [key, value] of Object.entries(entries)) {
-        if (typeof value === 'string') env[key] = value
-      }
+      const env = tomlStringEntries(entries)
       if (Object.keys(env).length > 0) envByName.set(name, env)
+      continue
+    }
+    if (
+      section.path.length === 3 &&
+      (section.path[2] === 'headers' || section.path[2] === 'http_headers')
+    ) {
+      const headers = tomlStringEntries(entries)
+      if (Object.keys(headers).length > 0) {
+        headersByName.set(name, { ...headersByName.get(name), ...headers })
+      }
       continue
     }
     if (section.path.length !== 2) continue
@@ -434,30 +458,24 @@ export function parseTomlMcpServers(toml: string, table = CODEX_SERVERS_TABLE): 
     if (transport === 'stdio') {
       if (!command) continue
       const args = Array.isArray(entries.args) ? entries.args : undefined
-      const env =
-        entries.env && !Array.isArray(entries.env) && typeof entries.env === 'object'
-          ? (entries.env as Record<string, string>)
-          : undefined
+      const env = tomlStringRecord(entries.env)
       byName.set(name, {
         name,
         transport,
         command,
         ...(args && args.length > 0 ? { args } : {}),
-        ...(env && Object.keys(env).length > 0 ? { env } : {}),
+        ...(env ? { env } : {}),
         ...(off ? { disabled: true } : {}),
       })
       continue
     }
     if (!url) continue
-    const headers =
-      entries.http_headers && typeof entries.http_headers === 'object'
-        ? (entries.http_headers as Record<string, string>)
-        : undefined
+    const headers = tomlStringRecord(entries.headers) ?? tomlStringRecord(entries.http_headers)
     byName.set(name, {
       name,
       transport,
       url,
-      ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+      ...(headers ? { headers } : {}),
       ...(off ? { disabled: true } : {}),
     })
   }
@@ -466,12 +484,16 @@ export function parseTomlMcpServers(toml: string, table = CODEX_SERVERS_TABLE): 
     const server = byName.get(name)
     if (server && server.transport === 'stdio' && !server.env) server.env = env
   }
+  for (const [name, headers] of headersByName) {
+    const server = byName.get(name)
+    if (server && server.transport !== 'stdio' && !server.headers) server.headers = headers
+  }
 
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** Hosts that read an explicit on/off key rather than table presence. */
-export type TomlServerOptions = { enabledFlag?: boolean }
+export type TomlServerOptions = { enabledFlag?: boolean; headerKey?: TomlHeaderKey }
 
 function renderTomlServer(
   server: McpServerConfig,
@@ -493,7 +515,8 @@ function renderTomlServer(
   lines.push(`url = ${tomlQuote(server.url ?? '')}`)
   if (server.transport !== 'http') lines.push(`transport = ${tomlQuote(server.transport)}`)
   if (server.headers && Object.keys(server.headers).length > 0) {
-    lines.push(`http_headers = ${tomlInlineTable(server.headers)}`)
+    const headerKey = options.headerKey ?? 'http_headers'
+    lines.push(`${headerKey} = ${tomlInlineTable(server.headers)}`)
   }
   return [...lines, ...enabled]
 }

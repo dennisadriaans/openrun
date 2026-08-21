@@ -94,6 +94,13 @@ import {
   type SharedMcpView,
   type SharedWriteReport,
 } from './mcpShared.ts'
+import {
+  beginMcpOAuth,
+  bootMcpTokenRefresh,
+  disconnectMcpOAuth,
+  mcpOAuthViews,
+  refreshMcpTokens,
+} from './mcpOAuth.ts'
 import type { McpServerConfig } from '../lib/mcp.ts'
 import { mcpSupportRefusal } from '../lib/mcpTargets.ts'
 import { listSlashCommands, type SlashCommandListing } from './slashCommands.ts'
@@ -122,6 +129,7 @@ if (!bootSafety.__agentopsSafetyBooted) {
 }
 bootScheduler()
 warmModelCatalogs()
+bootMcpTokenRefresh()
 
 /**
  * Everything that has to happen once a run settles. Registered here rather
@@ -482,6 +490,32 @@ export function syncSharedMcpConfig(input: { force?: boolean } = {}): {
 } {
   const report = syncSharedMcp(input)
   return { view: getSharedMcp(), report }
+}
+
+/**
+ * OAuth for a hosted MCP server, run once here instead of once per CLI. The
+ * token lands in every CLI config as an Authorization header — see
+ * `server/mcpOAuth.ts`.
+ */
+export async function getMcpOAuthStatus(): Promise<{
+  connections: ReturnType<typeof mcpOAuthViews>
+  errors: string[]
+}> {
+  const { errors } = await refreshMcpTokens()
+  return { connections: mcpOAuthViews(), errors }
+}
+
+export function startMcpOAuth(input: { name: string; redirectUri: string }) {
+  return beginMcpOAuth(input)
+}
+
+export async function disconnectMcpServer(input: { name: string }): Promise<{
+  view: SharedMcpView
+  report: SharedWriteReport
+  connections: ReturnType<typeof mcpOAuthViews>
+}> {
+  const report = await disconnectMcpOAuth(input)
+  return { view: getSharedMcp(), report, connections: mcpOAuthViews() }
 }
 
 // ---------------------------------------------------------------------------

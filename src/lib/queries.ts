@@ -127,6 +127,39 @@ export function useSyncSharedMcp() {
   })
 }
 
+const mcpOAuthKey = ['mcpOAuth'] as const
+
+/**
+ * Hosted servers Open Run holds a token for. Fetching also refreshes anything
+ * near expiry, so opening the page is what keeps the header in each CLI config
+ * live.
+ */
+export function useMcpOAuth() {
+  return useQuery({
+    queryKey: mcpOAuthKey,
+    queryFn: () => fns.getMcpOAuthStatus(),
+    staleTime: 5000,
+  })
+}
+
+export function useStartMcpOAuth() {
+  return useMutation({
+    mutationFn: (vars: { name: string; redirectUri: string }) => fns.startMcpOAuth({ data: vars }),
+  })
+}
+
+export function useDisconnectMcpServer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { name: string }) => fns.disconnectMcpServer({ data: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(sharedMcpKey, data.view)
+      qc.setQueryData(mcpOAuthKey, { connections: data.connections, errors: [] })
+      void qc.invalidateQueries({ queryKey: ['mcpConfig'] })
+    },
+  })
+}
+
 /**
  * Slash commands available in a composer. The files live on disk and the user
  * may add one while the page is open, so this is refetched rather than pinned.

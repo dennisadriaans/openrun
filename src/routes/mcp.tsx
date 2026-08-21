@@ -1,26 +1,34 @@
 /**
- * MCP servers — an editor over the agent CLIs' own config files.
+ * MCP servers — the shared registry, and what Open Run found in the CLIs.
  *
- * Nothing here is Open Run state: each card is one real file on disk
- * (`~/.claude.json`, `<repo>/.mcp.json`, `~/.codex/config.toml`, …), so a
- * server added here is the same one the user's own `claude` session sees. The
- * per-runtime file list comes from `lib/mcpTargets.ts`.
+ * Nothing here is Open Run state: a shared server is written into each CLI's
+ * own config file (`~/.claude.json`, `~/.codex/config.toml`, …), so it is the
+ * same server the user's own `claude` session sees.
  */
 import { createFileRoute } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Blocks,
+  ChevronDown,
+  ClipboardPaste,
   Download,
-  FileWarning,
   KeyRound,
+  Library,
+  LogIn,
   Pencil,
   Plus,
   RefreshCw,
-  Share2,
+  SlidersHorizontal,
   Trash2,
-  Wrench,
 } from 'lucide-react'
-import { Button, Card, EmptyState, Field, Modal, PageHeader, inputClass } from '../components/ui'
+import { Button, Card, Field, Modal, PageHeader, inputClass } from '../components/ui'
+import { parseMcpPaste } from '../lib/mcpPaste'
+import {
+  MCP_REGISTRY,
+  registryEntryAuthLabel,
+  registryEntrySummary,
+  registryEntryToServer,
+  type RegistryEntry,
+} from '../lib/mcpRegistry'
 import {
   MCP_TRANSPORT_KINDS,
   mcpServerRefusal,
@@ -35,32 +43,37 @@ import {
   type DiscoveredServer,
   type SharedSyncState,
 } from '../lib/mcpShared'
-import { OPENRUN_MCP_SERVER_NAME, OPENRUN_TOOLS } from '../lib/openrunTools'
 import {
+  useDisconnectMcpServer,
   useImportMcpServers,
-  useMcpConfig,
   useMcpDiscovery,
-  useProjects,
-  useRemoveMcpServer,
+  useMcpOAuth,
   useRemoveSharedMcpServer,
-  useRuntimes,
-  useSaveMcpServer,
   useSaveSharedMcpServer,
   useSharedMcp,
+  useStartMcpOAuth,
   useSyncSharedMcp,
-  useWorkspaces,
 } from '../lib/queries'
+import {
+  mcpOAuthRedirectUri,
+  mcpOAuthRefusal,
+  mcpOAuthStateLabel,
+  type McpOAuthState,
+  type McpOAuthView,
+} from '../lib/mcpOAuth'
 
 export const Route = createFileRoute('/mcp')({ component: McpPage })
-
-const openrunToolNames = OPENRUN_TOOLS.map((t) => t.name).join(', ')
-
-/** Sentinel `targetId` for a draft that belongs to the shared list. */
-const SHARED_TARGET_ID = '__shared__'
 
 /** `Claude Code — this machine` → `Claude Code`, for a per-CLI status chip. */
 function cliName(label: string): string {
   return label.split('—')[0]?.trim() ?? label
+}
+
+const AUTH_CHIP: Record<McpOAuthState, string> = {
+  connected: 'border-emerald-500/40 text-emerald-400',
+  expired: 'border-amber-500/40 text-amber-400',
+  pending: 'border-border text-tier-quaternary',
+  none: 'border-border text-tier-quaternary',
 }
 
 const SYNC_CHIP: Record<SharedSyncState, string> = {
@@ -73,7 +86,6 @@ const SYNC_CHIP: Record<SharedSyncState, string> = {
 }
 
 type ServerDraft = {
-  targetId: string
   previousName?: string
   name: string
   transport: McpTransportKind
@@ -84,17 +96,14 @@ type ServerDraft = {
   headers: string
 }
 
-function emptyDraft(targetId: string): ServerDraft {
-  return {
-    targetId,
-    name: '',
-    transport: 'stdio',
-    command: '',
-    args: '',
-    url: '',
-    env: '',
-    headers: '',
-  }
+const emptyDraft: ServerDraft = {
+  name: '',
+  transport: 'stdio',
+  command: '',
+  args: '',
+  url: '',
+  env: '',
+  headers: '',
 }
 
 /** `KEY=value` lines ⇄ the record every config format stores. */
@@ -130,9 +139,8 @@ function formatArgLine(args: string[] | undefined): string {
   return (args ?? []).map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')
 }
 
-function draftFromServer(targetId: string, server: McpServerConfig): ServerDraft {
+function draftFromServer(server: McpServerConfig): ServerDraft {
   return {
-    targetId,
     previousName: server.name,
     name: server.name,
     transport: server.transport,
@@ -167,36 +175,25 @@ function serverFromDraft(draft: ServerDraft): McpServerConfig {
 }
 
 function McpPage() {
-  const { data: runtimes } = useRuntimes()
-  const { data: projects } = useProjects()
-  const [runtimeId, setRuntimeId] = useState('')
-  const [workspaceId, setWorkspaceId] = useState('')
   const [draft, setDraft] = useState<ServerDraft | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-
-  const selectedRuntime = useMemo(() => {
-    if (runtimes && runtimes.length > 0) {
-      return runtimes.find((r) => r.id === runtimeId) ?? runtimes[0]
-    }
-    return undefined
-  }, [runtimes, runtimeId])
-
-  const { data: workspaces } = useWorkspaces()
-  const key = { runtimeId: selectedRuntime?.id ?? '', workspaceId: workspaceId || undefined }
-  const { data: config, isLoading } = useMcpConfig(key, { enabled: !!selectedRuntime })
-  const save = useSaveMcpServer(key)
-  const remove = useRemoveMcpServer(key)
+  const [pickedVariant, setPickedVariant] = useState<Record<string, string>>({})
+  const [pendingRemoval, setPendingRemoval] = useState<string>('')
+  const [showRegistry, setShowRegistry] = useState(false)
+  const [showPaste, setShowPaste] = useState(false)
+  const [connecting, setConnecting] = useState('')
 
   const { data: shared } = useSharedMcp()
   const { data: discovery } = useMcpDiscovery()
   const importServers = useImportMcpServers()
-  const [pickedVariant, setPickedVariant] = useState<Record<string, string>>({})
-  const [pendingRemoval, setPendingRemoval] = useState<string>('')
   const saveShared = useSaveSharedMcpServer()
   const removeShared = useRemoveSharedMcpServer()
   const syncShared = useSyncSharedMcp()
-  const sharedBusy =
+  const oauth = useMcpOAuth()
+  const startOAuth = useStartMcpOAuth()
+  const disconnect = useDisconnectMcpServer()
+  const busy =
     saveShared.isPending ||
     removeShared.isPending ||
     syncShared.isPending ||
@@ -210,10 +207,6 @@ function McpPage() {
     return blocked.length === 0 ? wrote : `${wrote}. Skipped: ${blocked[0]?.reason ?? ''}`
   }
 
-  const readyWorkspaces = (workspaces ?? []).filter((w) => w.status === 'ready')
-  const projectName = (projectId: string) =>
-    projects?.find((p) => p.id === projectId)?.name ?? 'Project'
-
   const submit = async () => {
     if (!draft) return
     const server = serverFromDraft(draft)
@@ -224,16 +217,30 @@ function McpPage() {
     }
     const previous = draft.previousName ? { previousName: draft.previousName } : {}
     try {
-      if (draft.targetId === SHARED_TARGET_ID) {
-        const { report } = await saveShared.mutateAsync({ server, ...previous })
-        setNotice(reportNotice(report))
-      } else {
-        await save.mutateAsync({ targetId: draft.targetId, server, ...previous })
-      }
+      const { report } = await saveShared.mutateAsync({ server, ...previous })
+      setNotice(reportNotice(report))
       setDraft(null)
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** Write a batch — a paste, or a library entry — into the shared registry. */
+  const install = async (servers: McpServerConfig[], onDone: () => void, connectAfter = '') => {
+    let written = 0
+    try {
+      for (const server of servers) {
+        const { report } = await saveShared.mutateAsync({ server })
+        written += report.written.length
+      }
+      onDone()
+      setNotice(
+        `Added ${servers.length} server${servers.length === 1 ? '' : 's'}, ${written} config file${written === 1 ? '' : 's'} updated. Restart any CLI session already open — it reads its config at startup.`,
+      )
+      if (connectAfter) void connect(connectAfter)
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -269,6 +276,56 @@ function McpPage() {
     }
   }
 
+  const connections = useMemo(() => {
+    const map = new Map<string, McpOAuthView>()
+    for (const view of oauth.data?.connections ?? []) map.set(view.name, view)
+    return map
+  }, [oauth.data])
+
+  /**
+   * Sign in as a full-page redirect rather than a popup: the vendor sends the
+   * browser back to `/api/mcp/oauth/callback`, which stores the token, writes
+   * it into every CLI config and returns here with the outcome in the query.
+   */
+  const connect = async (name: string) => {
+    setError('')
+    setNotice('')
+    setConnecting(name)
+    try {
+      const { authorizeUrl } = await startOAuth.mutateAsync({
+        name,
+        redirectUri: mcpOAuthRedirectUri(window.location.origin),
+      })
+      window.location.href = authorizeUrl
+    } catch (err) {
+      setConnecting('')
+      setNotice(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const dropConnection = async (name: string) => {
+    try {
+      await disconnect.mutateAsync({ name })
+      setNotice(`Disconnected ${name} and cleared its token from every CLI config.`)
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // The callback route redirects back with its outcome in the query string.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const connected = params.get('mcpConnected')
+    const failed = params.get('mcpAuthError')
+    if (!connected && !failed) return
+    setNotice(
+      connected
+        ? `Connected ${connected}. Its token is now in every CLI config — restart any session already open.`
+        : `Sign-in failed: ${failed}`,
+    )
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+
   const runSync = async (force: boolean) => {
     try {
       const { report } = await syncShared.mutateAsync({ ...(force ? { force: true } : {}) })
@@ -278,57 +335,68 @@ function McpPage() {
     }
   }
 
-  const addOpenrunTools = async (targetId: string) => {
-    const server = config?.openrunTools
-    if (!server) return
-    try {
-      await save.mutateAsync({ targetId, server })
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  const drop = async (targetId: string, name: string) => {
-    if (!confirm(`Remove "${name}" from this config file?`)) return
-    try {
-      await remove.mutateAsync({ targetId, name })
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
-    }
-  }
-
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
       <PageHeader
         title="MCP servers"
-        description="Define a server once under Shared and Open Run writes it into every CLI's own config, so any runtime can use it. Below that, each config file is editable on its own. Every turn spawns the CLI afresh, so a server added here is live on your next message — including in a chat that is already running."
+        description="Defined once, written into every CLI's own config."
+        actions={
+          <>
+            {hasConflict ? (
+              <Button
+                variant="default"
+                disabled={busy}
+                title="Replace the CLI's own entry of the same name with the shared one"
+                onClick={() => {
+                  if (confirm('Replace same-named servers in each CLI config with the shared one?'))
+                    void runSync(true)
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Overwrite
+              </Button>
+            ) : null}
+            {shared?.outOfSync ? (
+              <Button
+                variant="default"
+                disabled={busy}
+                title="Write every shared server into each CLI config again"
+                onClick={() => void runSync(false)}
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Sync
+              </Button>
+            ) : null}
+            <NewServerMenu
+              disabled={busy}
+              onPick={(choice) => {
+                setError('')
+                setNotice('')
+                if (choice === 'registry') setShowRegistry(true)
+                else if (choice === 'paste') setShowPaste(true)
+                else setDraft({ ...emptyDraft })
+              }}
+            />
+          </>
+        }
       />
+
+      {notice ? <div className="mb-3 text-ui-sm text-tier-tertiary">{notice}</div> : null}
 
       {(discovery?.servers.length ?? 0) > 0 ? (
         <Card className="mb-6 border-ring/40">
-          <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-ui-base text-foreground">
-                <Download className="h-3.5 w-3.5" /> Servers already in your CLIs
-              </div>
-              <div className="mt-0.5 text-ui-sm text-tier-tertiary">
-                Open Run found these in config files you already had. Import one and it joins the
-                shared list, then goes to every other CLI that can use it. Nothing is written to the
-                CLI it came from.
-              </div>
+          <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2 text-ui-base text-foreground">
+              <Download className="h-3.5 w-3.5" /> Found in your CLIs
             </div>
-            <div className="shrink-0">
-              <Button
-                variant="default"
-                disabled={sharedBusy}
-                title="Import every server whose copies agree across CLIs"
-                onClick={() =>
-                  void runImport((discovery?.servers ?? []).filter((entry) => !entry.ambiguous))
-                }
-              >
-                <Download className="h-3.5 w-3.5" /> Import all that agree
-              </Button>
-            </div>
+            <Button
+              variant="default"
+              disabled={busy}
+              title="Import every server whose copies agree across CLIs"
+              onClick={() =>
+                void runImport((discovery?.servers ?? []).filter((entry) => !entry.ambiguous))
+              }
+            >
+              Import all
+            </Button>
           </div>
 
           <div className="divide-y divide-[var(--border-quaternary)]">
@@ -338,23 +406,22 @@ function McpPage() {
                   <div className="flex items-baseline gap-2">
                     <span className="text-ui-base text-foreground">{entry.name}</span>
                     <span className="text-ui-xs text-tier-quaternary">
-                      {mcpTransportLabel(entry.variants[0]?.server.transport ?? 'stdio')}
+                      {discoveredOrigin(entry)}
                     </span>
+                    {entry.secretKeys.length > 0 ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-ui-xs text-amber-400"
+                        title={`Importing copies ${entry.secretKeys.join(', ')} into the other CLI configs on this machine`}
+                      >
+                        <KeyRound className="h-3 w-3 shrink-0" />
+                        {entry.secretKeys.join(', ')}
+                      </span>
+                    ) : null}
                   </div>
-                  <div className="mt-0.5 text-ui-sm text-tier-tertiary">
-                    {discoveredOrigin(entry)}
-                  </div>
-                  {entry.secretKeys.length > 0 ? (
-                    <div className="mt-0.5 flex items-center gap-1.5 text-ui-sm text-amber-400">
-                      <KeyRound className="h-3 w-3 shrink-0" />
-                      Carries {entry.secretKeys.join(', ')} — importing copies it into the other CLI
-                      configs on this machine.
-                    </div>
-                  ) : null}
                   {entry.ambiguous ? (
                     <div className="mt-1.5 flex flex-wrap items-center gap-2">
                       <span className="text-ui-sm text-amber-400">
-                        These configs disagree. Pick the one to keep:
+                        Configs disagree — pick one:
                       </span>
                       <select
                         className={inputClass}
@@ -378,11 +445,7 @@ function McpPage() {
                     </div>
                   )}
                 </div>
-                <Button
-                  variant="default"
-                  disabled={sharedBusy}
-                  onClick={() => void runImport([entry])}
-                >
+                <Button variant="default" disabled={busy} onClick={() => void runImport([entry])}>
                   Import
                 </Button>
               </div>
@@ -391,77 +454,15 @@ function McpPage() {
         </Card>
       ) : null}
 
-      <Card className="mb-6">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-ui-base text-foreground">
-              <Share2 className="h-3.5 w-3.5" /> Shared servers
-            </div>
-            <div className="mt-0.5 text-ui-sm text-tier-tertiary">
-              Defined once here and written into every CLI's machine-wide config, so a run picks
-              them up whichever runtime it uses. Removing one takes back only the copies Open Run
-              made.
-            </div>
-            <div className="mt-1 truncate mono text-ui-sm text-tier-quaternary">
-              {shared?.file ?? ''}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {hasConflict ? (
-              <Button
-                variant="default"
-                disabled={sharedBusy}
-                title="Replace the CLI's own entry of the same name with the shared one"
-                onClick={() => {
-                  if (confirm('Replace same-named servers in each CLI config with the shared one?'))
-                    void runSync(true)
-                }}
-              >
-                <RefreshCw className="h-3.5 w-3.5" /> Overwrite
-              </Button>
-            ) : null}
-            {shared?.outOfSync ? (
-              <Button
-                variant="default"
-                disabled={sharedBusy}
-                title="Write every shared server into each CLI config again"
-                onClick={() => void runSync(false)}
-              >
-                <RefreshCw className="h-3.5 w-3.5" /> Sync
-              </Button>
-            ) : null}
-            <Button
-              variant="default"
-              disabled={sharedBusy}
-              onClick={() => {
-                setError('')
-                setNotice('')
-                setDraft(emptyDraft(SHARED_TARGET_ID))
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" /> Add
-            </Button>
-          </div>
-        </div>
-
-        {notice ? (
-          <div className="border-b border-border px-4 py-2 text-ui-sm text-tier-tertiary">
-            {notice}
-          </div>
-        ) : null}
-
-        {(shared?.servers.length ?? 0) === 0 ? (
-          <div className="px-4 py-3 text-ui-sm text-tier-quaternary">
-            No shared servers yet. Adding one here writes it to{' '}
-            {(shared?.targets ?? [])
-              .filter((t) => t.installed)
-              .map((t) => cliName(t.label))
-              .join(', ') || 'every CLI you have set up'}
-            .
-          </div>
-        ) : (
-          <div className="divide-y divide-[var(--border-quaternary)]">
-            {(shared?.servers ?? []).map(({ server, targets }) => (
+      {(shared?.servers.length ?? 0) === 0 ? (
+        <div className="py-16 text-center text-ui-sm text-tier-quaternary">No servers yet.</div>
+      ) : (
+        <Card className="divide-y divide-[var(--border-quaternary)]">
+          {(shared?.servers ?? []).map(({ server, targets }) => {
+            const view = connections.get(server.name)
+            const managed = view?.state === 'connected' || view?.state === 'expired'
+            const refusal = mcpOAuthRefusal(server, managed)
+            return (
               <div key={server.name} className="group px-4 py-2.5">
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0">
@@ -476,13 +477,27 @@ function McpPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    {server.transport === 'stdio' ? null : (
+                      <Button
+                        variant="ghost"
+                        aria-label={`Connect ${server.name}`}
+                        disabled={connecting === server.name || Boolean(refusal)}
+                        title={
+                          refusal ??
+                          "Sign in once here; Open Run keeps the token in every CLI's config"
+                        }
+                        onClick={() => void connect(server.name)}
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       aria-label={`Edit ${server.name}`}
                       onClick={() => {
                         setError('')
                         setNotice('')
-                        setDraft(draftFromServer(SHARED_TARGET_ID, server))
+                        setDraft(draftFromServer(server))
                       }}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -496,7 +511,24 @@ function McpPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-1">
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {view ? (
+                    <span
+                      className={`rounded border px-1.5 py-0.5 text-ui-xs ${AUTH_CHIP[view.state]}`}
+                      title={`Signed in at ${view.issuer}. Open Run holds the token and refreshes it.`}
+                    >
+                      {mcpOAuthStateLabel(view)}
+                    </span>
+                  ) : null}
+                  {view ? (
+                    <button
+                      type="button"
+                      className="rounded border border-border px-1.5 py-0.5 text-ui-xs text-tier-quaternary hover:text-foreground"
+                      onClick={() => void dropConnection(server.name)}
+                    >
+                      Disconnect
+                    </button>
+                  ) : null}
                   {targets
                     .filter((t) => t.installed)
                     .map((t) => (
@@ -510,178 +542,65 @@ function McpPage() {
                     ))}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Field label="Runtime">
-          <select
-            className={inputClass}
-            value={selectedRuntime?.id ?? ''}
-            onChange={(e) => setRuntimeId(e.target.value)}
-          >
-            {(runtimes ?? []).map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Workspace" hint="for project-scoped files">
-          <select
-            className={inputClass}
-            value={workspaceId}
-            onChange={(e) => setWorkspaceId(e.target.value)}
-          >
-            <option value="">None</option>
-            {readyWorkspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {projectName(w.projectId)} · {w.branch || w.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-
-      {config?.refusal ? (
-        <EmptyState icon={<Blocks className="h-5 w-5" />} title="No MCP config for this runtime">
-          {config.refusal}
-        </EmptyState>
-      ) : isLoading ? (
-        <div className="py-16 text-center text-ui-base text-tier-tertiary">Loading…</div>
-      ) : (
-        <div className="space-y-4">
-          {(config?.targets ?? []).map((target) => (
-            <Card key={target.id}>
-              <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-3">
-                <div className="min-w-0">
-                  <div className="text-ui-base text-foreground">{target.label}</div>
-                  <div className="mt-0.5 text-ui-sm text-tier-tertiary">{target.description}</div>
-                  <div className="mt-1 truncate mono text-ui-sm text-tier-quaternary">
-                    {target.file || 'no workspace selected'}
-                    {target.file && !target.exists ? ' · not created yet' : ''}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {config?.openrunTools &&
-                  !target.servers.some((s) => s.name === OPENRUN_MCP_SERVER_NAME) ? (
-                    <Button
-                      variant="default"
-                      disabled={!!target.refusal || save.isPending}
-                      title={`Give the agent Open Run's own tools: ${openrunToolNames}`}
-                      onClick={() => addOpenrunTools(target.id)}
-                    >
-                      <Wrench className="h-3.5 w-3.5" /> Open Run tools
-                    </Button>
-                  ) : null}
-                  <Button
-                    variant="default"
-                    disabled={!!target.refusal}
-                    title={target.refusal ?? `Add a server to ${target.label}`}
-                    onClick={() => {
-                      setError('')
-                      setDraft(emptyDraft(target.id))
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add
-                  </Button>
-                </div>
-              </div>
-
-              {target.refusal ? (
-                <div className="flex items-center gap-2 px-4 py-3 text-ui-sm text-tier-tertiary">
-                  <FileWarning className="h-3.5 w-3.5 shrink-0" />
-                  {target.refusal}
-                </div>
-              ) : target.servers.length === 0 ? (
-                <div className="px-4 py-3 text-ui-sm text-tier-quaternary">No servers yet.</div>
-              ) : (
-                <div className="divide-y divide-[var(--border-quaternary)]">
-                  {target.servers.map((server) => (
-                    <div
-                      key={server.name}
-                      className="group flex items-center justify-between gap-4 px-4 py-2.5"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-ui-base text-foreground">{server.name}</span>
-                          <span className="text-ui-xs text-tier-quaternary">
-                            {mcpTransportLabel(server.transport)}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 truncate mono text-ui-sm text-tier-quaternary">
-                          {mcpServerSummary(server)}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                        <Button
-                          variant="ghost"
-                          aria-label={`Edit ${server.name}`}
-                          onClick={() => {
-                            setError('')
-                            setDraft(draftFromServer(target.id, server))
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          aria-label={`Remove ${server.name}`}
-                          onClick={() => drop(target.id, server.name)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
+            )
+          })}
+        </Card>
       )}
 
       {pendingRemoval ? (
         <Modal title={`Remove ${pendingRemoval}`} onClose={() => setPendingRemoval('')}>
-          <div className="space-y-3 p-4">
-            <p className="text-ui-sm text-tier-secondary">
-              <strong className="text-foreground">Open Run only</strong> stops sharing it and leaves
-              every CLI config exactly as it is — the right choice for a server you imported.
-            </p>
-            <p className="text-ui-sm text-tier-secondary">
-              <strong className="text-foreground">Remove everywhere</strong> also deletes the copies
-              Open Run wrote. Entries it did not write are never touched.
-            </p>
-            <div className="flex flex-wrap justify-end gap-2 pt-1">
-              <Button variant="default" onClick={() => setPendingRemoval('')}>
-                Cancel
-              </Button>
-              <Button
-                variant="default"
-                disabled={sharedBusy}
-                onClick={() => void dropShared(pendingRemoval, 'registry')}
-              >
-                Open Run only
-              </Button>
-              <Button
-                variant="danger"
-                disabled={sharedBusy}
-                onClick={() => void dropShared(pendingRemoval, 'everywhere')}
-              >
-                Remove everywhere
-              </Button>
-            </div>
+          <div className="flex flex-wrap justify-end gap-2 p-4">
+            <Button variant="default" onClick={() => setPendingRemoval('')}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              disabled={busy}
+              title="Stop sharing it and leave every CLI config as it is"
+              onClick={() => void dropShared(pendingRemoval, 'registry')}
+            >
+              Open Run only
+            </Button>
+            <Button
+              variant="danger"
+              disabled={busy}
+              title="Also delete the copies Open Run wrote; entries it did not write are untouched"
+              onClick={() => void dropShared(pendingRemoval, 'everywhere')}
+            >
+              Everywhere
+            </Button>
           </div>
         </Modal>
+      ) : null}
+
+      {showRegistry ? (
+        <RegistryModal
+          installed={new Set((shared?.servers ?? []).map((s) => s.server.name))}
+          busy={busy}
+          onClose={() => setShowRegistry(false)}
+          onInstall={(server, entry) =>
+            void install(
+              [server],
+              () => setShowRegistry(false),
+              entry.auth === 'oauth' ? server.name : '',
+            )
+          }
+        />
+      ) : null}
+
+      {showPaste ? (
+        <PasteModal
+          busy={busy}
+          onClose={() => setShowPaste(false)}
+          onInstall={(servers) => void install(servers, () => setShowPaste(false))}
+        />
       ) : null}
 
       {draft ? (
         <ServerModal
           value={draft}
           error={error}
-          saving={save.isPending || saveShared.isPending}
+          saving={saveShared.isPending}
           onChange={setDraft}
           onClose={() => {
             setDraft(null)
@@ -797,6 +716,234 @@ function ServerModal({
           </Button>
           <Button variant="primary" disabled={saving} onClick={onSave}>
             {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+const menuItem =
+  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-base text-foreground transition-colors hover:bg-hover'
+
+function NewServerMenu({
+  disabled,
+  onPick,
+}: {
+  disabled: boolean
+  onPick: (choice: 'registry' | 'paste' | 'manual') => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const pick = (choice: 'registry' | 'paste' | 'manual') => {
+    setOpen(false)
+    onPick(choice)
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button
+        variant="primary"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Plus className="h-3.5 w-3.5" /> New
+        <ChevronDown className="h-3.5 w-3.5" />
+      </Button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1.5 min-w-52 rounded-xl border border-border bg-elevated p-1.5 shadow-2xl shadow-[var(--shadow-primary)]"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={menuItem}
+            onClick={() => pick('registry')}
+          >
+            <Library className="h-3.5 w-3.5" /> Browse registry
+          </button>
+          <button type="button" role="menuitem" className={menuItem} onClick={() => pick('paste')}>
+            <ClipboardPaste className="h-3.5 w-3.5" /> Add mcp.json
+          </button>
+          <button type="button" role="menuitem" className={menuItem} onClick={() => pick('manual')}>
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Enter details
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function RegistryModal({
+  installed,
+  busy,
+  onClose,
+  onInstall,
+}: {
+  installed: Set<string>
+  busy: boolean
+  onClose: () => void
+  onInstall: (server: McpServerConfig, entry: RegistryEntry) => void
+}) {
+  const [openId, setOpenId] = useState('')
+  const [values, setValues] = useState<Record<string, string>>({})
+
+  const start = (entry: RegistryEntry) => {
+    if ((entry.secrets ?? []).length === 0) {
+      onInstall(registryEntryToServer(entry), entry)
+      return
+    }
+    setOpenId(entry.id === openId ? '' : entry.id)
+  }
+
+  return (
+    <Modal title="Registry" onClose={onClose} wide>
+      <div className="divide-y divide-[var(--border-quaternary)]">
+        {MCP_REGISTRY.map((entry) => {
+          const already = installed.has(entry.name)
+          const expanded = openId === entry.id
+          return (
+            <div key={entry.id} className="py-2.5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-ui-base text-foreground">{entry.name}</span>
+                    <span className="text-ui-xs text-tier-quaternary">
+                      {mcpTransportLabel(entry.transport)}
+                    </span>
+                    <span className="text-ui-xs text-tier-quaternary">
+                      · {registryEntryAuthLabel(entry)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-ui-sm text-tier-tertiary">{entry.summary}</div>
+                  <div className="mt-0.5 truncate mono text-ui-sm text-tier-quaternary">
+                    {registryEntrySummary(entry)}
+                  </div>
+                </div>
+                <Button
+                  variant={expanded ? 'primary' : 'default'}
+                  disabled={busy || already}
+                  title={already ? 'Already shared' : `Add ${entry.name} to every CLI`}
+                  onClick={() =>
+                    expanded ? onInstall(registryEntryToServer(entry, values), entry) : start(entry)
+                  }
+                >
+                  {already ? 'Added' : expanded ? 'Install' : 'Add'}
+                </Button>
+              </div>
+
+              {entry.auth === 'oauth' ? (
+                <div className="mt-1 text-ui-sm text-tier-quaternary">
+                  No token to paste — Open Run opens {entry.name}'s sign-in page after you add it,
+                  and writes the token into every CLI config.
+                </div>
+              ) : null}
+
+              {expanded ? (
+                <div className="mt-2 space-y-2">
+                  {(entry.secrets ?? []).map((secret) => (
+                    <Field
+                      key={secret.key}
+                      label={secret.label}
+                      hint={secret.hint ?? `blank = read \${${secret.key}} from your environment`}
+                    >
+                      <input
+                        className={`${inputClass} mono`}
+                        type="password"
+                        value={values[secret.key] ?? ''}
+                        onChange={(e) =>
+                          setValues((prev) => ({ ...prev, [secret.key]: e.target.value }))
+                        }
+                        placeholder={`\${${secret.key}}`}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    </Modal>
+  )
+}
+
+function PasteModal({
+  busy,
+  onClose,
+  onInstall,
+}: {
+  busy: boolean
+  onClose: () => void
+  onInstall: (servers: McpServerConfig[]) => void
+}) {
+  const [text, setText] = useState('')
+  const result = useMemo(() => parseMcpPaste(text), [text])
+
+  return (
+    <Modal title="Add mcp.json" onClose={onClose} wide>
+      <div className="space-y-3">
+        <div className="chat-code" data-wrap="true">
+          <div className="chat-code__header">
+            <span className="text-ui-xs text-tier-quaternary">
+              mcpServers, VS Code servers, or a Codex [mcp_servers] table
+            </span>
+          </div>
+          <textarea
+            className="chat-code__body w-full resize-y border-0 bg-transparent outline-none"
+            rows={12}
+            spellCheck={false}
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={
+              '{\n  "mcpServers": {\n    "github": {\n      "type": "http",\n      "url": "https://api.githubcopilot.com/mcp/"\n    }\n  }\n}'
+            }
+          />
+        </div>
+
+        {result.error ? <div className="text-ui-sm text-danger">{result.error}</div> : null}
+        {result.servers.length > 0 ? (
+          <div className="text-ui-sm text-tier-tertiary">
+            {result.servers.map((s) => s.name).join(', ')} — written into every CLI's own config.
+          </div>
+        ) : null}
+        {result.warnings.map((warning) => (
+          <div key={warning} className="text-ui-sm text-amber-400">
+            {warning}
+          </div>
+        ))}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || result.servers.length === 0}
+            onClick={() => onInstall(result.servers)}
+          >
+            {busy ? 'Adding…' : `Add ${result.servers.length || ''}`.trim()}
           </Button>
         </div>
       </div>

@@ -198,6 +198,36 @@ TOKEN = "t"
     ])
   })
 
+  it('reads Grok headers and Codex http_headers', () => {
+    const grok = `[mcp_servers.stripe]
+url = "https://mcp.stripe.com"
+headers = { Authorization = "Bearer t" }
+`
+    assert.deepEqual(parseTomlMcpServers(grok), [
+      {
+        name: 'stripe',
+        transport: 'http',
+        url: 'https://mcp.stripe.com',
+        headers: { Authorization: 'Bearer t' },
+      },
+    ])
+    const codex = `[mcp_servers.stripe]
+url = "https://mcp.stripe.com"
+http_headers = { Authorization = "Bearer t" }
+`
+    assert.equal(parseTomlMcpServers(codex)[0]?.headers?.Authorization, 'Bearer t')
+  })
+
+  it('reads headers written as a sub-table', () => {
+    const toml = `[mcp_servers.stripe]
+url = "https://mcp.stripe.com"
+
+[mcp_servers.stripe.http_headers]
+Authorization = "Bearer t"
+`
+    assert.equal(parseTomlMcpServers(toml)[0]?.headers?.Authorization, 'Bearer t')
+  })
+
   it('ignores unrelated tables', () => {
     assert.deepEqual(parseTomlMcpServers('[tui]\ntheme = "dark"\n'), [])
   })
@@ -253,6 +283,20 @@ TOKEN = "t"
       args: ['he said "hi"'],
     })
     assert.deepEqual(parseTomlMcpServers(next)[0]?.args, ['he said "hi"'])
+  })
+
+  it('writes Codex http_headers by default and Grok headers when asked', () => {
+    const server = {
+      name: 'stripe',
+      transport: 'http' as const,
+      url: 'https://mcp.stripe.com',
+      headers: { Authorization: 'Bearer t' },
+    }
+    const codex = upsertTomlMcpServer('', server)
+    assert.match(codex, /http_headers = \{ Authorization = "Bearer t" \}/)
+    const grok = upsertTomlMcpServer('', server, 'mcp_servers', { headerKey: 'headers' })
+    assert.match(grok, /^headers = \{ Authorization = "Bearer t" \}$/m)
+    assert.doesNotMatch(grok, /http_headers/)
   })
 })
 

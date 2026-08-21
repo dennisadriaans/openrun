@@ -127,6 +127,18 @@ export const importMcpServers = createServerFn({ method: 'POST' })
   .validator((d: { choices: { name: string; fromTargetId: string }[] }) => d)
   .handler(async ({ data }) => (await core()).importMcpServersConfig(data))
 
+export const getMcpOAuthStatus = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getMcpOAuthStatus(),
+)
+
+export const startMcpOAuth = createServerFn({ method: 'POST' })
+  .validator((d: { name: string; redirectUri: string }) => d)
+  .handler(async ({ data }) => (await core()).startMcpOAuth(data))
+
+export const disconnectMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { name: string }) => d)
+  .handler(async ({ data }) => (await core()).disconnectMcpServer(data))
+
 export const syncSharedMcp = createServerFn({ method: 'POST' })
   .validator((d: { force?: boolean }) => d)
   .handler(async ({ data }) => (await core()).syncSharedMcpConfig(data))

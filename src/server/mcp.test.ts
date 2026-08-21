@@ -174,6 +174,23 @@ describe('saveMcpServer', () => {
     assert.match(trust, /trusted = true/)
   })
 
+  it('writes HTTP headers under the key each TOML host reads', () => {
+    const stripe = {
+      name: 'stripe',
+      transport: 'http' as const,
+      url: 'https://mcp.stripe.com',
+      headers: { Authorization: 'Bearer t' },
+    }
+    saveMcpServer({ bin: 'grok', targetId: 'grok-user', server: stripe })
+    const grok = readFileSync(join(home, '.grok', 'config.toml'), 'utf8')
+    assert.match(grok, /^headers = \{ Authorization = "Bearer t" \}$/m)
+    assert.doesNotMatch(grok, /http_headers/)
+
+    saveMcpServer({ bin: 'codex', targetId: 'codex-user', server: stripe })
+    const codex = readFileSync(join(home, '.codex', 'config.toml'), 'utf8')
+    assert.match(codex, /http_headers = \{ Authorization = "Bearer t" \}/)
+  })
+
   it('records a workspace server as approved so an unattended Claude run may use it', () => {
     writeFileSync(join(home, '.claude.json'), JSON.stringify({ projects: {} }))
     saveMcpServer({ bin: 'claude', targetId: 'claude-project', cwd: workspace, server: linear })

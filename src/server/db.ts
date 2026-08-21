@@ -853,6 +853,34 @@ function migrate(db: Database.Database) {
     -- One row per CLI history file we have already totalled up, so the Usage
     -- page re-reads only what changed since the last scan. version bumps
     -- when the parser or the price table changes. Pure cache: safe to delete.
+    -- OAuth for a hosted MCP server, run by Open Run instead of by each CLI.
+    -- The vendors publish RFC 9728/8414 metadata and accept dynamic client
+    -- registration, so there is no vendor secret here: 'clientId' is one we
+    -- registered ourselves. Access, refresh, clientSecret and pendingVerifier
+    -- are AES-GCM sealed with ~/.openrun/data-key, which is not in this file.
+    -- The access token is copied into every CLI config as an Authorization
+    -- header, which is also why refreshing it rewrites those files.
+    -- 'pendingState'/'pendingVerifier' hold one PKCE flow in progress and are
+    -- cleared the moment it lands.
+    CREATE TABLE IF NOT EXISTS mcp_oauth (
+      name TEXT PRIMARY KEY,
+      resource TEXT NOT NULL,
+      issuer TEXT NOT NULL,
+      authorizationEndpoint TEXT NOT NULL,
+      tokenEndpoint TEXT NOT NULL,
+      registrationEndpoint TEXT NOT NULL DEFAULT '',
+      revocationEndpoint TEXT NOT NULL DEFAULT '',
+      clientId TEXT NOT NULL DEFAULT '',
+      clientSecret TEXT NOT NULL DEFAULT '',
+      redirectUri TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT '',
+      accessToken TEXT NOT NULL DEFAULT '',
+      refreshToken TEXT NOT NULL DEFAULT '',
+      expiresAt INTEGER NOT NULL DEFAULT 0,
+      pendingState TEXT NOT NULL DEFAULT '',
+      pendingVerifier TEXT NOT NULL DEFAULT '',
+      updatedAt INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS usage_file_cache (
       path TEXT PRIMARY KEY,
       kind TEXT NOT NULL,

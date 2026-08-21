@@ -275,6 +275,7 @@ export function writeServer(
       target.file,
       upsertTomlMcpServer(cleaned, server, target.table, {
         ...(target.enabledFlag ? { enabledFlag: true } : {}),
+        ...(target.headerKey ? { headerKey: target.headerKey } : {}),
       }),
     )
     if (target.needsFolderTrust && options.cwd) trustGrokFolder(options.cwd)

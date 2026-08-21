@@ -35,6 +35,7 @@ describe('mcpTargetsFor', () => {
       ['grok-user', 'grok-project'],
     )
     assert.ok(targets.every((t) => t.enabledFlag))
+    assert.ok(targets.every((t) => t.headerKey === 'headers'))
     assert.equal(targets[1]?.needsFolderTrust, true)
   })
 

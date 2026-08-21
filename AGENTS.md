@@ -102,6 +102,14 @@ Neither hook may open an `EventSource` of its own.
   The same middleware runs `hostHeaderRefusal()` **before** the token check: on a
   loopback bind, a request that addresses us by a non-loopback name is a rebound
   DNS answer, and it is refused whether or not a token is configured.
+- **Hard rules for secrets.** Anything that can be presented to a vendor or
+  used as a login lives hashed or AES-GCM sealed, never as a SQLite column in
+  the clear. The wrapping key is `~/.openrun/data-key`, not a row. Unwrap at
+  the call site that talks to the vendor. List RPCs strip APNs tokens. MCP
+  OAuth tokens are sealed in `mcp_oauth` and copied into CLI config files
+  (those files stay plaintext because the CLI reads them). Do not log
+  unwrapped secrets. Do not add `process.env` reads in client-bundled `lib/`
+  modules other than `openrunEnv.ts`.
 - **Open core: no local feature may consult the edition.** `lib/edition.ts` is the seam the
   commercial control plane attaches to, and it only ever *adds* surfaces. `lib/edition.test.ts`
   walks `src/` and fails the build if anything outside that module references it. If you are
@@ -167,6 +175,7 @@ Neither hook may open an `EventSource` of its own.
 | Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
 | Chat transcript / composer pickers | `components/Chat.tsx`, `components/ComposerControls.tsx` |
 | MCP servers: which config file, and editing it | `lib/mcpTargets.ts` (where they live per CLI) → `lib/mcp.ts` (shapes, JSON + TOML editors) → `server/mcp.ts` (the IO); UI in `routes/mcp.tsx` |
+| Signing in to an OAuth-gated MCP server | `lib/mcpOAuth.ts` (RFC 9728/8414 URL candidates, refresh skew, refusal, header) → `server/mcpOAuth.ts` (discovery, dynamic client registration, PKCE, token, fan-out, refresh timer) → `routes/api/mcp/oauth/callback.ts` (vendor redirect); UI in `routes/mcp.tsx`. One sign-in writes `Authorization: Bearer` onto the shared server — there is no per-CLI `mcp login` / pty path. |
 | One server, every CLI: the shared registry and its fan-out | `lib/mcpShared.ts` (sync states) → `server/mcpShared.ts` (`~/.openrun/mcp.json`, ownership manifest, projection into `SHARED_MCP_TARGETS`) |
 | Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
 | Slash commands | `lib/slashCommands.ts` (parsing, app commands), `server/slashCommands.ts` (discovery on disk), `components/SlashCommandMenu.tsx` |
@@ -178,6 +187,7 @@ Neither hook may open an `EventSource` of its own.
 | Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
 | Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` |
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
+| Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree `internal/SECRETS.md` |
 | Open-core boundary (what is free vs. commercial) | `lib/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |
 | Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `components/ui.tsx` |

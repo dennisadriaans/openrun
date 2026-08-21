@@ -32,6 +32,7 @@ import { Route as ApiMobileDashboardRouteImport } from './routes/api/mobile/dash
 import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
 import { Route as ApiMobilePairRouteImport } from './routes/api/mobile/pair'
 import { Route as ApiMobileUnpairRouteImport } from './routes/api/mobile/unpair'
+import { Route as ApiMcpOauthCallbackRouteImport } from './routes/api/mcp/oauth/callback'
 import { Route as ApiMobileActivityStreamRouteImport } from './routes/api/mobile/activity.stream'
 import { Route as ApiMobilePushRegisterRouteImport } from './routes/api/mobile/push.register'
 import { Route as ApiMobileRunsIndexRouteImport } from './routes/api/mobile/runs/index'
@@ -165,6 +166,11 @@ const ApiMobileUnpairRoute = ApiMobileUnpairRouteImport.update({
   path: '/api/mobile/unpair',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMcpOauthCallbackRoute = ApiMcpOauthCallbackRouteImport.update({
+  id: '/api/mcp/oauth/callback',
+  path: '/api/mcp/oauth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileActivityStreamRoute = ApiMobileActivityStreamRouteImport.update({
   id: '/api/mobile/activity/stream',
   path: '/api/mobile/activity/stream',
@@ -282,6 +288,7 @@ export interface FileRoutesByFullPath {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
+  '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
@@ -323,6 +330,7 @@ export interface FileRoutesByTo {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
+  '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
@@ -366,6 +374,7 @@ export interface FileRoutesById {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
+  '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
@@ -410,6 +419,7 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
+    | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
     | '/api/runs/$runId/stream'
@@ -451,6 +461,7 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
+    | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
     | '/api/runs/$runId/stream'
@@ -493,6 +504,7 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
+    | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
     | '/api/runs/$runId/stream'
@@ -534,6 +546,7 @@ export interface RootRouteChildren {
   ApiMobileMeRoute: typeof ApiMobileMeRoute
   ApiMobilePairRoute: typeof ApiMobilePairRoute
   ApiMobileUnpairRoute: typeof ApiMobileUnpairRoute
+  ApiMcpOauthCallbackRoute: typeof ApiMcpOauthCallbackRoute
   ApiMobileActivityStreamRoute: typeof ApiMobileActivityStreamRoute
   ApiMobilePushRegisterRoute: typeof ApiMobilePushRegisterRoute
   ApiRunsRunIdStreamRoute: typeof ApiRunsRunIdStreamRoute
@@ -712,6 +725,13 @@ declare module '@tanstack/react-router' {
       path: '/api/mobile/unpair'
       fullPath: '/api/mobile/unpair'
       preLoaderRoute: typeof ApiMobileUnpairRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mcp/oauth/callback': {
+      id: '/api/mcp/oauth/callback'
+      path: '/api/mcp/oauth/callback'
+      fullPath: '/api/mcp/oauth/callback'
+      preLoaderRoute: typeof ApiMcpOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/mobile/activity/stream': {
@@ -900,6 +920,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileMeRoute: ApiMobileMeRoute,
   ApiMobilePairRoute: ApiMobilePairRoute,
   ApiMobileUnpairRoute: ApiMobileUnpairRoute,
+  ApiMcpOauthCallbackRoute: ApiMcpOauthCallbackRoute,
   ApiMobileActivityStreamRoute: ApiMobileActivityStreamRoute,
   ApiMobilePushRegisterRoute: ApiMobilePushRegisterRoute,
   ApiRunsRunIdStreamRoute: ApiRunsRunIdStreamRoute,

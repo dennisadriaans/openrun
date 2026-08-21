@@ -17,7 +17,12 @@
  */
 import { modelKindForBin, type RuntimeModelKind } from './models.ts'
 import { isAcpTransport } from './acpTransport.ts'
-import { mcpTransportLabel, type McpJsonDialect, type McpTransportKind } from './mcp.ts'
+import {
+  mcpTransportLabel,
+  type McpJsonDialect,
+  type McpTransportKind,
+  type TomlHeaderKey,
+} from './mcp.ts'
 
 export type McpConfigFormat = 'json' | 'toml'
 
@@ -41,6 +46,8 @@ export type McpTarget = {
   table?: string
   /** Host reads an explicit `enabled` key instead of table presence (Grok). */
   enabledFlag?: boolean
+  /** Codex `http_headers`; Grok `headers` — the other is ignored. */
+  headerKey?: TomlHeaderKey
   /** Host only starts this file's servers once the folder is trusted (Grok). */
   needsFolderTrust?: boolean
   /**
@@ -107,6 +114,7 @@ const GROK_USER: McpTarget = {
   pointer: [],
   table: 'mcp_servers',
   enabledFlag: true,
+  headerKey: 'headers',
   supports: ['stdio', 'http'],
   presence: ['.grok'],
   description:
@@ -122,6 +130,7 @@ const GROK_PROJECT: McpTarget = {
   pointer: [],
   table: 'mcp_servers',
   enabledFlag: true,
+  headerKey: 'headers',
   needsFolderTrust: true,
   supports: ['stdio', 'http'],
   description:
