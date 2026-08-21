@@ -824,6 +824,10 @@ function migrate(db: Database.Database) {
       path TEXT PRIMARY KEY,
       deletedAt INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS deleted_runtime_ids (
+      id TEXT PRIMARY KEY,
+      deletedAt INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS turn_events (
       id TEXT PRIMARY KEY,
       messageId TEXT NOT NULL,
@@ -846,10 +850,6 @@ function migrate(db: Database.Database) {
       models TEXT NOT NULL,
       updatedAt INTEGER NOT NULL
     );
-  `)
-}
-
-function backfillId(prefix: string) {
     -- One row per CLI history file we have already totalled up, so the Usage
     -- page re-reads only what changed since the last scan. version bumps
     -- when the parser or the price table changes. Pure cache: safe to delete.
@@ -862,6 +862,10 @@ function backfillId(prefix: string) {
       stats TEXT NOT NULL,
       updatedAt INTEGER NOT NULL
     );
+  `)
+}
+
+function backfillId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 }
 
@@ -1038,6 +1042,26 @@ export function forgetDeletedProjectPath(projectPath: string): void {
   getDb().prepare('DELETE FROM deleted_project_paths WHERE path = ?').run(projectPath)
 }
 
+/** Remember a builtin id so boot seed will not recreate a deleted runtime. */
+export function rememberDeletedRuntimeId(runtimeId: string): void {
+  getDb()
+    .prepare('INSERT OR REPLACE INTO deleted_runtime_ids (id, deletedAt) VALUES (?, ?)')
+    .run(runtimeId, Date.now())
+}
+
+/** Allow an explicitly re-added runtime id to be seeded / saved again. */
+export function forgetDeletedRuntimeId(runtimeId: string): void {
+  getDb().prepare('DELETE FROM deleted_runtime_ids WHERE id = ?').run(runtimeId)
+}
+
+function deletedRuntimeIdSet(db: Database.Database): Set<string> {
+  return new Set(
+    (db.prepare('SELECT id FROM deleted_runtime_ids').all() as Array<{ id: string }>).map(
+      (row) => row.id,
+    ),
+  )
+}
+
 /** Map gallery presets → DB seed rows (canOpenPrs stays at column default 0). */
 function builtinRuntimeSeeds(): Array<Omit<RuntimeRow, 'createdAt' | 'canOpenPrs'>> {
   return RUNTIME_PRESETS.map((p) => ({
@@ -1068,8 +1092,12 @@ function seedRuntimes(db: Database.Database) {
 
   // canOpenPrs is omitted here — it falls back to the column's DEFAULT 0, so
   // seeded runtimes ship without PR-opening rights until a user opts in.
+  const deleted = deletedRuntimeIdSet(db)
   const tx = db.transaction(() => {
-    for (const r of builtinRuntimeSeeds()) insert.run({ ...r, createdAt: now })
+    for (const r of builtinRuntimeSeeds()) {
+      if (deleted.has(r.id)) continue
+      insert.run({ ...r, createdAt: now })
+    }
   })
   tx()
 }
@@ -1088,9 +1116,10 @@ function ensureBuiltinRuntimeSeeds(db: Database.Database) {
      VALUES (@id, @label, @bin, @argsTemplate, @promptViaStdin, @description, @enabled, @transport, @createdAt)`,
   )
 
+  const deleted = deletedRuntimeIdSet(db)
   const tx = db.transaction(() => {
     for (const r of builtinRuntimeSeeds()) {
-      if (exists.get(r.id)) continue
+      if (exists.get(r.id) || deleted.has(r.id)) continue
       insert.run({ ...r, createdAt: now })
     }
   })

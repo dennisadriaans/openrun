@@ -18,7 +18,7 @@ import {
   type RuntimeTransport,
 } from '../lib/acpTransport'
 import { modelKindForBin } from '../lib/models'
-import { useCommandPreview, useRuntimes } from '../lib/queries'
+import { useCommandPreview, usePresetBins, useRuntimes } from '../lib/queries'
 import { CommandPreview } from '../components/CommandPreview'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
@@ -75,11 +75,16 @@ function formatArgsPreview(argsTemplate: string): string {
 
 function RuntimesPage() {
   const { data: runtimes, isLoading } = useRuntimes()
+  const { data: presetBins } = usePresetBins()
   const qc = useQueryClient()
   const [editing, setEditing] = useState<RuntimeForm | null>(null)
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['runtimes'] })
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['runtimes'] })
+    void qc.invalidateQueries({ queryKey: ['presetBins'] })
+  }
   const existingIds = new Set(runtimes?.map((r) => r.id) ?? [])
+  const binOnPath = new Map((presetBins ?? []).map((b) => [b.bin, b.installed]))
 
   const save = async (form: RuntimeForm) => {
     if (!isValidArgsTemplate(form.argsTemplate)) {
@@ -116,11 +121,12 @@ function RuntimesPage() {
       <section className="mb-6">
         <h2 className="mb-2 text-sm font-medium text-tier-secondary">Presets</h2>
         <p className="mb-3 text-ui-sm text-tier-tertiary">
-          One-click known-good headless templates. First-class: Claude, Codex, Grok. Generic:
-          Gemini.
+          One-click known-good headless templates for CLIs on this machine.
         </p>
         <div className="flex flex-wrap gap-2">
-          {RUNTIME_PRESETS.map((preset) => {
+          {RUNTIME_PRESETS.filter(
+            (preset) => existingIds.has(preset.id) || binOnPath.get(preset.bin) === true,
+          ).map((preset) => {
             const installed = existingIds.has(preset.id)
             return (
               <Button
