@@ -74,7 +74,7 @@
     "@biomejs/biome": "2.5.8",
     "@tanstack/devtools-vite": "^0.8.3",
     "@tanstack/router-cli": "^1.167.27",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.2.0",
     "@types/node-cron": "^3.0.11",
     "@types/qrcode": "^1.5.5",
