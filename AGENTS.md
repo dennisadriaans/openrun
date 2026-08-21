@@ -166,7 +166,12 @@ Neither hook may open an `EventSource` of its own.
 | SSE reconnect, heartbeat watchdog, dev connection overlay | `lib/liveStream.ts`; `components/DevLiveStatus.tsx` (dev-only, mounted in `routes/__root.tsx`) |
 | Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
 | Chat transcript / composer pickers | `components/Chat.tsx`, `components/ComposerControls.tsx` |
+| MCP servers: which config file, and editing it | `lib/mcpTargets.ts` (where they live per CLI) → `lib/mcp.ts` (shapes, JSON + TOML editors) → `server/mcp.ts` (the IO); UI in `routes/mcp.tsx` |
+| One server, every CLI: the shared registry and its fan-out | `lib/mcpShared.ts` (sync states) → `server/mcpShared.ts` (`~/.openrun/mcp.json`, ownership manifest, projection into `SHARED_MCP_TARGETS`) |
+| Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
+| Slash commands | `lib/slashCommands.ts` (parsing, app commands), `server/slashCommands.ts` (discovery on disk), `components/SlashCommandMenu.tsx` |
 | Assistant prose: markdown, code fences, file chips | `components/chat/ChatMarkdown.tsx`; `lib/codeLanguage.ts`, `lib/filePathToken.ts`; `.chat-markdown` / `.chat-code` in `styles.css` |
+| Custom / MCP tool call rendering | `lib/toolCallView.ts` — `humanizeToolName`, `toolCallFields`, `formatToolResult` |
 | Transcript rows: tool calls, sub-agents, the working line | `components/chat/` — `ToolCall.tsx`, `SubagentCall.tsx`, `EditDiff.tsx`, `WorkingIndicator.tsx`; label from `lib/turnActivity.ts` |
 | Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
 | Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
@@ -179,7 +184,7 @@ Neither hook may open an `EventSource` of its own.
 | Design tokens | `src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |
 | Planner proposals → install automations | `lib/planProposals.ts`; UI in `components/PlanProposalCard.tsx`, `PlanProposalsInChat.tsx`, `routes/planner.tsx` |
 
-Routes: `index.tsx` redirects to Automations · `tasks.index.tsx` /
+Routes: `index.tsx` redirects to Automations · `mcp.tsx` MCP servers · `tasks.index.tsx` /
 `tasks.$taskId.tsx` / `tasks.new.tsx` automations · `runs.index.tsx` /
 `runs.$runId.tsx` / `runs.new.tsx` · `integrations.tsx` /
 `integrations.index.tsx` / `integrations.$provider.tsx` · `notifications.tsx` ·
