@@ -10,6 +10,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 
 import { getDb, type DeviceRow, type DevicePairingRow } from '../db'
+import { isSealed, revealString, sealString, secretAad } from '../secretBox.ts'
 import { safeEqualString } from '../integrations/crypto'
 import { DEFAULT_MOBILE_SCOPE, type MobileScope } from '../../lib/mobileScope'
 import {
@@ -205,16 +206,28 @@ export function touchDevice(device: DeviceRow): void {
   getDb().prepare(`UPDATE devices SET lastSeenAt = ? WHERE id = ?`).run(now, device.id)
 }
 
+function revealPushToken(row: DeviceRow): DeviceRow {
+  const pushToken = revealString(row.pushToken, secretAad('pushToken', row.id))
+  if (row.pushToken && !isSealed(row.pushToken) && pushToken) {
+    getDb()
+      .prepare('UPDATE devices SET pushToken = ? WHERE id = ?')
+      .run(sealString(pushToken, secretAad('pushToken', row.id)), row.id)
+  }
+  return { ...row, pushToken }
+}
+
 /** Paired devices, newest first. Revoked rows are kept for the audit trail. */
 export function listDevices(): DeviceRow[] {
-  return getDb().prepare(`SELECT * FROM devices ORDER BY createdAt DESC`).all() as DeviceRow[]
+  const rows = getDb().prepare(`SELECT * FROM devices ORDER BY createdAt DESC`).all() as DeviceRow[]
+  return rows.map((row) => ({ ...row, pushToken: row.pushToken ? 'registered' : '' }))
 }
 
 /** Devices that can receive an APNs push right now. */
 export function pushableDevices(): DeviceRow[] {
-  return getDb()
+  const rows = getDb()
     .prepare(`SELECT * FROM devices WHERE revokedAt IS NULL AND pushToken != '' ORDER BY createdAt`)
     .all() as DeviceRow[]
+  return rows.map(revealPushToken)
 }
 
 export function getDevice(deviceId: string): DeviceRow | null {
@@ -231,9 +244,14 @@ export function registerPushToken(input: {
   pushEnv: string
 }): void {
   const env = input.pushEnv === 'production' ? 'production' : 'sandbox'
+  const token = input.pushToken.trim().slice(0, 200)
   getDb()
     .prepare(`UPDATE devices SET pushToken = ?, pushEnv = ? WHERE id = ?`)
-    .run(input.pushToken.trim().slice(0, 200), env, input.deviceId)
+    .run(
+      token ? sealString(token, secretAad('pushToken', input.deviceId)) : '',
+      env,
+      input.deviceId,
+    )
 }
 
 /**

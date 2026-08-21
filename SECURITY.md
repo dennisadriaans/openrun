@@ -94,10 +94,12 @@ with a pointer here.
 - **`--dangerously-skip-permissions` being available.** It is opt-in per runtime,
   surfaced in the command preview, and requires acknowledgement before a schedule
   is armed. Its existence is a documented product decision.
-- **Secrets at rest in the local database.** Webhook secrets are stored
-  unencrypted in `~/.openrun` / `data/openrun.db`, protected by file
-  permissions (`0600`) and nothing else. Disk encryption is your operating
-  system's job. Encryption-at-rest is on the roadmap; see
+- **Secrets at rest in the local database.** Device pairing tokens and
+  machine bearers are stored as SHA-256. MCP OAuth tokens, notification
+  webhook URLs, and APNs tokens are AES-GCM sealed under `~/.openrun/data-key`,
+  which is not in the database file. A copy of `openrun.db` alone is not a
+  working credential. Anyone with your OS user can still read the key file;
+  disk encryption is the operating system's job. See
   [the known-gaps list](https://openrun.sh/docs/security#known-gaps).
 - **Anyone with a local shell account can control Open Run.** The trust boundary
   is the machine, not the user account.
