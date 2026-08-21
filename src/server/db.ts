@@ -591,9 +591,12 @@ export function getDb(): Database.Database {
  * EXISTS", so we diff against table_info instead.
  */
 function addColumn(db: Database.Database, table: string, column: string, ddl: string) {
-  const cols = new Set(
-    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
-  )
+  const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  // A table created further down this same migration does not exist yet on a
+  // fresh database, and `table_info` answers with an empty list rather than an
+  // error — so without this the ALTER below throws and first boot dies.
+  if (info.length === 0) return
+  const cols = new Set(info.map((c) => c.name))
   if (!cols.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
 }
 
@@ -649,9 +652,6 @@ function migrate(db: Database.Database) {
   addColumn(db, 'messages', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'messages', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'messages', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
-  addColumn(db, 'run_queue', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
-  addColumn(db, 'run_queue', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
-  addColumn(db, 'run_queue', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS check_results (
@@ -711,6 +711,12 @@ function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_run_queue_workspace
       ON run_queue(workspaceId, queuedAt ASC);
   `)
+
+  // After the table exists: on a fresh database `run_queue` is created above,
+  // and on an upgraded one these are the columns it is missing.
+  addColumn(db, 'run_queue', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS integrations (
