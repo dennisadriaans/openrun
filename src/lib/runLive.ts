@@ -49,6 +49,21 @@ export type RunLiveEvent =
       prompt: string
       createdAt: number
     }
+  /**
+   * One turn's assistant message settled. Published before the run itself
+   * goes terminal — verification and a repair turn may still follow — so the
+   * transcript can drop its working indicator without waiting for `status`.
+   */
+  | {
+      type: 'turn_finished'
+      messageId: string
+      status: 'success' | 'error' | 'cancelled'
+      exitCode: number | null
+      content: string
+      /** Parsed `DiffFile[]`; typed loosely to keep `lib/` server-free. */
+      diffSummary: unknown[]
+      finishedAt: number
+    }
   | { type: 'status'; status: string; exitCode: number | null }
   | {
       type: 'check_started'

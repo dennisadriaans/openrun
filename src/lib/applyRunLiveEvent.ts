@@ -61,11 +61,15 @@ export function applyRunLiveEvent<T extends ConversationCacheSlice>(
     case 'status':
       // Exit codes, files changed, canFollowUp, finalized content, etc.
       return { action: 'refetch' }
+    case 'turn_finished':
+      return patchTurnFinished(data, event)
     case 'turn_started':
       return patchTurnStarted(data, event)
     case 'log':
+      if (data.run.status === 'cancelled') return { action: 'ignore' }
       return { action: 'patch', data: patchLog(data, event) }
     case 'turn_event':
+      if (data.run.status === 'cancelled') return { action: 'ignore' }
       return patchTurnEvent(data, event)
     case 'check_started':
       return patchCheckStarted(data, event)
@@ -191,6 +195,27 @@ function patchTurnStarted<T extends ConversationCacheSlice>(
   return { action: 'patch', data: next as T }
 }
 
+function patchTurnFinished<T extends ConversationCacheSlice>(
+  data: T,
+  event: Extract<RunLiveEvent, { type: 'turn_finished' }>,
+): ApplyRunLiveResult<T> {
+  const idx = data.messages.findIndex((m) => m.id === event.messageId)
+  if (idx < 0) return { action: 'refetch' }
+  const message = data.messages[idx]!
+  if (message.status !== 'running') return { action: 'ignore' }
+  const messages = data.messages.slice()
+  messages[idx] = {
+    ...message,
+    status: event.status,
+    exitCode: event.exitCode,
+    // A turn that produced no prose keeps whatever the stream already showed.
+    content: event.content || message.content,
+    diffSummary: event.diffSummary,
+    finishedAt: event.finishedAt,
+  }
+  return { action: 'patch', data: { ...data, messages } }
+}
+
 function patchLog<T extends ConversationCacheSlice>(
   data: T,
   event: Extract<RunLiveEvent, { type: 'log' }>,
@@ -247,10 +272,11 @@ export function applyRunLiveEventToRunRow<
         data: { ...run, status: 'running', exitCode: null },
       }
     case 'turn_event':
+    case 'turn_finished':
     case 'check_started':
     case 'check_finished':
     case 'repair_started':
-      // The bare run row carries no check state — the conversation cache does.
+      // The bare run row carries no per-message state — the conversation cache does.
       return { action: 'ignore' }
     case 'verdict':
       return { action: 'patch', data: { ...run, verdict: event.verdict } }

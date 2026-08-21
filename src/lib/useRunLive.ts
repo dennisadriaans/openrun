@@ -44,7 +44,11 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
           refetchConversation()
           return
         }
-      } else if (event.type === 'status' || event.type === 'turn_started') {
+      } else if (
+        event.type === 'status' ||
+        event.type === 'turn_started' ||
+        event.type === 'turn_finished'
+      ) {
         refetchConversation()
         return
       }
