@@ -2,13 +2,12 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { Plus } from 'lucide-react'
 import { useMemo } from 'react'
 import { NeedProjectEmpty } from '../components/NeedProjectEmpty'
-import { Button, Card, EmptyState, PageHeader, StatusBadge, Switch } from '../components/ui'
+import { Button, Card, EmptyState, PageHeader, StatusBadge } from '../components/ui'
 import { absoluteTime, describeCron, relativeTime, taskScheduleStatus } from '../lib/format'
 import { queueDepthLabel } from '../lib/runQueue'
 
-import { enableBlockedReason } from '../lib/enableGate'
 import { automationsEmptyKind } from '../lib/projectGate'
-import { useProjects, useRuns, useTasks, useToggleTask } from '../lib/queries'
+import { useProjects, useRuns, useTasks } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
 
 type TaskRow = NonNullable<ReturnType<typeof useTasks>['data']>[number]
@@ -16,7 +15,7 @@ type TaskRow = NonNullable<ReturnType<typeof useTasks>['data']>[number]
 export const Route = createFileRoute('/tasks/')({ component: TasksPage })
 
 const ROW_GRID =
-  'grid items-center gap-3 grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,7rem)_5rem_2.25rem] sm:grid-cols-[6.5rem_minmax(0,1fr)_8rem_minmax(0,10rem)_5.5rem_2.25rem]'
+  'grid items-center gap-3 grid-cols-[6.5rem_minmax(0,1fr)_minmax(0,7rem)_5rem] sm:grid-cols-[6.5rem_minmax(0,1fr)_8rem_minmax(0,10rem)_5.5rem]'
 
 /**
  * One cell, not eight chips. A blocked automation says the one thing standing
@@ -49,7 +48,6 @@ function TasksPage() {
     [runs],
   )
   const navigate = useNavigate()
-  const toggle = useToggleTask()
   const emptyKind = automationsEmptyKind(projects?.length ?? 0)
 
   const newTask = () => navigate({ to: '/tasks/new' })
@@ -76,17 +74,15 @@ function TasksPage() {
             <span className="hidden sm:block">Runtime</span>
             <span>Schedule</span>
             <span className="text-right">Next run</span>
-            <span />
           </div>
           {tasks.map((t) => {
-            const blockEnable = t.enabled ? null : enableBlockedReason(t)
             const runBlocked = runNowBlockedReason(t)
             const schedule = scheduleCell(t, runBlocked)
             const when = whenCell(t)
             return (
               <div
                 key={t.id}
-                className={`group/row relative ${ROW_GRID} px-4 py-2 transition-colors hover:bg-hover`}
+                className={`relative ${ROW_GRID} px-4 py-2 transition-colors hover:bg-hover`}
               >
                 <Link
                   to="/tasks/$taskId"
@@ -110,26 +106,6 @@ function TasksPage() {
                   title={when.title}
                 >
                   {when.text}
-                </span>
-                <span
-                  className="relative justify-self-end"
-                  title={t.enabled ? 'Pause schedule' : (blockEnable ?? 'Enable schedule')}
-                >
-                  <Switch
-                    checked={!!t.enabled}
-                    label={t.enabled ? 'Pause schedule' : 'Enable schedule'}
-                    disabled={Boolean(blockEnable) || toggle.isPending}
-                    onChange={(enabled) =>
-                      toggle.mutate(
-                        { id: t.id, enabled },
-                        {
-                          onError: (err) => {
-                            window.alert(err instanceof Error ? err.message : String(err))
-                          },
-                        },
-                      )
-                    }
-                  />
                 </span>
               </div>
             )
