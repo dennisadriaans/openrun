@@ -186,8 +186,12 @@ function RunDetail() {
 
   const cancel = async () => {
     if (!run) return
+    qc.setQueryData(['conversation', run.id], (prev: typeof data) =>
+      prev ? { ...prev, run: { ...prev.run, status: 'cancelled' as const } } : prev,
+    )
     await fns.cancelRun({ data: { id: run.id } })
     qc.invalidateQueries({ queryKey: ['conversation', run.id] })
+    qc.invalidateQueries({ queryKey: ['runWorkspace', run.id] })
   }
 
   const followUpReason =
@@ -313,6 +317,8 @@ function RunDetail() {
                   undoFilesReason={undoFilesReason}
                   onStop={() => void cancel()}
                   onSend={(input) => sendMessage.mutate(input)}
+                  workspaceId={workspace?.id ?? run!.workspaceId}
+                  onNewChat={() => navigate({ to: '/runs/new' })}
                 />
               )}
             </div>
