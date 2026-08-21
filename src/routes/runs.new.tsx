@@ -22,7 +22,13 @@ import {
 } from '../lib/models'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
-import { useProjects, useRuntimes, useStartChat, useWorkspaces } from '../lib/queries'
+import {
+  useProjects,
+  useRuntimes,
+  useSlashCommands,
+  useStartChat,
+  useWorkspaces,
+} from '../lib/queries'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import { supportsSupervised } from '../lib/supervisedPolicy'
 import { isWorkspaceReady } from '../lib/workspaceReady'
@@ -40,6 +46,11 @@ function NewRun() {
   const [projectId, setProjectId] = useState('')
   const [workspaceId, setWorkspaceId] = useState('')
   const [runtimeId, setRuntimeId] = useState('')
+  // File commands only: `/clear` and friends need a conversation to act on.
+  const { data: commands } = useSlashCommands(
+    { runtimeId, ...(workspaceId ? { workspaceId } : {}) },
+    { enabled: !!runtimeId },
+  )
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
@@ -214,6 +225,8 @@ function NewRun() {
                 remember({ runtimeMode: mode })
               }}
               onSend={send}
+              commands={commands?.commands ?? []}
+              {...(commands?.note ? { commandNote: commands.note } : {})}
             />
             <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
           </div>

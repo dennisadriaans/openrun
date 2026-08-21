@@ -48,8 +48,16 @@ import {
   useNativeSessions,
   useProjectBranches,
   useCreateWorkspace,
+  useSlashCommands,
 } from '../lib/queries'
 import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import {
+  applySlashCommand,
+  matchSlashCommands,
+  slashMenuQuery,
+  type SlashCommand,
+} from '../lib/slashCommands'
 import {
   HOURLY_MINUTES,
   HOUR_TIMES,
@@ -959,6 +967,9 @@ export function TaskForm({
   const [showVerificationSettings, setShowVerificationSettings] = useState(false)
   const [nativeError, setNativeError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [slashDismissed, setSlashDismissed] = useState(false)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
 
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
@@ -985,6 +996,21 @@ export function TaskForm({
 
   const runtime = runtimes?.find((r) => r.id === v.runtimeId) ?? runtimes?.[0]
   const models = useMemo(() => (runtime ? modelsForRuntime(runtime) : []), [runtime])
+
+  // The prompt field offers the CLI's own command files. App commands
+  // (`/clear`, `/model`) are chat-only — an unattended run has no chat to act
+  // on and no human to answer.
+  const { data: slashCommands } = useSlashCommands(
+    { runtimeId: runtime?.id ?? '', ...(v.workspaceId ? { workspaceId: v.workspaceId } : {}) },
+    { enabled: Boolean(runtime?.id) },
+  )
+  const slashQuery = slashMenuQuery(v.prompt)
+  const slashMatches = useMemo(
+    () =>
+      slashQuery === null ? [] : matchSlashCommands(slashCommands?.commands ?? [], slashQuery),
+    [slashQuery, slashCommands],
+  )
+  const slashMenuOpen = !slashDismissed && slashMatches.length > 0
   const nativeQuery = useNativeSessions(
     { workspaceId: v.workspaceId },
     { enabled: hasWorkspaceId(v.workspaceId) },
@@ -1070,6 +1096,13 @@ export function TaskForm({
   const set = <K extends keyof TaskFormValues>(k: K, val: TaskFormValues[K]) => {
     setDirty(true)
     setV((prev) => ({ ...prev, [k]: val }))
+  }
+
+  const pickSlashCommand = (command: SlashCommand) => {
+    set('prompt', applySlashCommand(command))
+    setSlashIndex(0)
+    setSlashDismissed(false)
+    promptRef.current?.focus()
   }
 
   const selectProject = (pid: string) => {
@@ -1344,16 +1377,46 @@ export function TaskForm({
         <section>
           <StepLabel n={1}>What the agent should do</StepLabel>
           <div
-            className={`flex min-h-40 flex-col rounded-xl border bg-elevated p-1 ${
+            className={`relative flex min-h-40 flex-col rounded-xl border bg-elevated p-1 ${
               promptError ? 'border-rose-500/40' : 'border-border'
             }`}
           >
+            {slashMenuOpen ? (
+              <SlashCommandMenu
+                commands={slashMatches}
+                activeIndex={Math.min(slashIndex, slashMatches.length - 1)}
+                {...(slashCommands?.note ? { note: slashCommands.note } : {})}
+                onPick={pickSlashCommand}
+              />
+            ) : null}
             <textarea
+              ref={promptRef}
               className="min-h-28 flex-1 resize-y bg-transparent px-3.5 py-3 text-ui-base text-foreground outline-none placeholder:text-tier-quaternary"
               value={v.prompt}
               onChange={(e) => {
                 set('prompt', e.target.value)
+                setSlashIndex(0)
+                setSlashDismissed(false)
                 if (promptError) setPromptError(null)
+              }}
+              onKeyDown={(e) => {
+                if (!slashMenuOpen || slashMatches.length === 0) return
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i + 1) % slashMatches.length)
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setSlashDismissed(true)
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  const active = slashMatches[Math.min(slashIndex, slashMatches.length - 1)]
+                  if (active) {
+                    e.preventDefault()
+                    pickSlashCommand(active)
+                  }
+                }
               }}
               aria-invalid={Boolean(promptError)}
               aria-describedby={promptError ? 'prompt-required-error' : undefined}

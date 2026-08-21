@@ -4,7 +4,8 @@
  * Renders the turn-by-turn transcript of a run and the follow-up composer.
  * Layout adapted from the t3code chat view (MIT, T3 Tools Inc.).
  */
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { ChevronRight, Square, Terminal } from 'lucide-react'
 import type { ChatMessage } from '../server/core'
 import type { DiffFile } from '../server/git'
@@ -12,13 +13,26 @@ import type { ApprovalDecision } from '../lib/claudeControl'
 import type { TurnEventPayload, TurnEventRow } from '../lib/turnEvents'
 import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
 import { formatChatTimestampTooltip, formatShortTimestamp } from '../lib/format'
-import { useAnswerApproval, useDiscard, useRestoreFile } from '../lib/queries'
+import { useAnswerApproval, useDiscard, useRestoreFile, useSlashCommands } from '../lib/queries'
 import * as fns from '../fns'
-import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
+import {
+  DEFAULT_RUNTIME_MODE,
+  RUNTIME_MODES,
+  parseRuntimeMode,
+  type RuntimeMode,
+} from '../lib/runtimeMode'
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
-import { supportsSupervised } from '../lib/supervisedPolicy'
+import { isSupervised, supportsSupervised } from '../lib/supervisedPolicy'
 import { ComposerModelControls } from './ComposerControls'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import {
+  appCommandFor,
+  applySlashCommand,
+  matchSlashCommands,
+  slashMenuQuery,
+  type SlashCommand,
+} from '../lib/slashCommands'
 import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
 import { MessageSourceBadge } from './MessageSourceBadge'
@@ -34,11 +48,12 @@ import {
   WorkGroup,
   WorkingIndicator,
 } from './chat/index'
-import { latestActivityLabel } from '../lib/turnActivity'
+import { latestActivity } from '../lib/turnActivity'
 import { verificationPhase } from '../lib/runPhase'
 import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
 import { foldedRows, planTurnFold, type TurnFoldStage, type TurnRowKind } from '../lib/turnFold'
 import { hasEditHunks } from '../lib/toolCallView'
+import { mergeThoughtText } from '../lib/orbState'
 
 function isJsonlNoiseLine(line: string): boolean {
   const t = line.trim()
@@ -127,6 +142,7 @@ type TranscriptRow = { id: string; kind: TurnRowKind; node: ReactNode }
  */
 function turnRows({
   events,
+  running,
   answering,
   onAnswer,
   onSelectFile,
@@ -142,6 +158,7 @@ function turnRows({
   redoablePaths,
 }: {
   events: TurnEventRow[]
+  running?: boolean
   answering?: boolean
   onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile?: (path: string) => void
@@ -159,6 +176,7 @@ function turnRows({
   const rows: TranscriptRow[] = []
   const push = (id: string, kind: TurnRowKind, node: ReactNode) => rows.push({ id, kind, node })
   let lastAssistant = ''
+  let lastThought: { index: number; text: string } | null = null
   const openCalls = new Map<string, TurnEventPayload>()
   const consumedResults = new Set<string>()
   // Shared with the mobile API so the two can never disagree about what is
@@ -188,8 +206,26 @@ function turnRows({
           <ChatMarkdown text={payload.text} {...(onSelectFile ? { onSelectFile } : {})} />
         </div>,
       )
-    } else if (ev.kind === 'thought' && payload.text) {
-      push(ev.id, 'work', <ThoughtEvent text={payload.text} />)
+    } else if (ev.kind === 'thought') {
+      const text = payload.text ?? ''
+      const trailing = Boolean(
+        running &&
+          events
+            .slice(i + 1)
+            .every((later) => later.kind === 'thought' || later.kind === 'turn_done'),
+      )
+      if (lastThought && lastThought.index === rows.length - 1) {
+        lastThought.text = mergeThoughtText(lastThought.text, text)
+        const prev = rows[lastThought.index]!
+        rows[lastThought.index] = {
+          id: prev.id,
+          kind: 'work',
+          node: <ThoughtEvent text={lastThought.text} live={trailing} />,
+        }
+      } else {
+        lastThought = { index: rows.length, text }
+        push(ev.id, 'work', <ThoughtEvent text={text} live={trailing} />)
+      }
     } else if (ev.kind === 'plan' && payload.plan && payload.plan.length > 0) {
       push(ev.id, 'work', <PlanEvent plan={payload.plan} />)
     } else if (ev.kind === 'tool_start') {
@@ -520,7 +556,7 @@ const AssistantMessage = memo(function AssistantMessage({
       ? parsePlanProposals(message.content)
       : []
   const showPlanCards = planProposals.length > 0 && Boolean(runtimeId)
-  const activityLabel = running ? latestActivityLabel(message.events) : undefined
+  const activity = running ? latestActivity(message.events) : undefined
   // A turn whose events are all tool calls still has an answer — it just lives
   // on the message rather than in an `assistant` event (older rows, and CLIs
   // that only report their reply once, at the end).
@@ -535,6 +571,7 @@ const AssistantMessage = memo(function AssistantMessage({
   const rows = showEvents
     ? turnRows({
         events: message.events,
+        running,
         answering,
         ...(onAnswer ? { onAnswer } : {}),
         onSelectFile,
@@ -603,10 +640,12 @@ const AssistantMessage = memo(function AssistantMessage({
           <div className="text-sm text-muted-foreground/50">(empty response)</div>
         ) : null}
 
-        {running ? (
+        {running && activity ? (
           <WorkingIndicator
             startedAt={message.createdAt}
-            {...(activityLabel ? { step: activityLabel } : {})}
+            orb={activity.orb}
+            verb={activity.verb}
+            {...(activity.step ? { step: activity.step } : {})}
           />
         ) : null}
 
@@ -694,6 +733,9 @@ export function Composer({
   onSend,
   onStop,
   className,
+  commands,
+  commandNote,
+  onAppCommand,
 }: {
   disabled: boolean
   disabledReason?: string
@@ -716,8 +758,20 @@ export function Composer({
   onSend: (text: string) => void
   onStop?: () => void
   className?: string
+  /** Slash commands to offer, app commands included. */
+  commands?: SlashCommand[]
+  /** Caveat shown under the menu (see `server/slashCommands.ts`). */
+  commandNote?: string
+  /**
+   * Run an app command instead of prompting the agent. Returning a string
+   * shows it as an error under the composer; `/help` never gets here.
+   */
+  onAppCommand?: (input: { command: SlashCommand; args: string }) => string | undefined
 }) {
   const [value, setValue] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [menuDismissed, setMenuDismissed] = useState(false)
+  const [commandError, setCommandError] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -727,9 +781,49 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [value])
 
+  const query = slashMenuQuery(value)
+  const matches = useMemo(
+    () => (query === null || !commands ? [] : matchSlashCommands(commands, query)),
+    [query, commands],
+  )
+  const menuOpen = !menuDismissed && !disabled && matches.length > 0
+  const active = menuOpen ? matches[Math.min(activeIndex, matches.length - 1)] : undefined
+
+  const setText = (next: string) => {
+    setValue(next)
+    setActiveIndex(0)
+    setMenuDismissed(false)
+    if (commandError) setCommandError('')
+  }
+
+  const pick = (command: SlashCommand) => {
+    setText(applySlashCommand(command))
+    ref.current?.focus()
+  }
+
   const submit = () => {
     const text = value.trim()
-    if (!text || disabled || pending || running) return
+    if (!text || disabled) return
+
+    // App commands are answered here and never become a turn, so `/model`
+    // still lands while a send is in flight.
+    const app = commands ? appCommandFor(commands, text) : null
+    if (app) {
+      if (app.command.action === 'help') {
+        setText('/')
+        return
+      }
+      const failure = onAppCommand?.(app)
+      if (failure) {
+        setCommandError(failure)
+        return
+      }
+      setValue('')
+      setCommandError('')
+      return
+    }
+
+    if (pending || running) return
     onSend(text)
     setValue('')
   }
@@ -737,7 +831,15 @@ export function Composer({
   const canSend = !disabled && !pending && !running && value.trim().length > 0
 
   return (
-    <div className={className ?? 'mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2'}>
+    <div className={`relative ${className ?? 'mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2'}`}>
+      {menuOpen ? (
+        <SlashCommandMenu
+          commands={matches}
+          activeIndex={Math.min(activeIndex, matches.length - 1)}
+          {...(commandNote ? { note: commandNote } : {})}
+          onPick={pick}
+        />
+      ) : null}
       <div className="chat-composer-shell rounded-[22px] p-px">
         <div
           className={`chat-composer-glass rounded-[20px] border transition-[background-color,border-color] duration-200 focus-within:border-ring/45 ${
@@ -751,9 +853,36 @@ export function Composer({
               rows={1}
               value={value}
               disabled={disabled || running}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { 
+                if (menuOpen && matches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i + 1) % matches.length)
+                    return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i - 1 + matches.length) % matches.length)
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setMenuDismissed(true)
+                    return
+                  }
+                  // Enter and Tab both complete the highlighted command; the
+                  // next Enter sends it, so a command with arguments can be
+                  // finished before it is submitted.
+                  if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                    if (active) {
+                      e.preventDefault()
+                      pick(active)
+                      return
+                    }
+                  }
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
                   submit()
                 }
@@ -767,9 +896,12 @@ export function Composer({
               }
               className="block max-h-[200px] min-h-[3.25rem] w-full resize-none overflow-y-auto bg-transparent text-[16px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed sm:text-[14px]"
             />
+            {commandError ? (
+              <div className="pt-1 text-ui-xs text-danger">{commandError}</div>
+            ) : null}
           </div>
 
-          <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
+          <div className="relative flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
             {leading}
             <ComposerModelControls
               models={models}
@@ -789,7 +921,7 @@ export function Composer({
                 onClick={onStop}
                 aria-label="Stop"
                 title="Stop"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-danger/90 text-white transition-colors hover:bg-danger"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
               >
                 <Square className="size-3.5 fill-current" />
               </button>
@@ -855,6 +987,8 @@ export function Chat({
   undoFilesReason,
   onSend,
   onStop,
+  workspaceId,
+  onNewChat,
 }: {
   messages: ChatMessage[]
   activePath: string | null
@@ -899,6 +1033,10 @@ export function Chat({
     runtimeMode: RuntimeMode
   }) => void
   onStop?: () => void
+  /** Workspace the run lives in; scopes project slash-command discovery. */
+  workspaceId?: string
+  /** What `/clear` does — the route owns navigation. */
+  onNewChat?: () => void
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -1040,6 +1178,69 @@ export function Chat({
     remember({ runtimeMode: mode })
   }
 
+  const navigate = useNavigate()
+  const { data: commandListing } = useSlashCommands(
+    { runtimeId: runtimeId ?? '', ...(workspaceId ? { workspaceId } : {}), includeApp: true },
+    { enabled: !!runtimeId },
+  )
+
+  /**
+   * Answer an app command. The pickers this changes are the composer's own
+   * state, so `/model sonnet` and clicking the picker end up in the same place
+   * — including the remembered default.
+   */
+  const handleAppCommand = ({
+    command,
+    args,
+  }: {
+    command: SlashCommand
+    args: string
+  }): string | undefined => {
+    if (command.action === 'clear') {
+      if (!onNewChat) return 'Starting a new chat is not available here.'
+      onNewChat()
+      return
+    }
+    if (command.action === 'model') {
+      const picked = findModel(models, args.trim())
+      if (!picked) {
+        const known = models
+          .slice(0, 6)
+          .map((m) => m.slug)
+          .join(', ')
+        return known ? `Unknown model. Try: ${known}` : 'This runtime has no model picker.'
+      }
+      handleModelChange(picked.slug)
+      return
+    }
+    if (command.action === 'effort') {
+      const options = findModel(models, model)?.efforts ?? []
+      const picked = options.find((e) => e.value === args.trim().toLowerCase())
+      if (!picked) {
+        const known = options.map((e) => e.value).join(', ')
+        return known ? `Unknown effort. Try: ${known}` : 'This model has no effort levels.'
+      }
+      handleEffortChange(picked.value)
+      return
+    }
+    if (command.action === 'mcp') {
+      void navigate({ to: '/mcp' })
+      return
+    }
+    if (command.action === 'mode') {
+      const wanted = args.trim().toLowerCase()
+      const picked = RUNTIME_MODES.find((m) => m.value === wanted)
+      if (!picked) {
+        return `Unknown access mode. Try: ${RUNTIME_MODES.map((m) => m.value).join(', ')}`
+      }
+      if (isSupervised(picked.value) && !canSupervise) {
+        return 'This runtime cannot ask for approvals, so Supervised is unavailable.'
+      }
+      handleRuntimeModeChange(picked.value)
+      return
+    }
+  }
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div
@@ -1091,6 +1292,7 @@ export function Chat({
             <div className="px-1">
               <WorkingIndicator
                 verb={phase.label}
+                orb={phase.command ? 'working' : 'breathing'}
                 {...(phase.startedAt ? { startedAt: phase.startedAt } : {})}
                 {...(phase.command ? { step: phase.command } : {})}
               />
@@ -1104,10 +1306,10 @@ export function Chat({
         ref={composerOverlayRef}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
       >
-        <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10">
+        <div className="chat-composer-horizontal-inset pointer-events-auto relative">
           <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
             {changedFiles && changedFiles.length > 0 && onReviewFile ? (
-              <div className="relative z-10 mx-auto -mb-1.22 w-[92%]">
+              <div className="relative mx-auto -mb-[2px] w-[92%]">
                 <FilesChanged
                   variant="composer"
                   files={changedFiles}
@@ -1123,7 +1325,7 @@ export function Chat({
             <Composer
               className={
                 changedFiles && changedFiles.length > 0 && onReviewFile
-                  ? 'relative z-0 w-full'
+                  ? 'relative z-10 w-full'
                   : 'w-full pt-2'
               }
               disabled={!canFollowUp && !running}
@@ -1141,6 +1343,9 @@ export function Chat({
               onRuntimeModeChange={handleRuntimeModeChange}
               onStop={onStop}
               onSend={(text) => onSend({ prompt: text, model, effort, runtimeMode })}
+              commands={commandListing?.commands ?? []}
+              {...(commandListing?.note ? { commandNote: commandListing.note } : {})}
+              onAppCommand={handleAppCommand}
             />
           </div>
           <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
