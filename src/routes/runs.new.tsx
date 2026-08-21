@@ -13,6 +13,7 @@ import { Composer } from '../components/Chat'
 import { BranchPicker, ProjectPicker, RuntimePicker } from '../components/ComposerControls'
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
+import { WorkingIndicator } from '../components/chat/WorkingIndicator'
 import {
   defaultEffort,
   defaultModel,
@@ -57,6 +58,9 @@ function NewRun() {
     parseRuntimeMode(prefs.runtimeMode ?? DEFAULT_RUNTIME_MODE),
   )
   const [error, setError] = useState<string | null>(null)
+  // Optimistic first turn: the run only exists once the server answers, so the
+  // transcript is faked here to cover the boot round-trip.
+  const [sent, setSent] = useState<{ prompt: string; startedAt: number } | null>(null)
   const [addingProject, setAddingProject] = useState(false)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
@@ -114,13 +118,17 @@ function NewRun() {
             : null
 
   const send = (prompt: string) => {
-    if (!workspace || !runtime) return
+    if (!workspace || !runtime || sent) return
     setError(null)
+    setSent({ prompt, startedAt: Date.now() })
     startChat.mutate(
       { workspaceId: workspace.id, runtimeId: runtime.id, prompt, model, effort, runtimeMode },
       {
         onSuccess: ({ runId }) => navigate({ to: '/runs/$runId', params: { runId } }),
-        onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+        onError: (err) => {
+          setSent(null)
+          setError(err instanceof Error ? err.message : String(err))
+        },
       },
     )
   }
@@ -170,15 +178,32 @@ function NewRun() {
       </header>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-1 items-center justify-center px-6 pb-40">
-          <div className="max-w-md text-center">
-            <h1 className="text-ui-lg text-foreground">Start a new run</h1>
-            <p className="mt-1.5 text-ui-base text-tier-tertiary">
-              Confirm the project and branch above, pick a runtime, then send the first message.
-            </p>
-            {error ? <p className="mt-3 text-ui-base text-danger">{error}</p> : null}
+        {sent ? (
+          <div className="scroll-thin flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5">
+            <div className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pb-40 pt-3 sm:pt-4">
+              <div className="flex flex-col items-end gap-1">
+                <div className="max-w-[80%] rounded-[10px] border border-border bg-secondary px-3 py-2">
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                    {sent.prompt}
+                  </div>
+                </div>
+              </div>
+              <div className="px-1">
+                <WorkingIndicator verb="Starting" orb="breathing" startedAt={sent.startedAt} />
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center px-6 pb-40">
+            <div className="max-w-md text-center">
+              <h1 className="text-ui-lg text-foreground">Start a new run</h1>
+              <p className="mt-1.5 text-ui-base text-tier-tertiary">
+                Confirm the project and branch above, pick a runtime, then send the first message.
+              </p>
+              {error ? <p className="mt-3 text-ui-base text-danger">{error}</p> : null}
+            </div>
+          </div>
+        )}
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2">
           <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10">
