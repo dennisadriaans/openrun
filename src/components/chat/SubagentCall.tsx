@@ -11,6 +11,7 @@ import { Bot, ChevronRight } from 'lucide-react'
 import { isSettledToolStatus, type ToolCallStatus } from '../../lib/acp'
 import { subagentMetaFromInput } from '../../lib/toolCallRole'
 import { ChatMarkdown } from './ChatMarkdown'
+import { ActivityOrb } from './ActivityOrb'
 
 function promptFromInput(input: unknown): string {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return ''
@@ -61,12 +62,13 @@ export function SubagentCall({
         aria-expanded={expandable ? open : undefined}
         className="chat-subagent__header"
       >
-        <span
-          aria-hidden
-          className={`size-1.5 shrink-0 rounded-full ${
-            running ? 'live-dot bg-accent' : failed ? 'bg-danger' : 'bg-success'
-          }`}
-        />
+        <span aria-hidden className="flex size-5 shrink-0 items-center justify-center">
+          {running ? (
+            <ActivityOrb state="weaving" live />
+          ) : (
+            <span className={`size-1.5 rounded-full ${failed ? 'bg-danger' : 'bg-success'}`} />
+          )}
+        </span>
         <Bot className="size-3.5 shrink-0 opacity-80" />
         <span className="chat-event__eyebrow">Subagent</span>
         <span className="min-w-0 flex-1 truncate text-left">

@@ -83,10 +83,11 @@ export function turnEventToUiChunks(row: TurnEventRow): UiMessageChunk[] {
       ]
     }
     case 'thought': {
-      if (!payload.text) return []
       return [
         { type: 'reasoning-start', id: row.id },
-        { type: 'reasoning-delta', id: row.id, delta: payload.text },
+        ...(payload.text
+          ? [{ type: 'reasoning-delta' as const, id: row.id, delta: payload.text }]
+          : []),
         { type: 'reasoning-end', id: row.id },
       ]
     }

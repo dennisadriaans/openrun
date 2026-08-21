@@ -462,6 +462,7 @@ export function buildTurnCommand(input: {
   if (kind === 'claude') {
     if (!sessionId) return notResumable(runtime.bin)
     let args = ['-p', '--output-format', 'stream-json', '--verbose', '--resume', sessionId]
+    args = ensureMachineReadableArgs(args, 'claude')
     args = mergePreservedArgs(args, preserved)
     args = appendModelEffortArgs(args, kind, model, effort)
     args = applyRuntimeModeFlags(args, kind, runtimeMode)

@@ -389,7 +389,6 @@ body {
   --chat-tool-execute: var(--cyan);
   --chat-tool-edit: var(--modified);
   --chat-tool-search: var(--purple);
-  --chat-tool-fetch: var(--blue);
   --chat-tool-delete: var(--removed);
 }
 
@@ -535,9 +534,6 @@ body {
 }
 .chat-tool[data-tool-kind='search'] .chat-tool__icon {
   color: var(--chat-tool-search);
-}
-.chat-tool[data-tool-kind='fetch'] .chat-tool__icon {
-  color: var(--chat-tool-fetch);
 }
 .chat-tool[data-tool-kind='delete'] .chat-tool__icon {
   color: var(--chat-tool-delete);

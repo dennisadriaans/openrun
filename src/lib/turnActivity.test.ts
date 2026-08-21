@@ -1,52 +1,88 @@
-import { strict as assert } from 'node:assert'
-import { test } from 'node:test'
-import type { TurnEventKind } from './turnEvents.ts'
-import { latestActivityLabel } from './turnActivity.ts'
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+import { latestActivity, latestActivityLabel } from './turnActivity.ts'
+import type { TurnEventKind, TurnEventPayload } from './turnEvents.ts'
 
-const event = (kind: TurnEventKind, payload: unknown) => ({
-  kind,
-  payload: JSON.stringify(payload),
-})
+function ev(
+  kind: TurnEventKind,
+  payload: TurnEventPayload,
+): { kind: TurnEventKind; payload: string } {
+  return { kind, payload: JSON.stringify(payload) }
+}
 
-test('an in-flight tool call is described by verb and detail', () => {
-  const label = latestActivityLabel([
-    event('assistant', { text: 'On it.' }),
-    event('tool_start', {
-      toolCallId: 'a',
-      name: 'Bash',
-      toolKind: 'execute',
-      title: 'Bash · pnpm test',
-    }),
-  ])
-  assert.equal(label, 'Running pnpm test')
-})
+describe('latestActivity', () => {
+  it('defaults to breathing before the agent has spoken', () => {
+    assert.deepEqual(latestActivity([]), { orb: 'breathing', verb: 'Starting' })
+  })
 
-test('a settled call is skipped in favour of the one still open', () => {
-  const label = latestActivityLabel([
-    event('tool_start', { toolCallId: 'a', name: 'Read', toolKind: 'read', title: 'Read · a.ts' }),
-    event('tool_start', { toolCallId: 'b', name: 'Edit', toolKind: 'edit', title: 'Edit · b.ts' }),
-    event('tool_result', { toolCallId: 'b' }),
-  ])
-  assert.equal(label, 'Reading a.ts')
-})
+  it('maps an open approval to listening', () => {
+    const events = [ev('approval_request', { requestId: 'r1', name: 'Bash' })]
+    assert.equal(latestActivity(events).orb, 'listening')
+    assert.equal(latestActivity(events).step, 'approval')
+  })
 
-test('with no open call the agent’s last words are the label', () => {
-  const label = latestActivityLabel([
-    event('tool_start', { toolCallId: 'a', name: 'Read', title: 'Read · a.ts' }),
-    event('tool_result', { toolCallId: 'a' }),
-    event('thought', { text: 'Checking the gate module\nsecond line' }),
-  ])
-  assert.equal(label, 'Checking the gate module')
-})
+  it('maps an unsettled search tool to searching', () => {
+    const events = [
+      ev('tool_start', {
+        toolCallId: 'c1',
+        name: 'Grep',
+        toolKind: 'search',
+        title: 'Grep · TODO',
+        status: 'in_progress',
+      }),
+    ]
+    const activity = latestActivity(events)
+    assert.equal(activity.orb, 'searching')
+    assert.match(String(activity.step), /TODO/)
+    assert.equal(latestActivityLabel(events), activity.step)
+  })
 
-test('an empty or unparsable transcript has no label', () => {
-  assert.equal(latestActivityLabel([]), undefined)
-  const unparsable: { kind: TurnEventKind; payload: string } = { kind: 'assistant', payload: '{' }
-  assert.equal(latestActivityLabel([unparsable]), undefined)
-})
+  it('maps MCP, sub-agent, and edit calls onto connecting / weaving / shaping', () => {
+    assert.equal(
+      latestActivity([
+        ev('tool_start', { toolCallId: 'm', callRole: 'mcp', toolKind: 'other', name: 'list' }),
+      ]).orb,
+      'connecting',
+    )
+    assert.equal(
+      latestActivity([
+        ev('tool_start', {
+          toolCallId: 's',
+          callRole: 'subagent',
+          toolKind: 'think',
+          name: 'Task',
+        }),
+      ]).orb,
+      'weaving',
+    )
+    assert.equal(
+      latestActivity([
+        ev('tool_start', { toolCallId: 'e', toolKind: 'edit', name: 'Edit', title: 'Edit · a.ts' }),
+      ]).orb,
+      'shaping',
+    )
+  })
 
-test('a long line is truncated', () => {
-  const label = latestActivityLabel([event('assistant', { text: 'x'.repeat(200) })])
-  assert.equal(label?.length, 80)
-  assert.ok(label?.endsWith('…'))
+  it('maps a thought to solving and streaming prose to composing', () => {
+    assert.equal(latestActivity([ev('thought', { text: 'weighing' })]).orb, 'solving')
+    assert.equal(latestActivity([ev('thought', {})]).verb, 'Thinking')
+    assert.equal(latestActivity([ev('assistant', { text: 'Here is' })]).orb, 'composing')
+  })
+
+  it('prefers an open tool over an earlier thought', () => {
+    const events = [
+      ev('thought', { text: 'hmm' }),
+      ev('tool_start', { toolCallId: 'c', toolKind: 'execute', name: 'Bash' }),
+    ]
+    assert.equal(latestActivity(events).orb, 'working')
+  })
+
+  it('ignores a settled tool and falls back to the last thought', () => {
+    const events = [
+      ev('tool_start', { toolCallId: 'c', toolKind: 'read', name: 'Read' }),
+      ev('tool_result', { toolCallId: 'c', status: 'completed' }),
+      ev('thought', { text: 'ok' }),
+    ]
+    assert.equal(latestActivity(events).orb, 'solving')
+  })
 })

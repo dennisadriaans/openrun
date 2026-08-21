@@ -20,6 +20,13 @@ describe('parseAcpSessionUpdate', () => {
     )
     assert.deepEqual(
       parseAcpSessionUpdate({
+        sessionUpdate: 'agent_thought_chunk',
+        content: { type: 'text', text: '' },
+      }),
+      [{ kind: 'thought', payload: { text: '' } }],
+    )
+    assert.deepEqual(
+      parseAcpSessionUpdate({
         sessionUpdate: 'user_message_chunk',
         content: { type: 'text', text: 'do it' },
       }),
@@ -68,6 +75,19 @@ describe('parseAcpSessionUpdate', () => {
     assert.equal(event?.payload.callRole, 'mcp')
     assert.equal(event?.payload.mcpServer, 'cursor-cloud')
     assert.equal(event?.payload.title, 'run info')
+  })
+
+  it('classifies web browse tools as fetch even when the agent says search', () => {
+    const [event] = parseAcpSessionUpdate({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'w1',
+      title: 'Search the web',
+      toolName: 'web_search',
+      kind: 'search',
+      status: 'in_progress',
+      rawInput: { query: 'openrun' },
+    })
+    assert.equal(event?.payload.toolKind, 'fetch')
   })
 
   it('falls back to an inferred kind when the agent omits one', () => {

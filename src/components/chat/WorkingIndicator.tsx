@@ -7,6 +7,8 @@
  */
 import { useEffect, useRef } from 'react'
 import { elapsedLabel } from '../../lib/format'
+import { orbVerb, type ActivityOrbState } from '../../lib/orbState'
+import { ActivityOrb } from './ActivityOrb'
 
 function Timer({ startedAt }: { startedAt: number }) {
   const ref = useRef<HTMLSpanElement>(null)
@@ -30,29 +32,32 @@ function Timer({ startedAt }: { startedAt: number }) {
 export function WorkingIndicator({
   startedAt,
   step,
-  verb = 'Working',
+  verb,
+  orb = 'working',
 }: {
   /** Turn start; omitted when unknown, which drops the elapsed timer. */
   startedAt?: number
   /** What the agent is doing right now, e.g. the newest tool call. */
   step?: string
-  /** Overrides "Working" for phases that are not the agent typing. */
+  /** Overrides the orb's default verb for phases that are not the agent typing. */
   verb?: string
+  orb?: ActivityOrbState
 }) {
+  const label = verb ?? orbVerb(orb)
   return (
-    <div className="flex min-w-0 items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
-      <span className="inline-flex shrink-0 items-center gap-[3px]">
-        <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30" />
-        <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:200ms]" />
-        <span className="h-1 w-1 animate-status-pulse rounded-full bg-muted-foreground/30 [animation-delay:400ms]" />
-      </span>
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex min-w-0 items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums"
+    >
+      <ActivityOrb state={orb} live />
       <span className="shrink-0">
         {startedAt ? (
           <>
-            {verb} for <Timer startedAt={startedAt} />
+            {label} for <Timer startedAt={startedAt} />
           </>
         ) : (
-          `${verb}…`
+          `${label}…`
         )}
       </span>
       {step ? <span className="min-w-0 truncate text-muted-foreground/55">· {step}</span> : null}

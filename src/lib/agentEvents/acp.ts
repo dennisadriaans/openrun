@@ -10,7 +10,7 @@
  * because `lib/` stays dependency-free; `lib/acpConformance.ts` is what pins
  * these field names to the real protocol.
  */
-import { isToolCallStatus, isToolKind, toolKindFromName } from '../acp.ts'
+import { isToolCallStatus, isToolKind, resolveToolKind } from '../acp.ts'
 import type { PlanEntry, ToolCallLocation, ToolCallStatus, ToolKind } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
 import { pickString, toolResultContent, type ParsedTurnEvent } from './types.ts'
@@ -81,8 +81,13 @@ function planFrom(raw: unknown): PlanEntry[] {
 }
 
 function kindFrom(update: AcpSessionUpdate, name: string | undefined): ToolKind | undefined {
-  if (isToolKind(update.kind)) return update.kind
-  return name ? toolKindFromName(name) : undefined
+  const title = pickString(update, 'title')
+  return resolveToolKind(
+    name,
+    isToolKind(update.kind) ? update.kind : undefined,
+    update.rawInput,
+    title,
+  )
 }
 
 function statusFrom(update: AcpSessionUpdate, fallback?: ToolCallStatus) {
@@ -104,7 +109,7 @@ export function parseAcpSessionUpdate(update: AcpSessionUpdate): ParsedTurnEvent
     }
     case 'agent_thought_chunk': {
       const text = contentBlockText(update.content)
-      return text ? [{ kind: 'thought', payload: { text } }] : []
+      return [{ kind: 'thought', payload: { text } }]
     }
     case 'user_message_chunk': {
       const text = contentBlockText(update.content)

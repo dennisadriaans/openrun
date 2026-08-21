@@ -17,10 +17,24 @@ describe('parseCodexObject', () => {
   it('maps reasoning items to thought events', () => {
     assert.deepEqual(
       parseCodexObject({
+        type: 'item.started',
+        item: { type: 'reasoning', text: '' },
+      }),
+      [{ kind: 'thought', payload: { text: '' } }],
+    )
+    assert.deepEqual(
+      parseCodexObject({
         type: 'item.completed',
         item: { type: 'reasoning', text: 'considering the diff' },
       }),
       [{ kind: 'thought', payload: { text: 'considering the diff' } }],
+    )
+    assert.deepEqual(
+      parseCodexObject({
+        type: 'item.updated',
+        item: { type: 'reasoning', summary: [{ text: 'step one' }] },
+      }),
+      [{ kind: 'thought', payload: { text: 'step one' } }],
     )
   })
 

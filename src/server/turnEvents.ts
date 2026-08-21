@@ -21,6 +21,7 @@ export {
   hasEventAdapter,
   parseAcpSessionUpdate,
   parseTurnEventLine,
+  ClaudeStdoutIngest,
 } from '../lib/agentEvents/index.ts'
 
 export type { EventRuntimeKind, ParsedTurnEvent } from '../lib/agentEvents/index.ts'

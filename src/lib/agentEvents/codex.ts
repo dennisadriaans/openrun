@@ -21,6 +21,21 @@ import {
   type ParsedTurnEvent,
 } from './types.ts'
 
+/** Reasoning body: a string, or Codex/Responses `summary: [{ text }]`. */
+function reasoningText(item: Record<string, unknown>): string {
+  const direct = pickString(item, 'text', 'content')
+  if (direct) return direct
+  if (typeof item.summary === 'string' && item.summary) return item.summary
+  if (!Array.isArray(item.summary)) return ''
+  const parts: string[] = []
+  for (const entry of item.summary) {
+    if (!entry || typeof entry !== 'object') continue
+    const text = pickString(entry as Record<string, unknown>, 'text', 'content')
+    if (text) parts.push(text)
+  }
+  return parts.join('\n')
+}
+
 /** Codex item status → ACP tool status. */
 function statusFor(item: Record<string, unknown>, envelope: string): ToolCallStatus {
   const raw = typeof item.status === 'string' ? item.status : ''
@@ -75,9 +90,14 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
     }
 
     if (itemType === 'reasoning') {
-      if (type !== 'item.completed') return []
-      const text = pickString(item, 'text', 'summary', 'content')
-      return text ? [{ kind: 'thought', payload: { text } }] : []
+      const text = reasoningText(item)
+      if (type === 'item.started') {
+        return [{ kind: 'thought', payload: { text } }]
+      }
+      if (type === 'item.updated' || type === 'item.completed') {
+        return text ? [{ kind: 'thought', payload: { text } }] : []
+      }
+      return []
     }
 
     if (itemType === 'todo_list') {

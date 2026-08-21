@@ -2,6 +2,7 @@ import type { PermissionOption, ToolKind } from '../../lib/acp'
 import type { ApprovalDecision } from '../../lib/claudeControl'
 import { resolveCallRole } from '../../lib/toolCallRole'
 import { eyebrowForCallRole, iconForCallRole } from './chatEventIcons'
+import { ActivityOrb } from './ActivityOrb'
 
 /**
  * Tool-approval prompt. Style via `.chat-event--approval`.
@@ -66,7 +67,11 @@ export function ApprovalEvent({
       data-call-role={role}
     >
       <div className="chat-event__approval-banner flex items-center gap-2">
-        <Icon className="chat-event__icon size-3.5 shrink-0 opacity-70" />
+        {pending ? (
+          <ActivityOrb state="listening" live />
+        ) : (
+          <Icon className="chat-event__icon size-3.5 shrink-0 opacity-70" />
+        )}
         {eyebrow ? <span className="chat-event__eyebrow">{eyebrow}</span> : null}
         <span>
           Approval requested: <span className="mono">{title}</span>
