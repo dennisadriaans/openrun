@@ -31,6 +31,7 @@ import { publishRunLive } from './runLive'
 import { pushApprovalRequest, pushApprovalSettled } from './mobile/apns'
 import {
   AssistantDeltaCoalescer,
+  ClaudeStdoutIngest,
   LineBuffer,
   assistantTextFromEvents,
   hasEventAdapter,
@@ -53,6 +54,8 @@ import { resolveApprovalAnswer } from '../lib/approvals'
 import type { PermissionOption, ToolKind } from '../lib/acp'
 import { isAcpTransport } from '../lib/acpTransport'
 import { startAcpTurn } from './acpTurn'
+import { protocolMcpServers } from './mcp.ts'
+import { OPENRUN_APP_DIR_ENV, OPENRUN_RUN_ID_ENV } from '../lib/openrunTools.ts'
 import { withPrCapability } from '../lib/prCapability'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
@@ -103,16 +106,27 @@ type ApprovalController = {
 
 type LiveChild = ReturnType<typeof spawn>
 
+type LiveHandle = {
+  child: LiveChild
+  /** Cooperative stop (ACP `session/cancel`); CLI turns omit this. */
+  requestStop?: () => void
+}
+
 const g = globalThis as unknown as {
-  __agentopsLive?: Map<string, LiveChild>
+  __agentopsLive?: Map<string, LiveHandle>
   __agentopsApprovals?: Map<string, ApprovalController>
   __agentopsVerifying?: Map<string, AbortController>
   __agentopsShutdownHooks?: boolean
 }
 
-function liveMap(): Map<string, LiveChild> {
+function liveMap(): Map<string, LiveHandle> {
   if (!g.__agentopsLive) g.__agentopsLive = new Map()
   return g.__agentopsLive
+}
+
+function childOf(live: LiveHandle | undefined): LiveChild | undefined {
+  if (!live) return undefined
+  return live.child ?? (live as unknown as LiveChild)
 }
 
 function approvalsMap(): Map<string, ApprovalController> {
@@ -432,6 +446,21 @@ export function sendFollowUp(input: {
   })
 }
 
+/**
+ * Env every agent process gets on top of the runtime's own.
+ *
+ * `OPENRUN_RUN_ID` is what makes Open Run's MCP server (`scripts/mcp-server.ts`)
+ * answer for *this* run: the CLI inherits it and passes it down to any MCP
+ * server it spawns, so the tools need no handshake of their own.
+ */
+function turnEnv(runId: string, extraEnv?: Record<string, string>): Record<string, string> {
+  return {
+    ...(extraEnv ?? {}),
+    [OPENRUN_RUN_ID_ENV]: runId,
+    [OPENRUN_APP_DIR_ENV]: process.cwd(),
+  }
+}
+
 type TurnCommand = ReturnType<typeof buildTurnCommand>
 
 /**
@@ -550,7 +579,7 @@ function spawnTurn(input: {
         .run(displayCommand, runId, '%{promptFile}%')
     }
 
-    child = spawn(runtime.bin, spawnArgs, agentSpawnOptions(cwd, turn.extraEnv))
+    child = spawn(runtime.bin, spawnArgs, agentSpawnOptions(cwd, turnEnv(runId, turn.extraEnv)))
   } catch (err) {
     if (promptFileDir) {
       try {
@@ -572,7 +601,7 @@ function spawnTurn(input: {
     return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
   }
 
-  liveMap().set(runId, child)
+  liveMap().set(runId, { child })
   db.prepare('UPDATE runs SET pid = ? WHERE id = ?').run(child.pid ?? null, runId)
 
   const appendRunStdout = db.prepare('UPDATE runs SET stdout = stdout || ? WHERE id = ?')
@@ -585,6 +614,10 @@ function spawnTurn(input: {
   // workspace is then refused, and only restarting the app clears it.
   let budgetTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
     budgetTimer = null
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     const note = `\n[executor] ${runTimedOutMessage(timeoutMs)}\n`
     appendRunStderr.run(note, runId)
     appendMsgStderr.run(note, assistantMsgId)
@@ -597,10 +630,7 @@ function spawnTurn(input: {
     // Recorded before the kill so the close handler can tell an over-budget
     // stop apart from an ordinary non-zero exit.
     db.prepare('UPDATE runs SET timedOut = 1 WHERE id = ?').run(runId)
-    killChildTree(child, {
-      graceMs: RUN_KILL_GRACE_MS,
-      stillLive: () => liveMap().has(runId),
-    })
+    killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
   }, timeoutMs)
 
   const clearBudget = () => {
@@ -616,6 +646,7 @@ function spawnTurn(input: {
   // Grok streams token-sized `text` deltas; coalesce so chat gets prose, not
   // one event per word. Claude/Codex already emit whole messages.
   const grokCoalescer = structuredEvents && kind === 'grok' ? new AssistantDeltaCoalescer() : null
+  const claudeIngest = structuredEvents && kind === 'claude' ? new ClaudeStdoutIngest() : null
   let eventSeq = 0
   const insertEvent = db.prepare(
     `INSERT INTO turn_events (id, messageId, runId, seq, kind, payload, createdAt)
@@ -638,6 +669,10 @@ function spawnTurn(input: {
   >()
 
   const persistEvents = (events: ParsedTurnEvent[]) => {
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     for (const ev of events) {
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
@@ -803,6 +838,10 @@ function spawnTurn(input: {
   }
 
   const ingestStdoutChunk = (text: string) => {
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     appendRunStdout.run(text, runId)
     appendMsgStdout.run(text, assistantMsgId)
     publishRunLive(runId, {
@@ -815,7 +854,7 @@ function spawnTurn(input: {
     if (!structuredEvents) return
     const parsed: ParsedTurnEvent[] = []
     for (const line of lineBuffer.push(text)) {
-      parsed.push(...parseTurnEventLine(line, kind))
+      parsed.push(...(claudeIngest ? claudeIngest.pushLine(line) : parseTurnEventLine(line, kind)))
     }
     persistEvents(grokCoalescer ? grokCoalescer.push(parsed) : parsed)
   }
@@ -872,10 +911,17 @@ function spawnTurn(input: {
     if (structuredEvents) {
       const rest = lineBuffer.flush()
       const parsed: ParsedTurnEvent[] = []
-      if (rest.trim()) parsed.push(...parseTurnEventLine(rest, kind))
+      if (rest.trim()) {
+        parsed.push(
+          ...(claudeIngest ? claudeIngest.pushLine(rest) : parseTurnEventLine(rest, kind)),
+        )
+      }
       if (grokCoalescer) {
         persistEvents(grokCoalescer.push(parsed))
         persistEvents(grokCoalescer.flush())
+      } else if (claudeIngest) {
+        persistEvents(parsed)
+        persistEvents(claudeIngest.flush())
       } else if (parsed.length > 0) {
         persistEvents(parsed)
       }
@@ -1038,6 +1084,10 @@ function spawnAcpTurn(input: {
   const coalescer = new AssistantDeltaCoalescer()
 
   const appendLog = (stream: 'stdout' | 'stderr', chunk: string) => {
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     if (stream === 'stderr') {
       appendRunStderr.run(chunk, runId)
       appendMsgStderr.run(chunk, assistantMsgId)
@@ -1049,6 +1099,10 @@ function spawnAcpTurn(input: {
   }
 
   const persistEvents = (events: ParsedTurnEvent[]) => {
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     for (const ev of events) {
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
@@ -1175,7 +1229,10 @@ function spawnAcpTurn(input: {
       cwd,
       prompt: input.prompt,
       sessionId: input.sessionId,
-      extraEnv: input.extraEnv,
+      // Only the protocol-scoped list: whatever the agent reads from its own
+      // config file it has already loaded by the time the session opens.
+      mcpServers: protocolMcpServers({ bin: runtime.bin, transport: runtime.transport, cwd }),
+      extraEnv: turnEnv(runId, input.extraEnv),
     },
     {
       onEvents: (events) => persistEvents(coalescer.push(events)),
@@ -1218,7 +1275,7 @@ function spawnAcpTurn(input: {
     },
   )
 
-  liveMap().set(runId, handle.child)
+  liveMap().set(runId, { child: handle.child, requestStop: () => handle.cancelTurn() })
   db.prepare('UPDATE runs SET pid = ? WHERE id = ?').run(handle.child.pid ?? null, runId)
   approvalsMap().set(runId, {
     answer: (rid, answer) => resolveApproval(rid, answer),
@@ -1227,13 +1284,14 @@ function spawnAcpTurn(input: {
 
   budgetTimer = setTimeout(() => {
     budgetTimer = null
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     appendLog('stderr', `\n[executor] ${runTimedOutMessage(timeoutMs)}\n`)
     db.prepare('UPDATE runs SET timedOut = 1 WHERE id = ?').run(runId)
-    handle.cancelPending()
-    killChildTree(handle.child, {
-      graceMs: RUN_KILL_GRACE_MS,
-      stillLive: () => liveMap().has(runId),
-    })
+    handle.cancelTurn()
+    killChildTree(handle.child, { graceMs: RUN_KILL_GRACE_MS })
   }, timeoutMs)
 }
 
@@ -1264,16 +1322,32 @@ function finalizeMessage(
     : undefined
   const since = run?.baseSnapshot || undefined
 
-  let diffSummary = '[]'
+  let diff: ReturnType<typeof changedFiles> = []
   try {
-    diffSummary = JSON.stringify(changedFiles(cwd, since))
+    diff = changedFiles(cwd, since)
   } catch {
     // A missing or non-git cwd just means no diff panel for this turn.
   }
 
+  const finishedAt = Date.now()
   db.prepare(
     'UPDATE messages SET status = ?, exitCode = ?, content = ?, diffSummary = ?, finishedAt = ? WHERE id = ?',
-  ).run(status, exitCode, content, diffSummary, Date.now(), messageId)
+  ).run(status, exitCode, content, JSON.stringify(diff), finishedAt, messageId)
+
+  // The run stays `running` through verification and any repair turn, so the
+  // transcript would keep spinning on an answer that is already final if it
+  // had to wait for the run-level `status` frame.
+  if (row?.runId) {
+    publishRunLive(row.runId, {
+      type: 'turn_finished',
+      messageId,
+      status,
+      exitCode,
+      content,
+      diffSummary: diff,
+      finishedAt,
+    })
+  }
 }
 
 function finalizeRun(
@@ -1616,7 +1690,7 @@ export function listTurnEventsForRun(runId: string): TurnEventRow[] {
  * never becomes a DB-only flip that leaves a token-burning orphan.
  */
 export function cancelRun(runId: string): boolean {
-  const child = liveMap().get(runId)
+  const live = liveMap().get(runId)
   const db = getDb()
   const row = db.prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
     | { pid: number | null }
@@ -1642,13 +1716,15 @@ export function cancelRun(runId: string): boolean {
     verifyingMap().delete(runId)
   }
 
+  live?.requestStop?.()
+
   let killed = false
+  const child = childOf(live)
   if (child) {
-    killChildTree(child, {
-      graceMs: RUN_KILL_GRACE_MS,
-      stillLive: () => liveMap().has(runId),
-    })
-    liveMap().delete(runId)
+    // Leave the handle in liveMap until the close handler removes it. Dropping
+    // it here used to make killChildTree's stillLive() skip SIGKILL while the
+    // CLI ignored SIGTERM and kept spending tokens.
+    killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
     killed = true
   } else if (row?.pid != null && isPidAlive(row.pid)) {
     // No handle (restart/HMR) but the OS process is still there — kill by pid.
