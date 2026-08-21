@@ -12,9 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevicesRouteImport } from './routes/devices'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PlannerRouteImport } from './routes/planner'
 import { Route as RuntimesRouteImport } from './routes/runtimes'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as CloudCallbackRouteImport } from './routes/cloud.callback'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
@@ -63,6 +65,11 @@ const IntegrationsRoute = IntegrationsRouteImport.update({
   path: '/integrations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -76,6 +83,11 @@ const PlannerRoute = PlannerRouteImport.update({
 const RuntimesRoute = RuntimesRouteImport.update({
   id: '/runtimes',
   path: '/runtimes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WelcomeRoute = WelcomeRouteImport.update({
@@ -250,9 +262,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/devices': typeof DevicesRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/mcp': typeof McpRoute
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
@@ -289,9 +303,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/devices': typeof DevicesRoute
+  '/mcp': typeof McpRoute
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
@@ -330,9 +346,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/devices': typeof DevicesRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/mcp': typeof McpRoute
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
@@ -372,9 +390,11 @@ export interface FileRouteTypes {
     | '/'
     | '/devices'
     | '/integrations'
+    | '/mcp'
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/usage'
     | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
@@ -411,9 +431,11 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/devices'
+    | '/mcp'
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/usage'
     | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
@@ -451,9 +473,11 @@ export interface FileRouteTypes {
     | '/'
     | '/devices'
     | '/integrations'
+    | '/mcp'
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/usage'
     | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
@@ -492,9 +516,11 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DevicesRoute: typeof DevicesRoute
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
+  McpRoute: typeof McpRoute
   NotificationsRoute: typeof NotificationsRoute
   PlannerRoute: typeof PlannerRoute
   RuntimesRoute: typeof RuntimesRoute
+  UsageRoute: typeof UsageRoute
   WelcomeRoute: typeof WelcomeRoute
   CloudCallbackRoute: typeof CloudCallbackRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -548,6 +574,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/notifications': {
       id: '/notifications'
       path: '/notifications'
@@ -567,6 +600,13 @@ declare module '@tanstack/react-router' {
       path: '/runtimes'
       fullPath: '/runtimes'
       preLoaderRoute: typeof RuntimesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/welcome': {
@@ -842,9 +882,11 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DevicesRoute: DevicesRoute,
   IntegrationsRoute: IntegrationsRouteWithChildren,
+  McpRoute: McpRoute,
   NotificationsRoute: NotificationsRoute,
   PlannerRoute: PlannerRoute,
   RuntimesRoute: RuntimesRoute,
+  UsageRoute: UsageRoute,
   WelcomeRoute: WelcomeRoute,
   CloudCallbackRoute: CloudCallbackRoute,
   RunsRunIdRoute: RunsRunIdRoute,

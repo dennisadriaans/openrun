@@ -17,6 +17,7 @@ import type {
 import type { PlanProposal } from '../lib/planProposals'
 import type { IntegrationProviderId, WebhookFilters } from '../lib/integrations/types'
 import type { CheckDef } from '../lib/checks'
+import type { McpServerConfig } from '../lib/mcp'
 
 export type { PlanProposal } from '../lib/planProposals'
 
@@ -45,6 +46,10 @@ export const listRuntimes = createServerFn({ method: 'GET' }).handler(async () =
     ...r,
     ...c.checkRuntimeInstalled(r.bin),
   }))
+})
+
+export const listPresetBins = createServerFn({ method: 'GET' }).handler(async () => {
+  return (await core()).listPresetBinStatus()
 })
 
 export const saveRuntime = createServerFn({ method: 'POST' })
@@ -79,6 +84,58 @@ export const removeRuntime = createServerFn({ method: 'POST' })
     ;(await core()).deleteRuntime(data.id)
     return { ok: true }
   })
+
+// --- MCP servers -----------------------------------------------------------
+
+export const getMcpConfig = createServerFn({ method: 'GET' })
+  .validator((d: { runtimeId: string; workspaceId?: string }) => d)
+  .handler(async ({ data }) => (await core()).getMcpConfig(data))
+
+export const saveMcpServer = createServerFn({ method: 'POST' })
+  .validator(
+    (d: {
+      runtimeId: string
+      workspaceId?: string
+      targetId: string
+      server: McpServerConfig
+      previousName?: string
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).saveMcpServerConfig(data))
+
+export const removeMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { runtimeId: string; workspaceId?: string; targetId: string; name: string }) => d)
+  .handler(async ({ data }) => (await core()).removeMcpServerConfig(data))
+
+export const getSharedMcp = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getSharedMcpConfig(),
+)
+
+export const saveSharedMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { server: McpServerConfig; previousName?: string; force?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).saveSharedMcpServerConfig(data))
+
+export const removeSharedMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { name: string; scope?: 'registry' | 'everywhere' }) => d)
+  .handler(async ({ data }) => (await core()).removeSharedMcpServerConfig(data))
+
+export const discoverMcpServers = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).discoverMcpServersConfig(),
+)
+
+export const importMcpServers = createServerFn({ method: 'POST' })
+  .validator((d: { choices: { name: string; fromTargetId: string }[] }) => d)
+  .handler(async ({ data }) => (await core()).importMcpServersConfig(data))
+
+export const syncSharedMcp = createServerFn({ method: 'POST' })
+  .validator((d: { force?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).syncSharedMcpConfig(data))
+
+// --- Slash commands --------------------------------------------------------
+
+export const listSlashCommands = createServerFn({ method: 'GET' })
+  .validator((d: { runtimeId: string; workspaceId?: string; includeApp?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).listSlashCommandsFor(data))
 
 // --- Tasks -----------------------------------------------------------------
 
@@ -134,8 +191,14 @@ export const listNativeSessions = createServerFn({ method: 'GET' })
 // --- Runs ------------------------------------------------------------------
 
 export const listRuns = createServerFn({ method: 'GET' })
-  .validator((d: { taskId?: string; limit?: number; includeArchived?: boolean }) => d)
+  .validator(
+    (d: { taskId?: string; limit?: number; offset?: number; includeArchived?: boolean }) => d,
+  )
   .handler(async ({ data }) => (await core()).listRuns(data))
+
+export const countRuns = createServerFn({ method: 'GET' })
+  .validator((d: { taskId?: string; includeArchived?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).countRuns(data))
 
 export const listRunChecks = createServerFn({ method: 'GET' })
   .validator((d: { runId: string }) => d)
@@ -353,6 +416,16 @@ export const retryWorkspaceSetup = createServerFn({ method: 'POST' })
 export const archiveWorkspace = createServerFn({ method: 'POST' })
   .validator((d: { id: string; force: boolean }) => d)
   .handler(async ({ data }) => (await core()).archiveWorkspace(data.id, data.force))
+
+// --- Usage -----------------------------------------------------------------
+
+export const usageReport = createServerFn({ method: 'GET' })
+  .validator((d: { range?: string }) => d)
+  .handler(async ({ data }) => (await core()).getUsageReport(data))
+
+export const usagePressure = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getUsagePressure(),
+)
 
 // --- Notifications ---------------------------------------------------------
 

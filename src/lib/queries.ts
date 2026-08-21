@@ -8,8 +8,145 @@ import {
 } from './applyRunLiveEvent'
 import { useActivityStreamHealthy } from './useActivityLive'
 import type { PlanProposal } from './planProposals.ts'
+import type { McpServerConfig } from './mcp.ts'
+import type { UsageRange } from './usage.ts'
 
 const SEND_MESSAGE_SAFETY_REFETCH_MS = 400
+
+type McpConfigKey = { runtimeId: string; workspaceId?: string }
+
+function mcpKey(input: McpConfigKey) {
+  return ['mcpConfig', input.runtimeId, input.workspaceId ?? ''] as const
+}
+
+/** MCP servers as they sit in the runtime's own config file, right now. */
+export function useMcpConfig(input: McpConfigKey, opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: mcpKey(input),
+    queryFn: () => fns.getMcpConfig({ data: input }),
+    enabled: (opts?.enabled ?? true) && !!input.runtimeId,
+    // The file is the source of truth and the user may edit it in an editor
+    // while this page is open.
+    staleTime: 2000,
+  })
+}
+
+export function useSaveMcpServer(input: McpConfigKey) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { targetId: string; server: McpServerConfig; previousName?: string }) =>
+      fns.saveMcpServer({ data: { ...input, ...vars } }),
+    onSuccess: (data) => qc.setQueryData(mcpKey(input), data),
+  })
+}
+
+export function useRemoveMcpServer(input: McpConfigKey) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { targetId: string; name: string }) =>
+      fns.removeMcpServer({ data: { ...input, ...vars } }),
+    onSuccess: (data) => qc.setQueryData(mcpKey(input), data),
+  })
+}
+
+const sharedMcpKey = ['sharedMcp'] as const
+const mcpDiscoveryKey = ['mcpDiscovery'] as const
+
+/**
+ * Servers defined once in Open Run and projected into every CLI's config.
+ * Mutations return the refreshed view plus what the fan-out actually wrote.
+ */
+export function useSharedMcp() {
+  return useQuery({
+    queryKey: sharedMcpKey,
+    queryFn: () => fns.getSharedMcp(),
+    staleTime: 2000,
+  })
+}
+
+export function useSaveSharedMcpServer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { server: McpServerConfig; previousName?: string; force?: boolean }) =>
+      fns.saveSharedMcpServer({ data: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(sharedMcpKey, data.view)
+      void qc.invalidateQueries({ queryKey: mcpDiscoveryKey })
+      void qc.invalidateQueries({ queryKey: ['mcpConfig'] })
+    },
+  })
+}
+
+/**
+ * Servers the user already had in a CLI config and has not shared yet. Read
+ * only — importing is an explicit action, never something a page load does.
+ */
+export function useMcpDiscovery() {
+  return useQuery({
+    queryKey: mcpDiscoveryKey,
+    queryFn: () => fns.discoverMcpServers(),
+    staleTime: 2000,
+  })
+}
+
+export function useImportMcpServers() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { choices: { name: string; fromTargetId: string }[] }) =>
+      fns.importMcpServers({ data: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(sharedMcpKey, data.view)
+      qc.setQueryData(mcpDiscoveryKey, data.discovery)
+      void qc.invalidateQueries({ queryKey: ['mcpConfig'] })
+    },
+  })
+}
+
+export function useRemoveSharedMcpServer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { name: string; scope?: 'registry' | 'everywhere' }) =>
+      fns.removeSharedMcpServer({ data: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(sharedMcpKey, data.view)
+      void qc.invalidateQueries({ queryKey: mcpDiscoveryKey })
+      void qc.invalidateQueries({ queryKey: ['mcpConfig'] })
+    },
+  })
+}
+
+export function useSyncSharedMcp() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { force?: boolean } = {}) => fns.syncSharedMcp({ data: vars }),
+    onSuccess: (data) => {
+      qc.setQueryData(sharedMcpKey, data.view)
+      void qc.invalidateQueries({ queryKey: mcpDiscoveryKey })
+      void qc.invalidateQueries({ queryKey: ['mcpConfig'] })
+    },
+  })
+}
+
+/**
+ * Slash commands available in a composer. The files live on disk and the user
+ * may add one while the page is open, so this is refetched rather than pinned.
+ */
+export function useSlashCommands(
+  input: { runtimeId: string; workspaceId?: string; includeApp?: boolean },
+  opts?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: [
+      'slashCommands',
+      input.runtimeId,
+      input.workspaceId ?? '',
+      input.includeApp ? 'app' : 'files',
+    ],
+    queryFn: () => fns.listSlashCommands({ data: input }),
+    enabled: (opts?.enabled ?? true) && !!input.runtimeId,
+    staleTime: 30_000,
+  })
+}
 
 export function useTasks() {
   const streamHealthy = useActivityStreamHealthy()
@@ -50,6 +187,10 @@ export function loadNativeSessionPage(input: {
 
 export function useRuntimes() {
   return useQuery({ queryKey: ['runtimes'], queryFn: () => fns.listRuntimes() })
+}
+
+export function usePresetBins() {
+  return useQuery({ queryKey: ['presetBins'], queryFn: () => fns.listPresetBins() })
 }
 
 /**
@@ -98,13 +239,28 @@ export function useCommandPreviewForRuntime(
   })
 }
 
-export function useRuns(taskId?: string, includeArchived = false) {
+export const RUNS_PAGE_SIZE = 10
+
+export function useRuns(
+  taskId?: string,
+  includeArchived = false,
+  opts?: { limit?: number; offset?: number },
+) {
   const streamHealthy = useActivityStreamHealthy()
+  const limit = opts?.limit ?? 100
+  const offset = opts?.offset ?? 0
   return useQuery({
-    queryKey: ['runs', taskId ?? 'all', includeArchived ? 'archived' : 'active'],
-    queryFn: () => fns.listRuns({ data: { taskId, limit: 100, includeArchived } }),
+    queryKey: ['runs', taskId ?? 'all', includeArchived ? 'archived' : 'active', limit, offset],
+    queryFn: () => fns.listRuns({ data: { taskId, limit, offset, includeArchived } }),
     // Activity SSE invalidates on run_changed; poll only when the stream is down.
     refetchInterval: streamHealthy ? false : 3000,
+  })
+}
+
+export function useRunCount(taskId?: string, includeArchived = false) {
+  return useQuery({
+    queryKey: ['runs', 'count', taskId ?? 'all', includeArchived ? 'archived' : 'active'],
+    queryFn: () => fns.countRuns({ data: { taskId, includeArchived } }),
   })
 }
 
@@ -636,6 +792,34 @@ export function useCreateIntegrationAutomation() {
 export function useSuggestProjectChecks() {
   return useMutation({
     mutationFn: (id: string) => fns.suggestProjectChecks({ data: { id } }),
+  })
+}
+
+/**
+ * Usage across every configured runtime. The first call after a lot of CLI
+ * activity re-parses whatever changed on disk, so keep it cached rather than
+ * refetching on focus. Changing the range re-aggregates from the same cache.
+ */
+export function useUsageReport(range: UsageRange) {
+  return useQuery({
+    queryKey: ['usageReport', range],
+    queryFn: () => fns.usageReport({ data: { range } }),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
+  })
+}
+
+/**
+ * The tightest limit any CLI reports about itself, for the account-menu badge.
+ * One file read, so the sidebar can poll it without the full scan.
+ */
+export function useUsagePressure() {
+  return useQuery({
+    queryKey: ['usagePressure'],
+    queryFn: () => fns.usagePressure(),
+    staleTime: 120_000,
+    refetchInterval: 300_000,
   })
 }
 

@@ -19,7 +19,7 @@ import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
 import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
 import { cachedModelsForBin, warmModelCatalogs } from './modelCatalog'
 import { parseRuntimeMode } from '../lib/runtimeMode'
-import { compareRuntimesForDisplay } from '../lib/runtimePresets'
+import { compareRuntimesForDisplay, RUNTIME_PRESETS } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
 import type { WebhookFilters } from '../lib/integrations/types'
@@ -35,7 +35,9 @@ import {
   type NativeSessionKind,
 } from '../lib/nativeSessions.ts'
 import {
+  forgetDeletedRuntimeId,
   getDb,
+  rememberDeletedRuntimeId,
   type CheckResultRow,
   type MessageRow,
   type RuntimeRow,
@@ -72,7 +74,33 @@ import {
   type PreviewCommandResult,
 } from './commandPreview'
 import { getProject, getWorkspace, listWorkspaces, resolveWorkspacePath } from './workspaces'
+import {
+  openrunToolServer,
+  removeMcpServer,
+  resolveMcpTargets,
+  saveMcpServer,
+  type ResolvedMcpTarget,
+} from './mcp.ts'
+import {
+  discoverMcpServers,
+  getSharedMcp,
+  importMcpServers,
+  removeSharedMcpServer,
+  saveSharedMcpServer,
+  syncSharedMcp,
+  type ImportChoice,
+  type ImportReport,
+  type McpDiscovery,
+  type SharedMcpView,
+  type SharedWriteReport,
+} from './mcpShared.ts'
+import type { McpServerConfig } from '../lib/mcp.ts'
+import { mcpSupportRefusal } from '../lib/mcpTargets.ts'
+import { listSlashCommands, type SlashCommandListing } from './slashCommands.ts'
+import { APP_SLASH_COMMANDS } from '../lib/slashCommands.ts'
 import { listNativeSessionsForKind, nativeSessionExists } from './nativeSessions'
+import { collectUsage } from './usage'
+import { parseUsageRange, rangeCutoff, type UsageReport } from '../lib/usage.ts'
 import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
 
@@ -219,14 +247,28 @@ export function upsertRuntime(input: RuntimeInput): RuntimeRow {
     transport,
     createdAt: existing?.createdAt ?? Date.now(),
   })
+  forgetDeletedRuntimeId(rid)
   return getRuntime(rid)!
 }
 
 export function deleteRuntime(runtimeId: string) {
   getDb().prepare('DELETE FROM runtimes WHERE id = ?').run(runtimeId)
+  rememberDeletedRuntimeId(runtimeId)
 }
 
-export { checkRuntimeInstalled } from './runtimePath'
+/** PATH status for gallery presets, keyed by binary name. */
+export function listPresetBinStatus(): Array<{ bin: string; installed: boolean; path: string }> {
+  const seen = new Set<string>()
+  const out: Array<{ bin: string; installed: boolean; path: string }> = []
+  for (const preset of RUNTIME_PRESETS) {
+    if (seen.has(preset.bin)) continue
+    seen.add(preset.bin)
+    out.push({ bin: preset.bin, ...checkRuntimeInstalled(preset.bin) })
+  }
+  return out
+}
+
+export { checkRuntimeInstalled }
 
 export { previewRuntimeCommand }
 export type { PreviewCommandInput, PreviewCommandResult }
@@ -298,6 +340,171 @@ function assertNativeResume(input: {
   const kind = nativeResumeKindFor(runtime ?? {})
   if (!kind) throw new Error(nativeResumeNotSupportedMessage())
   if (!nativeSessionExists(input.cwd, kind, id)) throw new Error(missingNativeSessionMessage(kind))
+}
+
+// ---------------------------------------------------------------------------
+// MCP servers
+// ---------------------------------------------------------------------------
+
+/**
+ * What the MCP page shows for one runtime: the config files its servers can
+ * live in, already read, plus the reason there are none.
+ *
+ * Open Run has no registry of its own — these are the agent's real config
+ * files, so a server added here is also there next time the user runs the CLI
+ * by hand. See `lib/mcpTargets.ts`.
+ */
+export type McpConfigView = {
+  runtime: { id: string; label: string; bin: string; transport: string }
+  /** Why this runtime cannot hold MCP servers at all (unknown CLI). */
+  refusal?: string
+  targets: ResolvedMcpTarget[]
+  /**
+   * The entry that points an agent at Open Run's own run-context tools, ready
+   * to write into any of the targets above. Null when the server script is
+   * missing from this checkout.
+   */
+  openrunTools: McpServerConfig | null
+}
+
+/** Workspace path for MCP purposes — unset and half-built ones simply have none. */
+function mcpCwd(workspaceId?: string): string {
+  if (!workspaceId?.trim()) return ''
+  return getWorkspace(workspaceId)?.path ?? ''
+}
+
+function mcpRuntime(runtimeId: string): RuntimeRow {
+  const runtime = getRuntime(runtimeId)
+  if (!runtime) throw new Error('Runtime not found')
+  return runtime
+}
+
+export function getMcpConfig(input: { runtimeId: string; workspaceId?: string }): McpConfigView {
+  const runtime = mcpRuntime(input.runtimeId)
+  const refusal = mcpSupportRefusal({ bin: runtime.bin, transport: runtime.transport })
+  return {
+    runtime: {
+      id: runtime.id,
+      label: resolveRuntimeLabel(runtime.label, runtime.id),
+      bin: runtime.bin,
+      transport: runtime.transport,
+    },
+    ...(refusal ? { refusal } : {}),
+    targets: resolveMcpTargets({
+      bin: runtime.bin,
+      transport: runtime.transport,
+      cwd: mcpCwd(input.workspaceId),
+    }),
+    openrunTools: openrunToolServer(),
+  }
+}
+
+export function saveMcpServerConfig(input: {
+  runtimeId: string
+  workspaceId?: string
+  targetId: string
+  server: McpServerConfig
+  previousName?: string
+}): McpConfigView {
+  const runtime = mcpRuntime(input.runtimeId)
+  saveMcpServer({
+    bin: runtime.bin,
+    transport: runtime.transport,
+    cwd: mcpCwd(input.workspaceId),
+    targetId: input.targetId,
+    server: input.server,
+    ...(input.previousName ? { previousName: input.previousName } : {}),
+  })
+  return getMcpConfig(input)
+}
+
+export function removeMcpServerConfig(input: {
+  runtimeId: string
+  workspaceId?: string
+  targetId: string
+  name: string
+}): McpConfigView {
+  const runtime = mcpRuntime(input.runtimeId)
+  removeMcpServer({
+    bin: runtime.bin,
+    transport: runtime.transport,
+    cwd: mcpCwd(input.workspaceId),
+    targetId: input.targetId,
+    name: input.name,
+  })
+  return getMcpConfig(input)
+}
+
+/**
+ * Shared MCP servers: defined once here, written into every CLI's machine-wide
+ * config. See `server/mcpShared.ts` for the ownership rules.
+ */
+export function getSharedMcpConfig(): SharedMcpView {
+  return getSharedMcp()
+}
+
+export function saveSharedMcpServerConfig(input: {
+  server: McpServerConfig
+  previousName?: string
+  force?: boolean
+}): { view: SharedMcpView; report: SharedWriteReport } {
+  const report = saveSharedMcpServer(input)
+  return { view: getSharedMcp(), report }
+}
+
+export function discoverMcpServersConfig(): McpDiscovery {
+  return discoverMcpServers()
+}
+
+export function importMcpServersConfig(input: { choices: ImportChoice[] }): {
+  view: SharedMcpView
+  discovery: McpDiscovery
+  report: ImportReport
+} {
+  const report = importMcpServers(input)
+  return { view: getSharedMcp(), discovery: discoverMcpServers(), report }
+}
+
+export function removeSharedMcpServerConfig(input: {
+  name: string
+  scope?: 'registry' | 'everywhere'
+}): {
+  view: SharedMcpView
+  report: SharedWriteReport
+} {
+  const report = removeSharedMcpServer(input)
+  return { view: getSharedMcp(), report }
+}
+
+export function syncSharedMcpConfig(input: { force?: boolean } = {}): {
+  view: SharedMcpView
+  report: SharedWriteReport
+} {
+  const report = syncSharedMcp(input)
+  return { view: getSharedMcp(), report }
+}
+
+// ---------------------------------------------------------------------------
+// Slash commands
+// ---------------------------------------------------------------------------
+
+/**
+ * Commands the composer can offer for a runtime: the CLI's own command files
+ * plus, in a live chat, the ones Open Run answers itself.
+ *
+ * `includeApp` is false for an automation's prompt: `/clear` and `/stop` need
+ * a conversation and a human, neither of which an unattended run has.
+ */
+export function listSlashCommandsFor(input: {
+  runtimeId: string
+  workspaceId?: string
+  includeApp?: boolean
+}): SlashCommandListing {
+  const runtime = getRuntime(input.runtimeId)
+  if (!runtime) return { commands: [] }
+  const listing = listSlashCommands({ bin: runtime.bin, cwd: mcpCwd(input.workspaceId) })
+  if (!input.includeApp) return listing
+  return { ...listing, commands: [...APP_SLASH_COMMANDS, ...listing.commands] }
 }
 
 // ---------------------------------------------------------------------------
@@ -799,36 +1006,49 @@ export type RunSummary = Omit<RunRow, 'stdout' | 'stderr'> & {
   runtimeLabel: string
 }
 
+function runsListWhere(opts?: { taskId?: string; includeArchived?: boolean }): {
+  where: string
+  params: unknown[]
+} {
+  const archivedClause = opts?.includeArchived
+    ? 'AND archivedAt IS NOT NULL'
+    : 'AND archivedAt IS NULL'
+  if (opts?.taskId) {
+    return { where: `taskId = ? ${archivedClause}`, params: [opts.taskId] }
+  }
+  return { where: `1=1 ${archivedClause}`, params: [] }
+}
+
+export function countRuns(opts?: {
+  taskId?: string
+  /** When true, count archived runs only; default is active (non-archived) runs. */
+  includeArchived?: boolean
+}): number {
+  const { where, params } = runsListWhere(opts)
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM runs WHERE ${where}`)
+    .get(...params) as { n: number }
+  return row.n
+}
+
 export function listRuns(opts?: {
   taskId?: string
   limit?: number
+  offset?: number
   /** When true, return archived runs only; default is active (non-archived) runs. */
   includeArchived?: boolean
 }): RunSummary[] {
   const limit = opts?.limit ?? 50
-  const db = getDb()
-  const archivedClause = opts?.includeArchived
-    ? 'AND archivedAt IS NOT NULL'
-    : 'AND archivedAt IS NULL'
-  const rows = (
-    opts?.taskId
-      ? db
-          .prepare(
-            `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
-                    length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
-                    archivedAt, verdict, repairAttempts, timedOut
-             FROM runs WHERE taskId = ? ${archivedClause} ORDER BY startedAt DESC LIMIT ?`,
-          )
-          .all(opts.taskId, limit)
-      : db
-          .prepare(
-            `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
-                    length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
-                    archivedAt, verdict, repairAttempts, timedOut
-             FROM runs WHERE 1=1 ${archivedClause} ORDER BY startedAt DESC LIMIT ?`,
-          )
-          .all(limit)
-  ) as Omit<RunSummary, 'runtimeLabel'>[]
+  const offset = opts?.offset ?? 0
+  const { where, params } = runsListWhere(opts)
+  const rows = getDb()
+    .prepare(
+      `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
+              length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
+              archivedAt, verdict, repairAttempts, timedOut
+       FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as Omit<RunSummary, 'runtimeLabel'>[]
   const labelById = new Map(listRuntimes().map((runtime) => [runtime.id, runtime.label] as const))
   return rows.map((row) => ({
     ...row,
@@ -1428,6 +1648,58 @@ export function createTasksFromPlan(input: {
     }),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+/**
+ * What every configured runtime has spent, read from each CLI's own history.
+ * Runtimes are listed even when their binary is missing, so the page shows the
+ * same roster as Runtimes rather than silently dropping rows.
+ *
+ * Worktrees are passed in alongside their project so a session started in a
+ * worktree is credited to the project it belongs to, not to a stray folder.
+ */
+export function getUsageReport(input?: { range?: string }): UsageReport {
+  const range = parseUsageRange(input?.range)
+  const runtimes = listRuntimes().map((r) => ({
+    id: r.id,
+    label: r.label,
+    bin: r.bin,
+    transport: r.transport,
+    installed: checkRuntimeInstalled(r.bin).installed,
+  }))
+
+  const db = getDb()
+  const projectRows = db.prepare('SELECT id, name, path FROM projects').all() as Array<{
+    id: string
+    name: string
+    path: string
+  }>
+  const worktreeRows = db
+    .prepare(
+      `SELECT w.projectId AS id, p.name AS name, w.path AS path
+       FROM workspaces w JOIN projects p ON p.id = w.projectId`,
+    )
+    .all() as Array<{ id: string; name: string; path: string }>
+
+  const cutoff = rangeCutoff(range, Date.now())
+  const runCounts: Record<string, number> = {}
+  const counted = db
+    .prepare('SELECT runtimeId, COUNT(*) AS n FROM runs WHERE startedAt >= ? GROUP BY runtimeId')
+    .all(cutoff) as Array<{ runtimeId: string; n: number }>
+  for (const row of counted) runCounts[row.runtimeId] = row.n
+
+  return collectUsage({
+    runtimes,
+    projects: [...projectRows, ...worktreeRows],
+    range,
+    runCounts,
+  })
+}
+
+export { readUsagePressure as getUsagePressure } from './usage'
 
 // ---------------------------------------------------------------------------
 // Notifications

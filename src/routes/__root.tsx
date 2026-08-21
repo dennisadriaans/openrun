@@ -8,7 +8,17 @@ import {
   useRouterState,
 } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Bell, ChevronsUpDown, History, ListChecks, Smartphone, User, Webhook } from 'lucide-react'
+import {
+  Bell,
+  Blocks,
+  ChevronsUpDown,
+  Gauge,
+  History,
+  ListChecks,
+  Smartphone,
+  User,
+  Webhook,
+} from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import {
@@ -64,7 +74,9 @@ const NAV = [
 const USER_MENU = [
   { to: '/devices', label: 'Devices', icon: Smartphone },
   { to: '/integrations', label: 'Integrations', icon: Webhook },
+  { to: '/mcp', label: 'MCP servers', icon: Blocks },
   { to: '/notifications', label: 'Notifications', icon: Bell },
+  { to: '/usage', label: 'Usage', icon: Gauge },
 ]
 
 export const Icon = ({ className = 'w-6 h-6 rounded bg-inverted', ...props }) => {
@@ -289,7 +301,7 @@ function Sidebar() {
   if (!open) return null
 
   return (
-    <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-sidebar py-2">
+    <aside className="flex h-full w-52 shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar py-2">
       <div className="mb-2 flex items-center gap-1 px-3">
         <Icon className="size-4 rounded-[3px] bg-inverted text-foreground" />
         <span className="ml-1.5 text-ui-sm font-medium tracking-tight text-foreground">
@@ -339,11 +351,11 @@ function AppLayout() {
   return (
     <SidebarProvider>
       <TopBarActionsProvider>
-        <div className="flex min-h-screen bg-chrome">
+        <div className="flex h-dvh max-h-dvh overflow-hidden bg-chrome">
           <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden bg-chrome">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chrome">
             <AppTopBar />
-            <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden">
+            <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
               <Outlet />
             </main>
           </div>
@@ -355,7 +367,7 @@ function AppLayout() {
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark" className="dark">
       <head>
         <HeadContent />
       </head>
