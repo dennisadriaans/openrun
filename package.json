@@ -29,7 +29,7 @@
     "token:print": "node --experimental-strip-types scripts/token.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src scripts",
+    "lint": "biome check src scripts && node --experimental-strip-types scripts/lint-comments.ts",
     "lint:fix": "biome check --write src scripts",
     "format": "biome format --write src scripts",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""

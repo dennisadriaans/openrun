@@ -1,24 +1,6 @@
 /**
- * Production entrypoint — binds the interface the security model assumes.
- *
- * Two jobs, and the first is why this file exists at all:
- *
- * 1. **Decide the bind address before the port opens.** The in-process guard
- *    (`src/start.ts`) can only refuse requests; it cannot un-publish a socket.
- *    If the listener came up on every interface while the guard believed it was
- *    on loopback, the check would be confidently wrong. So the address is
- *    resolved here, from the same rules the guard uses
- *    (`src/lib/serverAccess.ts`), and a configuration that would expose command
- *    execution to the network exits non-zero instead of listening.
- *
- * 2. **Serve the build.** `vite build` emits a fetch handler
- *    (`dist/server/server.js` exports `{ fetch }`), not a listening server —
- *    there is no Nitro preset configured. This bridges it onto `node:http`.
- *    Response bodies are piped as streams rather than buffered, because the
- *    live run log and the activity feed are SSE: buffering them would hang the
- *    UI on an open connection that never ends.
- *
- * `pnpm dev` needs none of this — Vite serves it and binds loopback already.
+ * Production entrypoint: resolves the bind address before the port opens (the in-process
+ * guard cannot un-publish a socket) and serves the built fetch handler over node:http.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { existsSync } from 'node:fs'
