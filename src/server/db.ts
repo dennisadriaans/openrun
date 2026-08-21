@@ -850,6 +850,18 @@ function migrate(db: Database.Database) {
 }
 
 function backfillId(prefix: string) {
+    -- One row per CLI history file we have already totalled up, so the Usage
+    -- page re-reads only what changed since the last scan. version bumps
+    -- when the parser or the price table changes. Pure cache: safe to delete.
+    CREATE TABLE IF NOT EXISTS usage_file_cache (
+      path TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      mtimeMs INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      stats TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 }
 

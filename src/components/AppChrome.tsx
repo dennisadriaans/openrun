@@ -123,7 +123,9 @@ function crumbsForPath(pathname: string): Crumb[] {
     return [{ label: 'Integrations', to: '/integrations' }, { label: title }]
   }
   if (pathname === '/notifications') return [{ label: 'Notifications' }]
+  if (pathname === '/usage') return [{ label: 'Usage' }]
   if (pathname === '/runtimes') return [{ label: 'Runtimes' }]
+  if (pathname === '/mcp') return [{ label: 'MCP servers' }]
   if (pathname === '/planner') return [{ label: 'Planner' }]
   if (pathname === '/tasks' || pathname === '/tasks/') {
     return [{ label: 'Automations', to: '/tasks' }]
