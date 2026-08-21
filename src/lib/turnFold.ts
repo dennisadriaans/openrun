@@ -23,11 +23,18 @@ export type TurnFoldPlan = {
 /**
  * A settled turn folds tool calls, thoughts, and in-progress commentary.
  * File-edit hunks stay in the response as change cards, next to the answer.
+ *
+ * A turn still running folds its work too — the working line is the whole
+ * status; the steps behind it only ever show once the fold is opened.
  */
 export function planTurnFold(rows: TurnRow[], settled: boolean): TurnFoldPlan {
   const empty: TurnFoldPlan = { foldable: false, hiddenIds: new Set() }
-  if (!settled) return empty
   if (!rows.some((row) => row.kind === 'work')) return empty
+
+  if (!settled) {
+    const workIds = new Set(rows.filter((row) => row.kind === 'work').map((row) => row.id))
+    return { foldable: true, hiddenIds: workIds }
+  }
 
   let terminalTextId: string | null = null
   for (let i = rows.length - 1; i >= 0; i--) {

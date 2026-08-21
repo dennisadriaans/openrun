@@ -595,7 +595,7 @@ const AssistantMessage = memo(function AssistantMessage({
       <div className="relative min-w-0 px-1 py-0.5">
         {showEvents ? (
           <>
-            {fold.foldable ? (
+            {fold.foldable && !running ? (
               <TurnFold
                 startedAt={message.createdAt}
                 finishedAt={message.finishedAt}
@@ -604,7 +604,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 onToggle={() => setFoldStage(foldStage === 'closed' ? 'partial' : 'closed')}
               />
             ) : null}
-            {moreCount > 0 && foldStage !== 'closed' ? (
+            {moreCount > 0 && !running && foldStage !== 'closed' ? (
               <button
                 type="button"
                 aria-expanded={foldStage === 'all'}
