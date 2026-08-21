@@ -8,6 +8,7 @@
  */
 import {
   toolKindFromName,
+  resolveToolKind,
   type ToolCallLocation,
   type ToolCallStatus,
   type ToolKind,
@@ -72,6 +73,27 @@ function runningVerb(status: ToolCallStatus | undefined): boolean {
   return status === 'pending' || status === 'in_progress'
 }
 
+/**
+ * A readable label for a tool we have no verb for.
+ *
+ * Custom and MCP tools are named for machines — `create_issue`,
+ * `createIssue`, `mcp__linear__create_issue` — and rendering that raw in the
+ * transcript is the difference between a row that reads like a sentence and
+ * one that reads like a log line. The MCP prefix is dropped because the server
+ * is shown separately.
+ */
+export function humanizeToolName(name: string | undefined): string {
+  const raw = (name ?? '').trim()
+  if (!raw) return ''
+  const bare = raw.replace(/^mcp[_.]{1,2}.*?[_.]{2}/i, '').replace(/^mcp[_.]/i, '')
+  const words = bare
+    .replace(/[_.-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .trim()
+  if (!words) return raw
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 export function toolCallVerb(
   kind: ToolKind,
   name: string | undefined,
@@ -92,10 +114,13 @@ export function toolCallVerb(
     return running ? 'Searching' : 'Searched'
   }
   if (kind === 'execute') return running ? 'Running' : 'Ran'
-  if (kind === 'fetch') return running ? 'Fetching' : 'Fetched'
+  if (kind === 'fetch') {
+    if (n.includes('search')) return running ? 'Searching' : 'Searched'
+    return running ? 'Fetching' : 'Fetched'
+  }
   if (kind === 'think') return running ? 'Thinking' : 'Thought'
   if (kind === 'switch_mode') return running ? 'Switching' : 'Switched'
-  return name?.trim() || 'Tool'
+  return humanizeToolName(name) || 'Tool'
 }
 
 function pathFromInput(
@@ -161,8 +186,16 @@ function targetFrom(
   }
 
   if (kind === 'fetch') {
-    const url = pickString(obj ?? {}, 'url', 'uri', 'href') || fallback
+    const url = pickString(obj ?? {}, 'url', 'uri', 'href')
     if (url) return { type: 'url', url }
+    const query = pickString(obj ?? {}, 'query')
+    if (query) return { type: 'text', text: query }
+    if (fallback) {
+      if (/^https?:\/\//i.test(fallback) || fallback.startsWith('//')) {
+        return { type: 'url', url: fallback }
+      }
+      return { type: 'text', text: fallback }
+    }
   }
 
   const path = pathFromInput(obj, locations)
@@ -187,7 +220,9 @@ export function toolCallView(input: {
   toolInput?: unknown
   locations?: ToolCallLocation[]
 }): ToolCallView {
-  const kind = input.toolKind ?? toolKindFromName(input.name)
+  const kind =
+    resolveToolKind(input.name, input.toolKind, input.toolInput, input.title) ??
+    toolKindFromName(input.name)
   const locations = input.locations ?? []
   return {
     kind,
@@ -206,4 +241,93 @@ export function hasEditHunks(input: {
   locations?: ToolCallLocation[]
 }): boolean {
   return toolCallView(input).hunks.length > 0
+}
+
+/** One row of the key/value table shown for a tool we have no layout for. */
+export type ToolCallField = {
+  key: string
+  label: string
+  value: string
+  /** Render in a block rather than on the same line as the label. */
+  block: boolean
+}
+
+/** Input keys the row header already shows, so the table does not repeat them. */
+const SHOWN_IN_HEADER = new Set([
+  'command',
+  'cmd',
+  'file_path',
+  'filePath',
+  'path',
+  'target_file',
+  'notebook_path',
+  'pattern',
+  'query',
+  'glob',
+  'url',
+  'uri',
+  'href',
+  'old_string',
+  'oldString',
+  'new_string',
+  'newString',
+  'contents',
+  'content',
+  'edits',
+])
+
+function fieldValue(value: unknown): { text: string; block: boolean } {
+  if (typeof value === 'string') {
+    return { text: value, block: value.includes('\n') || value.length > 60 }
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return { text: String(value), block: false }
+  }
+  try {
+    const json = JSON.stringify(value, null, 2)
+    return { text: json, block: json.includes('\n') }
+  } catch {
+    return { text: String(value), block: false }
+  }
+}
+
+/**
+ * Arguments of a custom / MCP tool as labelled rows.
+ *
+ * An MCP server can name its arguments anything, so there is no layout to
+ * recognise — but a table of `issue id: ENG-42` still reads better than the
+ * JSON blob, and long values keep their own block so a prompt argument is
+ * readable. `target` is what the row header already renders; those keys are
+ * skipped here.
+ */
+export function toolCallFields(input: unknown, target?: ToolCallTarget): ToolCallField[] {
+  const obj = inputRecord(input)
+  if (!obj) return []
+  const skipHeader = target === undefined || target.type !== 'text'
+  const out: ToolCallField[] = []
+  for (const [key, raw] of Object.entries(obj)) {
+    if (raw === undefined) continue
+    if (skipHeader && SHOWN_IN_HEADER.has(key)) continue
+    if (typeof raw === 'string' && raw.trim() === '') continue
+    const { text, block } = fieldValue(raw)
+    out.push({ key, label: humanizeToolName(key), value: text, block })
+  }
+  return out
+}
+
+/**
+ * Pretty-print a tool result that is really JSON.
+ *
+ * MCP servers commonly answer with a single JSON string, which the transcript
+ * used to show as one unbroken line. Anything that is not JSON comes back
+ * untouched.
+ */
+export function formatToolResult(result: string): string {
+  const trimmed = result.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return result
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return result
+  }
 }

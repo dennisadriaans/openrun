@@ -135,10 +135,10 @@ export function toolKindFromName(name: string | undefined): ToolKind {
   ) {
     return 'edit'
   }
+  if (isWebToolName(n)) return 'fetch'
   if (n === 'grep' || n === 'glob' || n === 'search' || n === 'ls' || n === 'listdir') {
     return 'search'
   }
-  if (n === 'websearch' || n === 'webfetch' || n === 'web_search' || n === 'fetch') return 'fetch'
   if (
     n === 'task' ||
     n === 'agent' ||
@@ -154,6 +154,100 @@ export function toolKindFromName(name: string | undefined): ToolKind {
   if (n === 'move' || n === 'rename' || n === 'mv') return 'move'
   if (n.startsWith('mcp__') || n.startsWith('mcp_') || n.startsWith('mcp.')) return 'other'
   return 'other'
+}
+
+function isRepoSearchName(n: string): boolean {
+  return (
+    n === 'grep' ||
+    n === 'glob' ||
+    n === 'ls' ||
+    n === 'listdir' ||
+    n === 'list_dir' ||
+    n.includes('grep') ||
+    n.includes('glob') ||
+    n.includes('codebase') ||
+    n.startsWith('listdir') ||
+    n.startsWith('list_dir')
+  )
+}
+
+function isWebToolName(n: string): boolean {
+  if (!n) return false
+  return (
+    n === 'fetch' ||
+    n.includes('websearch') ||
+    n.includes('webfetch') ||
+    n.includes('web_search') ||
+    n.includes('web_fetch') ||
+    (n.includes('web') && (n.includes('search') || n.includes('fetch')))
+  )
+}
+
+function acpPickString(obj: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function hasRepoScope(obj: Record<string, unknown>): boolean {
+  if (
+    acpPickString(
+      obj,
+      'pattern',
+      'glob',
+      'path',
+      'file_path',
+      'filePath',
+      'target_directory',
+      'targetDirectory',
+    )
+  ) {
+    return true
+  }
+  const dirs = obj.target_directories ?? obj.targetDirectories
+  return Array.isArray(dirs) && dirs.length > 0
+}
+
+/** Web browse/search input: a URL, or a query with no repo path / pattern. */
+export function isWebToolInput(name: string | undefined, input: unknown): boolean {
+  const obj =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : undefined
+  if (!obj) return false
+  const n = (name ?? '').toLowerCase()
+  if (isRepoSearchName(n)) return false
+  if (acpPickString(obj, 'url', 'uri', 'href')) return true
+  if (hasRepoScope(obj)) return false
+  return Boolean(acpPickString(obj, 'query'))
+}
+
+/**
+ * Pick the transcript kind for a tool call.
+ *
+ * ACP agents sometimes label web browse/search tools with `kind: 'search'`
+ * even though the tool name is `web_search` / `WebFetch`, or the bare name
+ * `Search` with only a `query` argument. Prefer web fetch in those cases so
+ * chat shows the globe icon instead of the repo-search magnifying glass.
+ */
+export function resolveToolKind(
+  name: string | undefined,
+  kind?: ToolKind,
+  input?: unknown,
+  title?: string,
+): ToolKind | undefined {
+  for (const candidate of [name, title]) {
+    if (!candidate?.trim()) continue
+    if (toolKindFromName(candidate) === 'fetch') return 'fetch'
+    if (isWebToolInput(candidate, input)) return 'fetch'
+  }
+  if (kind === 'search' && title && /\bweb\b/i.test(title)) return 'fetch'
+  if (kind !== undefined && isToolKind(kind)) return kind
+  if (name) return toolKindFromName(name)
+  if (title) return toolKindFromName(title)
+  return undefined
 }
 
 /**
