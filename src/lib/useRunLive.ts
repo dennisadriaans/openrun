@@ -18,12 +18,18 @@ import {
 import { openLiveStream } from './liveStream.ts'
 import type { RunLiveEvent } from './runLive'
 import { runLiveStreamPath } from './runLive'
+import { isDemoDetailRun, isDemoMode } from './demoData.ts'
 
 export function useRunLive(runId: string): { streamHealthy: boolean } {
   const qc = useQueryClient()
-  const [streamHealthy, setStreamHealthy] = useState(false)
+  const demo = isDemoMode() && isDemoDetailRun(runId)
+  const [streamHealthy, setStreamHealthy] = useState(demo)
 
   useEffect(() => {
+    if (demo) {
+      setStreamHealthy(true)
+      return
+    }
     if (typeof EventSource === 'undefined') return
 
     const refetchConversation = () => {
@@ -97,7 +103,7 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
     })
 
     return () => stream.close()
-  }, [runId, qc])
+  }, [demo, runId, qc])
 
   return { streamHealthy }
 }

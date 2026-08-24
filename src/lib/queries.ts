@@ -8,6 +8,8 @@ import {
   type ConversationCacheSlice,
 } from './applyRunLiveEvent'
 import { useActivityStreamHealthy } from './useActivityLive'
+import { demoConversation, demoFileDiff, demoRunWorkspace } from './demoConversation.ts'
+import { isDemoDetailRun, isDemoMode } from './demoData.ts'
 import { newMessageId } from './messageId.ts'
 import type { PlanProposal } from './planProposals.ts'
 import type { McpServerConfig } from './mcp.ts'
@@ -317,18 +319,20 @@ export function useRemoveRun() {
 }
 
 export function conversationQueryOptions(runId: string) {
+  const demo = isDemoMode() && isDemoDetailRun(runId)
   return {
     queryKey: ['conversation', runId] as const,
-    queryFn: () => fns.getConversation({ data: { runId } }),
+    queryFn: () => (demo ? demoConversation(runId) : fns.getConversation({ data: { runId } })),
     staleTime: CONVERSATION_STALE_MS,
     refetchOnWindowFocus: false as const,
   }
 }
 
 export function runWorkspaceQueryOptions(runId: string) {
+  const demo = isDemoMode() && isDemoDetailRun(runId)
   return {
     queryKey: ['runWorkspace', runId] as const,
-    queryFn: () => fns.getRunWorkspace({ data: { runId } }),
+    queryFn: () => (demo ? demoRunWorkspace(runId) : fns.getRunWorkspace({ data: { runId } })),
   }
 }
 
@@ -387,10 +391,11 @@ export function useRun(id: string, opts?: { streamHealthy?: boolean }) {
 
 export function useConversation(runId: string, opts?: { streamHealthy?: boolean }) {
   const streamHealthy = opts?.streamHealthy ?? false
+  const demo = isDemoMode() && isDemoDetailRun(runId)
   return useQuery({
     ...conversationQueryOptions(runId),
     refetchInterval: (q) => {
-      if (streamHealthy) return false
+      if (demo || streamHealthy) return false
       const running = q.state.data?.run.status === 'running'
       return running ? 1000 : 5000
     },
@@ -403,20 +408,23 @@ export function useRunWorkspace(
   opts?: { enabled?: boolean; streamHealthy?: boolean },
 ) {
   const streamHealthy = opts?.streamHealthy ?? false
+  const demo = isDemoMode() && isDemoDetailRun(runId)
   return useQuery({
     ...runWorkspaceQueryOptions(runId),
     enabled: opts?.enabled ?? true,
     refetchInterval: () => {
-      if (streamHealthy) return false
+      if (demo || streamHealthy) return false
       return 5_000
     },
   })
 }
 
 export function useFileDiff(runId: string, path: string | null) {
+  const demo = isDemoMode() && isDemoDetailRun(runId)
   return useQuery({
     queryKey: ['fileDiff', runId, path],
-    queryFn: () => fns.getFileDiff({ data: { runId, path: path! } }),
+    queryFn: () =>
+      demo && path ? demoFileDiff(runId, path) : fns.getFileDiff({ data: { runId, path: path! } }),
     enabled: !!path,
   })
 }

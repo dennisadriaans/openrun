@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button, Card, EmptyState, Modal, PageHeader, StatusBadge } from '../components/ui'
+import { demoRuns, isDemoMode } from '../lib/demoData.ts'
 import { absoluteTime, duration, relativeTime } from '../lib/format'
 import { RUNS_PAGE_SIZE, useRemoveRun, useRunCount, useRuns } from '../lib/queries'
 
@@ -21,12 +22,17 @@ const ROW_GRID =
   'grid items-center gap-3 grid-cols-[6.5rem_minmax(0,1fr)_4rem_4.5rem_1.75rem] sm:grid-cols-[6.5rem_minmax(0,1fr)_8rem_4rem_4.5rem_1.75rem]'
 
 function RunsPage() {
+  const demo = isDemoMode()
   const { page = 1 } = Route.useSearch()
-  const { data: runs, isLoading } = useRuns(undefined, false, {
+  const { data: liveRuns, isLoading: liveLoading } = useRuns(undefined, false, {
     limit: RUNS_PAGE_SIZE,
     offset: (page - 1) * RUNS_PAGE_SIZE,
   })
-  const { data: total = 0 } = useRunCount()
+  const { data: liveTotal = 0 } = useRunCount()
+  const demoList = demo ? demoRuns(Date.now()) : undefined
+  const runs = demoList ?? liveRuns
+  const total = demoList ? demoList.length : liveTotal
+  const isLoading = demo ? false : liveLoading
   const remove = useRemoveRun()
   const navigate = useNavigate()
   const [deleteId, setDeleteId] = useState<string | null>(null)

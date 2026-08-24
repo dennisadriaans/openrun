@@ -22,6 +22,7 @@ turn snapshots git state so the UI can show diffs and open a PR.
 
 ```bash
 pnpm dev             # dev server on :3000 (loopback)
+pnpm dev -- --demo   # same, overlay sample Runs + Automations (no DB writes)
 pnpm lint            # biome check (lint + format); pnpm lint:fix writes
 pnpm build           # production build into dist/
 pnpm start           # serve the build via scripts/start.ts (refuses an unsafe bind)

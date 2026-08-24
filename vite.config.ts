@@ -22,6 +22,7 @@ import { lanAllowedHosts } from './src/server/mobile/lan'
  * behaves exactly as before either way.
  */
 const MOBILE_ENABLED = process.env.AGENTOPS_MOBILE === '1'
+const DEMO_FLAG = process.env.OPENRUN_DEMO ?? process.env.AGENTOPS_DEMO ?? ''
 
 function remoteAccessGuard(): Plugin {
   return {
@@ -53,6 +54,10 @@ function remoteAccessGuard(): Plugin {
 }
 
 const config = defineConfig({
+  define: {
+    'process.env.OPENRUN_DEMO': JSON.stringify(DEMO_FLAG),
+    'process.env.AGENTOPS_DEMO': JSON.stringify(process.env.AGENTOPS_DEMO ?? ''),
+  },
   resolve: { tsconfigPaths: true },
   server: MOBILE_ENABLED
     ? {

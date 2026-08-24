@@ -21,7 +21,7 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "node --experimental-strip-types scripts/dev.ts",
     "dev:mobile": "AGENTOPS_MOBILE=1 vite dev --port 3000",
     "generate-routes": "tsr generate",
     "build": "vite build",

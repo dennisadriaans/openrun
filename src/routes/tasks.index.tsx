@@ -3,14 +3,15 @@ import { Plus } from 'lucide-react'
 import { useMemo } from 'react'
 import { NeedProjectEmpty } from '../components/NeedProjectEmpty'
 import { Button, Card, EmptyState, PageHeader, StatusBadge } from '../components/ui'
+import { DEMO_RUNNING_TASK_ID, demoTasks, isDemoMode, type DemoTask } from '../lib/demoData.ts'
 import { absoluteTime, describeCron, relativeTime, taskScheduleStatus } from '../lib/format'
-import { queueDepthLabel } from '../lib/runQueue'
-
 import { automationsEmptyKind } from '../lib/projectGate'
 import { useProjects, useRuns, useTasks } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
+import { queueDepthLabel } from '../lib/runQueue'
 
 type TaskRow = NonNullable<ReturnType<typeof useTasks>['data']>[number]
+type ListTask = DemoTask | TaskRow
 
 export const Route = createFileRoute('/tasks/')({ component: TasksPage })
 
@@ -21,7 +22,7 @@ const ROW_GRID =
  * One cell, not eight chips. A blocked automation says the one thing standing
  * in the way; a healthy one says its cadence and any backlog behind it.
  */
-function scheduleCell(t: TaskRow, blocked: string | null): string {
+function scheduleCell(t: ListTask, blocked: string | null): string {
   if (blocked) return blocked
   const parts = [
     t.webhookIntegrationId?.trim() && !t.cron.trim() ? 'Webhook' : describeCron(t.cron),
@@ -31,7 +32,7 @@ function scheduleCell(t: TaskRow, blocked: string | null): string {
 }
 
 /** Next fire when the schedule is live, otherwise the last one, self-labelled. */
-function whenCell(t: TaskRow): { text: string; title: string } {
+function whenCell(t: ListTask): { text: string; title: string } {
   if (t.enabled && t.nextRunAt)
     return { text: relativeTime(t.nextRunAt), title: absoluteTime(t.nextRunAt) }
   if (t.lastRunAt)
@@ -40,15 +41,22 @@ function whenCell(t: TaskRow): { text: string; title: string } {
 }
 
 function TasksPage() {
-  const { data: tasks, isLoading } = useTasks()
-  const { data: projects, isLoading: loadingProjects } = useProjects()
+  const demo = isDemoMode()
+  const { data: liveTasks, isLoading: liveLoading } = useTasks()
+  const { data: projects, isLoading: liveLoadingProjects } = useProjects()
   const { data: runs } = useRuns()
+  const tasks = demo ? demoTasks(Date.now()) : liveTasks
+  const isLoading = demo ? false : liveLoading
+  const loadingProjects = demo ? false : liveLoadingProjects
   const runningTaskIds = useMemo(
-    () => new Set(runs?.filter((r) => r.status === 'running').map((r) => r.taskId) ?? []),
-    [runs],
+    () =>
+      demo
+        ? new Set([DEMO_RUNNING_TASK_ID])
+        : new Set(runs?.filter((r) => r.status === 'running').map((r) => r.taskId) ?? []),
+    [demo, runs],
   )
   const navigate = useNavigate()
-  const emptyKind = automationsEmptyKind(projects?.length ?? 0)
+  const emptyKind = demo ? null : automationsEmptyKind(projects?.length ?? 0)
 
   const newTask = () => navigate({ to: '/tasks/new' })
 

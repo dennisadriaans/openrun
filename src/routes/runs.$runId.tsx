@@ -35,6 +35,7 @@ import {
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
 import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
+import { isDemoDetailRun, isDemoMode } from '../lib/demoData.ts'
 import { useRunLive } from '../lib/useRunLive'
 
 export const Route = createFileRoute('/runs/$runId')({
@@ -166,7 +167,9 @@ function RunDetail() {
     const trigger = data?.run?.trigger
     if (!trigger) return
     if (layoutChosenRef.current) return
-    if (trigger === 'webhook') patchLayout({ rightPanelOpen: true })
+    if (trigger === 'webhook' || (isDemoMode() && isDemoDetailRun(runId))) {
+      patchLayout({ rightPanelOpen: true })
+    }
     layoutChosenRef.current = true
   }, [data?.run?.trigger, patchLayout, runId])
 
