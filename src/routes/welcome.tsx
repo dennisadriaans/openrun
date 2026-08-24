@@ -60,7 +60,7 @@ function WelcomePage() {
     <div className="grid min-h-screen place-items-center bg-chrome px-6 py-12">
       <div className="w-full max-w-lg">
         <div className="mb-8 flex items-center gap-2">
-          <Icon className="size-6 rounded-[5px] bg-inverted text-foreground" />
+          <Icon className="size-6 rounded-[5px]" />
           <span className="text-ui-base font-medium tracking-tight text-foreground">Open Run</span>
         </div>
 
