@@ -73,3 +73,16 @@ export function pickDefaultRuntimeId(
 ): string | undefined {
   return pickDefaultRuntime(runtimes, preferredId)?.id
 }
+
+/**
+ * Drop runtimes whose binary is not on PATH. Same escape hatches as
+ * `visibleRuntimes`: `keepId` always survives, and an empty result falls back
+ * to the whole catalog (nothing installed yet — still let the user pick).
+ */
+export function installedRuntimes<T extends RuntimePickCandidate>(
+  runtimes: readonly T[],
+  keepId?: string | null,
+): T[] {
+  const kept = runtimes.filter((r) => r.installed || r.id === keepId)
+  return kept.length > 0 ? kept : [...runtimes]
+}

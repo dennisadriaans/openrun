@@ -28,7 +28,12 @@ import {
   type ModelOption,
 } from '../lib/models'
 import { usePickerPrefs } from '../lib/pickerPrefs'
-import { hiddenRuntimesIn, toggleHiddenRuntime, visibleRuntimes } from '../lib/pickRuntime'
+import {
+  hiddenRuntimesIn,
+  installedRuntimes,
+  toggleHiddenRuntime,
+  visibleRuntimes,
+} from '../lib/pickRuntime'
 import {
   DEFAULT_RUNTIME_MODE,
   RUNTIME_MODES,
@@ -43,6 +48,8 @@ export type RuntimeOption = {
   label: string
   bin: string
   description?: string
+  /** False / missing means the binary is not on PATH. */
+  installed?: boolean
 }
 
 function useClickOutside(
@@ -609,8 +616,9 @@ export function RuntimePicker({
 
   if (runtimes.length === 0) return null
   const selected = runtimes.find((r) => r.id === runtimeId) ?? runtimes[0]!
-  const shown = visibleRuntimes(runtimes, prefs.hiddenRuntimes, selected.id)
-  const hidden = hiddenRuntimesIn(runtimes, prefs.hiddenRuntimes, selected.id)
+  const present = installedRuntimes(runtimes, selected.id)
+  const shown = visibleRuntimes(present, prefs.hiddenRuntimes, selected.id)
+  const hidden = hiddenRuntimesIn(present, prefs.hiddenRuntimes, selected.id)
   const toggleHidden = (id: string) =>
     remember({ hiddenRuntimes: toggleHiddenRuntime(prefs.hiddenRuntimes, id) })
 
@@ -626,7 +634,7 @@ export function RuntimePicker({
     >
       {(close) => (
         <>
-          {(showHidden ? runtimes : shown).map((r) => (
+          {(showHidden ? present : shown).map((r) => (
             <HideableMenuItem
               key={r.id}
               label={r.label}
