@@ -69,7 +69,7 @@ function RunsPage() {
             <Card className="divide-y divide-[var(--border-quaternary)]">
               <div className={`${ROW_GRID} px-4 py-2 text-ui-sm text-tier-quaternary`}>
                 <span>Status</span>
-                <span>Run</span>
+                <span>Chat</span>
                 <span className="hidden sm:block">Runtime</span>
                 <span className="text-right">Duration</span>
                 <span className="text-right">Started</span>
@@ -81,16 +81,32 @@ function RunsPage() {
                 return (
                   <div
                     key={r.id}
-                    className={`group/row relative ${ROW_GRID} px-4 py-2 transition-colors hover:bg-hover`}
+                    className={`group/row relative ${ROW_GRID} px-4 py-2.5 transition-colors hover:bg-hover`}
                   >
                     <Link
                       to="/runs/$runId"
                       params={{ runId: r.id }}
+                      viewTransition
                       className="absolute inset-0"
-                      aria-label={r.taskName}
+                      aria-label={r.chatTitle}
                     />
                     <StatusBadge status={r.status} />
-                    <span className="truncate text-ui-base text-foreground">{r.taskName}</span>
+                    <span className="min-w-0">
+                      <span
+                        className="block truncate text-ui-base text-foreground"
+                        title={r.chatTitle}
+                      >
+                        {r.chatTitle}
+                      </span>
+                      {r.activitySummary ? (
+                        <span
+                          className="block truncate text-ui-sm text-tier-quaternary"
+                          title={r.activitySummary}
+                        >
+                          {r.activitySummary}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="hidden truncate text-ui-sm text-tier-quaternary sm:block">
                       {r.runtimeLabel}
                     </span>
@@ -115,7 +131,7 @@ function RunsPage() {
                         variant="ghost"
                         disabled={busy || pending}
                         title={busy ? 'Cancel the run before deleting' : 'Delete run'}
-                        aria-label={`Delete ${r.taskName}`}
+                        aria-label={`Delete ${r.chatTitle}`}
                         onClick={() => setDeleteId(r.id)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -170,8 +186,8 @@ function RunsPage() {
           <Modal title="Delete run" onClose={() => setDeleteId(null)}>
             <div className="space-y-4">
               <p className="text-ui-base text-tier-secondary">
-                Permanently delete <span className="text-foreground">{deleteTarget.taskName}</span>?
-                This cannot be undone.
+                Permanently delete <span className="text-foreground">{deleteTarget.chatTitle}</span>
+                ? This cannot be undone.
               </p>
               {remove.isError ? (
                 <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">

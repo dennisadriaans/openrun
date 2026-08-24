@@ -21,6 +21,7 @@ import { cachedModelsForBin, warmModelCatalogs } from './modelCatalog'
 import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay, RUNTIME_PRESETS } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
+import { runActivitySummary, runListTitle } from '../lib/runPreview'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
 import type { WebhookFilters } from '../lib/integrations/types'
 import {
@@ -1038,6 +1039,10 @@ export type RunSummary = Omit<RunRow, 'stdout' | 'stderr'> & {
   stderrBytes: number
   /** Display name from the runtime row; falls back to runtimeId when missing. */
   runtimeLabel: string
+  /** First-prompt title for chats; the automation name otherwise. */
+  chatTitle: string
+  /** One-line activity: in-flight tool, or files the agent edited. */
+  activitySummary: string
 }
 
 function runsListWhere(opts?: { taskId?: string; includeArchived?: boolean }): {
@@ -1065,6 +1070,63 @@ export function countRuns(opts?: {
   return row.n
 }
 
+type RunListRow = Omit<RunRow, 'stdout' | 'stderr'> & {
+  stdoutBytes: number
+  stderrBytes: number
+}
+
+function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
+  const labelById = new Map(listRuntimes().map((runtime) => [runtime.id, runtime.label] as const))
+  if (rows.length === 0) return []
+
+  const ids = rows.map((row) => row.id)
+  const placeholders = ids.map(() => '?').join(',')
+  const db = getDb()
+
+  const firstPrompt = new Map<string, string>()
+  const promptRows = db
+    .prepare(
+      `SELECT runId, content FROM messages
+       WHERE runId IN (${placeholders}) AND role = 'user'
+       ORDER BY createdAt ASC`,
+    )
+    .all(...ids) as Array<{ runId: string; content: string }>
+  for (const row of promptRows) {
+    if (!firstPrompt.has(row.runId)) firstPrompt.set(row.runId, row.content)
+  }
+
+  const eventsByRun = new Map<string, Array<Pick<TurnEventRow, 'kind' | 'payload'>>>()
+  const eventRows = db
+    .prepare(
+      `SELECT runId, kind, payload FROM turn_events
+       WHERE runId IN (${placeholders})
+         AND kind IN ('tool_start','tool_result','thought','plan','assistant','approval_request','approval_resolved')
+       ORDER BY createdAt ASC, seq ASC`,
+    )
+    .all(...ids) as Array<{ runId: string; kind: TurnEventRow['kind']; payload: string }>
+  for (const row of eventRows) {
+    const list = eventsByRun.get(row.runId) ?? []
+    list.push({ kind: row.kind, payload: row.payload })
+    eventsByRun.set(row.runId, list)
+  }
+
+  return rows.map((row) => {
+    const summary = runActivitySummary(eventsByRun.get(row.id) ?? [], {
+      running: row.status === 'running' || row.status === 'queued',
+    })
+    return {
+      ...row,
+      runtimeLabel: resolveRuntimeLabel(labelById.get(row.runtimeId), row.runtimeId),
+      chatTitle: runListTitle({
+        trigger: row.trigger,
+        taskName: row.taskName,
+        prompt: firstPrompt.get(row.id) ?? '',
+      }),
+      activitySummary: summary ?? '',
+    }
+  })
+}
+
 export function listRuns(opts?: {
   taskId?: string
   limit?: number
@@ -1082,12 +1144,8 @@ export function listRuns(opts?: {
               archivedAt, verdict, repairAttempts, timedOut
        FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
     )
-    .all(...params, limit, offset) as Omit<RunSummary, 'runtimeLabel'>[]
-  const labelById = new Map(listRuntimes().map((runtime) => [runtime.id, runtime.label] as const))
-  return rows.map((row) => ({
-    ...row,
-    runtimeLabel: resolveRuntimeLabel(labelById.get(row.runtimeId), row.runtimeId),
-  }))
+    .all(...params, limit, offset) as RunListRow[]
+  return decorateRunSummaries(rows)
 }
 
 /** Verification results for a run, oldest pass first. */
