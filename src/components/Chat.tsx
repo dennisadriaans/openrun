@@ -4,7 +4,16 @@
  * Renders the turn-by-turn transcript of a run and the follow-up composer.
  * Layout adapted from the t3code chat view (MIT, T3 Tools Inc.).
  */
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { ChevronRight, Square, Terminal } from 'lucide-react'
 import type { ChatMessage } from '../server/core'
@@ -686,31 +695,18 @@ const AssistantMessage = memo(function AssistantMessage({
 })
 
 /** Stable-sized placeholder while conversation fetches — avoids layout jump. */
-export function ChatBootSkeleton() {
+function TranscriptBootSkeleton() {
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="scroll-thin flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5">
-        <div
-          className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-3 sm:pt-4"
-          style={{ paddingBottom: 156 }}
-        >
-          <div className="flex flex-col items-end gap-1">
-            <div className="h-14 w-[55%] max-w-[80%] animate-pulse rounded-[10px] border border-border bg-secondary/80" />
-          </div>
-          <div className="space-y-2 px-1">
-            <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />
-            <div className="h-3 w-full max-w-md animate-pulse rounded bg-muted-foreground/10" />
-            <div className="h-3 w-[85%] max-w-sm animate-pulse rounded bg-muted-foreground/10" />
-          </div>
-        </div>
+    <>
+      <div className="flex flex-col items-end gap-1">
+        <div className="h-14 w-[55%] max-w-[80%] animate-pulse rounded-[10px] border border-border bg-secondary/80" />
       </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2">
-        <div className="chat-composer-horizontal-inset relative z-10 isolate">
-          <div className="mx-auto h-[140px] w-full max-w-3xl rounded-t-[20px] border border-border bg-elevated/80" />
-          <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
-        </div>
+      <div className="space-y-2 px-1">
+        <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />
+        <div className="h-3 w-full max-w-md animate-pulse rounded bg-muted-foreground/10" />
+        <div className="h-3 w-[85%] max-w-sm animate-pulse rounded bg-muted-foreground/10" />
       </div>
-    </div>
+    </>
   )
 }
 
@@ -957,6 +953,7 @@ export function Composer({
 
 export function Chat({
   messages,
+  transcriptPending = false,
   activePath,
   canFollowUp,
   followUpReason,
@@ -991,6 +988,8 @@ export function Chat({
   onNewChat,
 }: {
   messages: ChatMessage[]
+  /** Pulse the transcript scroller while conversation is still in flight. */
+  transcriptPending?: boolean
   activePath: string | null
   canFollowUp: boolean
   followUpReason?: string
@@ -1053,58 +1052,70 @@ export function Chat({
   const canSupervise = supportsSupervised({ bin: runtimeBin, transport: runtimeTransport })
   const discardFile = useDiscard(runId)
   const restoreFile = useRestoreFile(runId)
+  const discardMutate = discardFile.mutate
+  const restoreMutate = restoreFile.mutate
   const [undoneFiles, setUndoneFiles] = useState(() => new Map<string, string | null>())
   const [undoPendingPath, setUndoPendingPath] = useState<string | null>(null)
-  const changedPaths = changedFiles?.map((file) => file.path)
-  const undonePaths = [...undoneFiles.keys()]
-  const redoablePaths = [...undoneFiles.entries()]
-    .filter(([, content]) => content !== null)
-    .map(([path]) => path)
+  const undoneFilesRef = useRef(undoneFiles)
+  undoneFilesRef.current = undoneFiles
+  const changedPaths = useMemo(() => changedFiles?.map((file) => file.path), [changedFiles])
+  const undonePaths = useMemo(() => [...undoneFiles.keys()], [undoneFiles])
+  const redoablePaths = useMemo(
+    () =>
+      [...undoneFiles.entries()].filter(([, content]) => content !== null).map(([path]) => path),
+    [undoneFiles],
+  )
   const undoBusyPath =
     undoPendingPath ?? (discardFile.isPending ? (discardFile.variables?.paths?.[0] ?? null) : null)
   const redoBusyPath = restoreFile.isPending ? (restoreFile.variables?.path ?? null) : null
 
-  const undoChatFile = (path: string) => {
-    setUndoPendingPath(path)
-    void fns
-      .readWorkspaceFile({ data: { runId, path } })
-      .then((file) => {
-        const snapshot = file.readOnly ? null : file.content
-        discardFile.mutate(
-          { paths: [path] },
-          {
-            onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, snapshot)),
-            onSettled: () => setUndoPendingPath(null),
-          },
-        )
-      })
-      .catch(() => {
-        discardFile.mutate(
-          { paths: [path] },
-          {
-            onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, null)),
-            onSettled: () => setUndoPendingPath(null),
-          },
-        )
-      })
-  }
+  const undoChatFile = useCallback(
+    (path: string) => {
+      setUndoPendingPath(path)
+      void fns
+        .readWorkspaceFile({ data: { runId, path } })
+        .then((file) => {
+          const snapshot = file.readOnly ? null : file.content
+          discardMutate(
+            { paths: [path] },
+            {
+              onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, snapshot)),
+              onSettled: () => setUndoPendingPath(null),
+            },
+          )
+        })
+        .catch(() => {
+          discardMutate(
+            { paths: [path] },
+            {
+              onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, null)),
+              onSettled: () => setUndoPendingPath(null),
+            },
+          )
+        })
+    },
+    [discardMutate, runId],
+  )
 
-  const redoChatFile = (path: string) => {
-    const content = undoneFiles.get(path)
-    if (content == null) return
-    restoreFile.mutate(
-      { path, content },
-      {
-        onSuccess: () => {
-          setUndoneFiles((prev) => {
-            const next = new Map(prev)
-            next.delete(path)
-            return next
-          })
+  const redoChatFile = useCallback(
+    (path: string) => {
+      const content = undoneFilesRef.current.get(path)
+      if (content == null) return
+      restoreMutate(
+        { path, content },
+        {
+          onSuccess: () => {
+            setUndoneFiles((prev) => {
+              const next = new Map(prev)
+              next.delete(path)
+              return next
+            })
+          },
         },
-      },
-    )
-  }
+      )
+    },
+    [restoreMutate],
+  )
 
   // The run stays `running` while its checks execute, but the assistant
   // message is already final — that gap is the verification pass, and saying
@@ -1112,6 +1123,13 @@ export function Chat({
   const verifying = running && !messages.some((m) => m.status === 'running')
   const phase = verifying ? verificationPhase(checkResults ?? []) : undefined
   const answerApproval = useAnswerApproval(runId)
+  const answerApprovalMutate = answerApproval.mutate
+  const onAnswer = useCallback(
+    (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => {
+      answerApprovalMutate(input)
+    },
+    [answerApprovalMutate],
+  )
 
   useEffect(() => {
     setModel(initialModel)
@@ -1252,41 +1270,45 @@ export function Chat({
           className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-3 sm:pt-4"
           style={{ paddingBottom: composerHeight + 16 }}
         >
-          {messages.map((message) =>
-            message.role === 'system' ? (
-              <p key={message.id} className="text-ui-sm text-tier-quaternary">
-                {message.content}
-              </p>
-            ) : message.role === 'user' ? (
-              <UserMessage key={message.id} message={message} />
-            ) : (
-              <AssistantMessage
-                key={message.id}
-                message={message}
-                answering={answerApproval.isPending}
-                onAnswer={(input) => answerApproval.mutate(input)}
-                onSelectFile={onSelectFile}
-                onReviewFile={onReviewFile}
-                onUndoFile={undoChatFile}
-                onRedoFile={redoChatFile}
-                undoDisabled={undoFilesDisabled}
-                undoDisabledReason={undoFilesReason}
-                undoBusyPath={undoBusyPath}
-                redoBusyPath={redoBusyPath}
-                changedPaths={changedPaths}
-                undonePaths={undonePaths}
-                redoablePaths={redoablePaths}
-                runId={runId}
-                runtimeId={runtimeId}
-                runTrigger={runTrigger}
-                installWorkspaceId={installWorkspaceId}
-                installWorkspaceReady={installWorkspaceReady}
-                installWorkspaceStatus={installWorkspaceStatus}
-                installProjectId={installProjectId}
-                installProjectName={installProjectName}
-                installWorkspaceLabel={installWorkspaceLabel}
-              />
-            ),
+          {transcriptPending && messages.length === 0 ? (
+            <TranscriptBootSkeleton />
+          ) : (
+            messages.map((message) =>
+              message.role === 'system' ? (
+                <p key={message.id} className="text-ui-sm text-tier-quaternary">
+                  {message.content}
+                </p>
+              ) : message.role === 'user' ? (
+                <UserMessage key={message.id} message={message} />
+              ) : (
+                <AssistantMessage
+                  key={message.id}
+                  message={message}
+                  answering={answerApproval.isPending}
+                  onAnswer={onAnswer}
+                  onSelectFile={onSelectFile}
+                  onReviewFile={onReviewFile}
+                  onUndoFile={undoChatFile}
+                  onRedoFile={redoChatFile}
+                  undoDisabled={undoFilesDisabled}
+                  undoDisabledReason={undoFilesReason}
+                  undoBusyPath={undoBusyPath}
+                  redoBusyPath={redoBusyPath}
+                  changedPaths={changedPaths}
+                  undonePaths={undonePaths}
+                  redoablePaths={redoablePaths}
+                  runId={runId}
+                  runtimeId={runtimeId}
+                  runTrigger={runTrigger}
+                  installWorkspaceId={installWorkspaceId}
+                  installWorkspaceReady={installWorkspaceReady}
+                  installWorkspaceStatus={installWorkspaceStatus}
+                  installProjectId={installProjectId}
+                  installProjectName={installProjectName}
+                  installWorkspaceLabel={installWorkspaceLabel}
+                />
+              ),
+            )
           )}
           {phase ? (
             <div className="px-1">

@@ -7,6 +7,7 @@ import { afterEach, describe, it } from 'node:test'
 import {
   captureBaseSnapshot,
   changedFiles,
+  changedFilesAsync,
   commit,
   createPullRequest,
   discard,
@@ -99,6 +100,18 @@ describe('changedFiles since snapshot', () => {
     assert.deepEqual(paths, ['agent.txt', 'tracked.txt'])
     assert.ok(!paths.includes('pre.txt'))
     assert.ok(!paths.includes('clean.txt'))
+  })
+
+  it('matches the sync listing on the async path', async () => {
+    const cwd = makeRepo()
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'tracked.txt'), 'edited\n')
+    writeFileSync(join(cwd, 'new.txt'), 'x\n')
+    const syncPaths = changedFiles(cwd, snap)
+      .map((f) => f.path)
+      .sort()
+    const asyncPaths = (await changedFilesAsync(cwd, snap)).map((f) => f.path).sort()
+    assert.deepEqual(asyncPaths, syncPaths)
   })
 
   it('includes new untracked and modified tracked files', () => {

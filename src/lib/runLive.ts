@@ -64,7 +64,7 @@ export type RunLiveEvent =
       diffSummary: unknown[]
       finishedAt: number
     }
-  | { type: 'status'; status: string; exitCode: number | null }
+  | { type: 'status'; status: string; exitCode: number | null; canFollowUp?: boolean }
   | {
       type: 'check_started'
       id: string

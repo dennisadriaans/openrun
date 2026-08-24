@@ -9,7 +9,7 @@ import { ArrowLeft, Ban, ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
-import { Chat, ChatBootSkeleton } from '../components/Chat'
+import { Chat } from '../components/Chat'
 import { DiffPanel } from '../components/DiffPanel'
 import { EmptyState, Modal } from '../components/ui'
 import { Button } from '../components/ui'
@@ -20,17 +20,30 @@ import { VerticalResizeHandle } from '../components/workspace/VerticalResizeHand
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
 import { WorkspaceBreadcrumb } from '../components/workspace/WorkspaceBreadcrumb'
 import {
+  peekCachedRunSummary,
+  prefetchConversation,
+  RUN_PRELOAD_STALE_MS,
+  scheduleIdleWorkspacePrefetch,
   useConversation,
   useCreateWorkspace,
   useDiscard,
   useRemoveRun,
+  useRuntimes,
   useRunWorkspace,
   useSendMessage,
 } from '../lib/queries'
+import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
+import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
 import { useRunLive } from '../lib/useRunLive'
 
-export const Route = createFileRoute('/runs/$runId')({ component: RunDetail })
+export const Route = createFileRoute('/runs/$runId')({
+  loader: ({ context, params }) => {
+    void prefetchConversation(context.queryClient, params.runId)
+  },
+  preloadStaleTime: RUN_PRELOAD_STALE_MS,
+  component: RunDetail,
+})
 
 const DEFAULT_RIGHT_PANEL_WIDTH = 420
 const MIN_RIGHT_PANEL_WIDTH = 280
@@ -86,7 +99,7 @@ function RunDetail() {
   const { runId } = Route.useParams()
   const { streamHealthy } = useRunLive(runId)
   const { data, isLoading } = useConversation(runId, { streamHealthy })
-  const { data: workspacePanel } = useRunWorkspace(runId, { streamHealthy })
+  const { data: runtimes } = useRuntimes()
   const { open: sidebarOpen } = useSidebar()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [reviewPath, setReviewPath] = useState<string | null>(null)
@@ -96,13 +109,24 @@ function RunDetail() {
   const [newBranchOpen, setNewBranchOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
   const qc = useQueryClient()
+  const listRow = peekCachedRunSummary(qc, runId)
   const navigate = useNavigate()
   const createWorkspace = useCreateWorkspace()
+  const showRight = layout.rightPanelOpen || layout.maximized
+  const { data: workspacePanel } = useRunWorkspace(runId, {
+    streamHealthy,
+    enabled: showRight,
+  })
 
   const sendMessage = useSendMessage(runId)
   const discard = useDiscard(runId)
   const remove = useRemoveRun()
   const [confirmDelete, setConfirmDelete] = useState(false)
+
+  useEffect(() => {
+    if (showRight) return
+    return scheduleIdleWorkspacePrefetch(qc, runId)
+  }, [qc, runId, showRight])
 
   useEffect(() => {
     layoutChosenRef.current = hasStoredLayout(runId)
@@ -144,10 +168,43 @@ function RunDetail() {
     if (layoutChosenRef.current) return
     if (trigger === 'webhook') patchLayout({ rightPanelOpen: true })
     layoutChosenRef.current = true
-  }, [data?.run?.trigger, patchLayout])
+  }, [data?.run?.trigger, patchLayout, runId])
+
+  const openReview = useCallback((path: string) => setReviewPath(path), [])
+  const firstChangedPath = workspacePanel?.files[0]?.path
+  const openReviewAll = useCallback(() => {
+    if (firstChangedPath) setReviewPath(firstChangedPath)
+  }, [firstChangedPath])
+  const onSelectFile = useCallback(
+    (path: string) => {
+      setSelectedPath(path)
+      patchLayout({ rightPanelOpen: true, maximized: false })
+    },
+    [patchLayout],
+  )
+  const onUndoAllFiles = useCallback(() => setConfirmUndoAll(true), [])
+  const sendFollowUp = sendMessage.mutate
+  const onSend = useCallback(
+    (input: { prompt: string; model: string; effort: string; runtimeMode: RuntimeMode }) => {
+      sendFollowUp(input)
+    },
+    [sendFollowUp],
+  )
+  const onNewChat = useCallback(() => navigate({ to: '/runs/new' }), [navigate])
+  const onStop = useCallback(() => {
+    const current = data?.run
+    if (!current) return
+    qc.setQueryData(['conversation', current.id], (prev: typeof data) =>
+      prev ? { ...prev, run: { ...prev.run, status: 'cancelled' as const } } : prev,
+    )
+    void fns.cancelRun({ data: { id: current.id } }).then(() => {
+      void qc.invalidateQueries({ queryKey: ['conversation', current.id] })
+      void qc.invalidateQueries({ queryKey: ['runWorkspace', current.id] })
+    })
+  }, [data, qc])
 
   // Keep the workspace chrome mounted while conversation loads — only the
-  // chat column waits. "Not found" waits until the first fetch settles.
+  // transcript waits. "Not found" waits until the first fetch settles.
   if (!isLoading && !data) {
     return (
       <div className="px-8 py-8">
@@ -177,39 +234,33 @@ function RunDetail() {
   }
   const totals = workspacePanel?.totals ?? { additions: 0, deletions: 0 }
   const checkResults = data?.checkResults ?? []
-  const canFollowUp = data?.canFollowUp ?? false
+  const canFollowUp = data?.canFollowUp ?? listRow?.status !== 'running'
   const gh = workspacePanel?.gh ?? { installed: false, authenticated: false }
   const workspace = data?.workspace ?? null
   const project = data?.project ?? null
   const workspaces = data?.workspaces ?? []
   const booting = isLoading || !data
-
-  const cancel = async () => {
-    if (!run) return
-    qc.setQueryData(['conversation', run.id], (prev: typeof data) =>
-      prev ? { ...prev, run: { ...prev.run, status: 'cancelled' as const } } : prev,
-    )
-    await fns.cancelRun({ data: { id: run.id } })
-    qc.invalidateQueries({ queryKey: ['conversation', run.id] })
-    qc.invalidateQueries({ queryKey: ['runWorkspace', run.id] })
-  }
+  const fallbackRuntime = runtimes?.find(
+    (runtime) => runtime.id === (data?.runtime?.id ?? listRow?.runtimeId),
+  )
+  const models = data?.models?.length
+    ? data.models
+    : fallbackRuntime
+      ? modelsForRuntime(fallbackRuntime)
+      : []
+  const seededModel = data?.model || defaultModel(models)?.slug || ''
+  const seededEffort = data?.effort || defaultEffort(defaultModel(models))
 
   const followUpReason =
-    run?.status === 'running'
+    (run?.status ?? listRow?.status) === 'running'
       ? 'The agent is still working — wait for this turn to finish.'
       : 'This runtime has no resumable session, so follow-ups are unavailable.'
 
-  const showRight = layout.rightPanelOpen || layout.maximized
   const showChat = !layout.maximized
   const runBusy = run?.status === 'running'
   const undoFilesReason = runBusy
     ? 'Wait for the agent to finish before undoing changes.'
     : undefined
-  const openReview = (path: string) => setReviewPath(path)
-  const openReviewAll = () => {
-    const first = files[0]
-    if (first) setReviewPath(first.path)
-  }
 
   const submitNewBranch = async () => {
     if (!project || !newBranchName.trim()) return
@@ -225,7 +276,7 @@ function RunDetail() {
     <div className="flex h-[calc(100vh-var(--header-h,0px))] min-h-0 flex-col">
       <div className="flex min-h-0 flex-1">
         {showChat ? (
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 flex-1 flex-col" style={{ viewTransitionName: 'run-chat' }}>
             {/*
               The top bar lives inside the chat column (t3code layout) so the
               right panel is a full-height sibling rather than sitting below it.
@@ -246,13 +297,13 @@ function RunDetail() {
                 isMainCheckout={workspace?.kind === 'main'}
                 workspace={workspace}
                 workspaces={workspaces}
-                branchDisabled={booting || sendMessage.isPending || run?.status === 'running'}
+                branchDisabled={booting || run?.status === 'running'}
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
               />
 
               <div className="flex shrink-0 items-center gap-2">
                 {run?.status === 'running' ? (
-                  <Button variant="danger" onClick={cancel}>
+                  <Button variant="danger" onClick={onStop}>
                     <Ban className="h-4 w-4" /> Cancel
                   </Button>
                 ) : null}
@@ -273,54 +324,48 @@ function RunDetail() {
             </header>
 
             <div className="min-h-0 flex-1">
-              {booting ? (
-                <ChatBootSkeleton />
-              ) : (
-                <Chat
-                  messages={messages}
-                  activePath={selectedPath}
-                  canFollowUp={canFollowUp}
-                  followUpReason={followUpReason}
-                  pending={sendMessage.isPending}
-                  running={run!.status === 'running'}
-                  checkResults={checkResults}
-                  models={data!.models ?? []}
-                  runId={runId}
-                  runtimeId={data!.runtime?.id}
-                  runtimeBin={data!.runtime?.bin}
-                  runtimeTransport={data!.runtime?.transport}
-                  runTrigger={run!.trigger}
-                  installWorkspaceId={workspace?.id ?? run!.workspaceId}
-                  installWorkspaceReady={workspace ? isWorkspaceReady(workspace.status) : false}
-                  installWorkspaceStatus={workspace?.status}
-                  installProjectId={project?.id ?? workspace?.projectId}
-                  installProjectName={project?.name}
-                  installWorkspaceLabel={
-                    workspace
-                      ? workspace.kind === 'main'
-                        ? 'main'
-                        : workspace.branch || workspace.id
-                      : null
-                  }
-                  initialModel={data!.model ?? ''}
-                  initialEffort={data!.effort ?? ''}
-                  initialRuntimeMode={data!.runtimeMode}
-                  changedFiles={files}
-                  onSelectFile={(path) => {
-                    setSelectedPath(path)
-                    patchLayout({ rightPanelOpen: true, maximized: false })
-                  }}
-                  onReviewFile={openReview}
-                  onReviewFiles={openReviewAll}
-                  onUndoAllFiles={() => setConfirmUndoAll(true)}
-                  undoFilesDisabled={runBusy}
-                  undoFilesReason={undoFilesReason}
-                  onStop={() => void cancel()}
-                  onSend={(input) => sendMessage.mutate(input)}
-                  workspaceId={workspace?.id ?? run!.workspaceId}
-                  onNewChat={() => navigate({ to: '/runs/new' })}
-                />
-              )}
+              <Chat
+                messages={messages}
+                transcriptPending={booting}
+                activePath={selectedPath}
+                canFollowUp={canFollowUp}
+                followUpReason={followUpReason}
+                pending={false}
+                running={run?.status === 'running'}
+                checkResults={checkResults}
+                models={models}
+                runId={runId}
+                runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
+                runtimeBin={data?.runtime?.bin ?? fallbackRuntime?.bin}
+                runtimeTransport={data?.runtime?.transport ?? fallbackRuntime?.transport}
+                runTrigger={run?.trigger}
+                installWorkspaceId={workspace?.id ?? run?.workspaceId}
+                installWorkspaceReady={workspace ? isWorkspaceReady(workspace.status) : false}
+                installWorkspaceStatus={workspace?.status}
+                installProjectId={project?.id ?? workspace?.projectId}
+                installProjectName={project?.name}
+                installWorkspaceLabel={
+                  workspace
+                    ? workspace.kind === 'main'
+                      ? 'main'
+                      : workspace.branch || workspace.id
+                    : null
+                }
+                initialModel={seededModel}
+                initialEffort={seededEffort}
+                initialRuntimeMode={data?.runtimeMode}
+                changedFiles={files}
+                onSelectFile={onSelectFile}
+                onReviewFile={openReview}
+                onReviewFiles={openReviewAll}
+                onUndoAllFiles={onUndoAllFiles}
+                undoFilesDisabled={runBusy}
+                undoFilesReason={undoFilesReason}
+                onStop={onStop}
+                onSend={onSend}
+                workspaceId={workspace?.id ?? run?.workspaceId}
+                onNewChat={onNewChat}
+              />
             </div>
           </div>
         ) : null}

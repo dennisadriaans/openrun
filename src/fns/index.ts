@@ -264,8 +264,15 @@ export const getRunWorkspace = createServerFn({ method: 'GET' })
 
 export const postMessage = createServerFn({ method: 'POST' })
   .validator(
-    (d: { runId: string; prompt: string; model?: string; effort?: string; runtimeMode?: string }) =>
-      d,
+    (d: {
+      runId: string
+      prompt: string
+      model?: string
+      effort?: string
+      runtimeMode?: string
+      userMessageId?: string
+      assistantMessageId?: string
+    }) => d,
   )
   .handler(async ({ data }) => (await core()).postMessage(data))
 

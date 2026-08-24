@@ -58,9 +58,17 @@ export function applyRunLiveEvent<T extends ConversationCacheSlice>(
     case 'ping':
     case 'hello':
       return { action: 'ignore' }
-    case 'status':
-      // Exit codes, files changed, canFollowUp, finalized content, etc.
-      return { action: 'refetch' }
+    case 'status': {
+      const running = event.status === 'running'
+      return {
+        action: 'patch',
+        data: {
+          ...data,
+          run: { ...data.run, status: event.status, exitCode: event.exitCode },
+          canFollowUp: running ? false : (event.canFollowUp ?? data.canFollowUp),
+        },
+      }
+    }
     case 'turn_finished':
       return patchTurnFinished(data, event)
     case 'turn_started':
@@ -265,7 +273,10 @@ export function applyRunLiveEventToRunRow<
     case 'hello':
       return { action: 'ignore' }
     case 'status':
-      return { action: 'refetch' }
+      return {
+        action: 'patch',
+        data: { ...run, status: event.status, exitCode: event.exitCode },
+      }
     case 'turn_started':
       return {
         action: 'patch',

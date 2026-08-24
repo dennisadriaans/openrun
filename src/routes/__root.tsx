@@ -3,11 +3,12 @@ import {
   Link,
   Outlet,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
   useNavigate,
+  useRouter,
   useRouterState,
 } from '@tanstack/react-router'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import {
   Bell,
   Blocks,
@@ -30,11 +31,12 @@ import {
 } from '../components/AppChrome'
 import { DevLiveStatus } from '../components/DevLiveStatus'
 import { Toaster } from '../components/toast'
+import { getQueryClient } from '../lib/queryClient'
 import { ActivityLiveProvider } from '../lib/useActivityLive'
 import { useCloudStatus, useSignOutCloud, useStartCloudLogin } from '../lib/queries'
 import appCss from '../styles.css?url'
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -53,17 +55,6 @@ export const Route = createRootRoute({
   component: AppLayout,
   shellComponent: RootDocument,
 })
-
-let browserQueryClient: QueryClient | undefined
-function getQueryClient() {
-  if (typeof document === 'undefined') {
-    return new QueryClient({ defaultOptions: { queries: { staleTime: 5_000 } } })
-  }
-  if (!browserQueryClient) {
-    browserQueryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000 } } })
-  }
-  return browserQueryClient
-}
 
 const NAV = [
   { to: '/tasks', label: 'Automations', icon: ListChecks },
@@ -366,13 +357,14 @@ function AppLayout() {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
+  const queryClient = useRouter().options.context.queryClient ?? getQueryClient()
   return (
     <html lang="en" data-theme="dark" className="dark">
       <head>
         <HeadContent />
       </head>
       <body>
-        <QueryClientProvider client={getQueryClient()}>
+        <QueryClientProvider client={queryClient}>
           <ActivityLiveProvider>
             {children}
             <Toaster />

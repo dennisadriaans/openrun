@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { activityLiveInvalidateKeys, activityLiveStreamPath } from './activityLive.ts'
+import {
+  ACTIVITY_LIVE_RESUME_KEYS,
+  activityLiveInvalidateKeys,
+  activityLiveStreamPath,
+} from './activityLive.ts'
 
 describe('activityLiveInvalidateKeys', () => {
   it('refetches list pages when a run starts or finishes', () => {
@@ -10,7 +14,7 @@ describe('activityLiveInvalidateKeys', () => {
         runId: 'r1',
         status: 'running',
       }),
-      ['runs', 'dashboard', 'tasks'],
+      [['runs'], ['dashboard'], ['tasks']],
     )
   })
 
@@ -23,7 +27,7 @@ describe('activityLiveInvalidateKeys', () => {
         workspaceId: 'ws1',
         queued: 2,
       }),
-      ['dashboard', 'tasks'],
+      [['dashboard'], ['tasks']],
     )
   })
 
@@ -38,7 +42,7 @@ describe('activityLiveInvalidateKeys', () => {
         toolName: 'Bash',
         expiresAt: 1_000,
       }),
-      ['conversation', 'runs', 'dashboard'],
+      [['conversation', 'r1'], ['runs'], ['dashboard']],
     )
     assert.deepEqual(
       activityLiveInvalidateKeys({
@@ -47,13 +51,17 @@ describe('activityLiveInvalidateKeys', () => {
         requestId: 'req1',
         decision: 'allow',
       }),
-      ['conversation', 'runs', 'dashboard'],
+      [['conversation', 'r1'], ['runs'], ['dashboard']],
     )
   })
 
   it('ignores hello and ping frames', () => {
     assert.deepEqual(activityLiveInvalidateKeys({ type: 'hello' }), [])
     assert.deepEqual(activityLiveInvalidateKeys({ type: 'ping' }), [])
+  })
+
+  it('does not drop every conversation cache on stream resume', () => {
+    assert.deepEqual(ACTIVITY_LIVE_RESUME_KEYS, [['runs'], ['dashboard'], ['tasks']])
   })
 })
 

@@ -10,8 +10,12 @@
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { ActivityLiveEvent } from './activityLive.ts'
-import { activityLiveInvalidateKeys, activityLiveStreamPath } from './activityLive.ts'
+import {
+  ACTIVITY_LIVE_RESUME_KEYS,
+  activityLiveInvalidateKeys,
+  activityLiveStreamPath,
+  type ActivityLiveEvent,
+} from './activityLive.ts'
 import { openLiveStream } from './liveStream.ts'
 
 const INVALIDATE_DEBOUNCE_MS = 100
@@ -39,15 +43,15 @@ function useActivityLiveConnection(): boolean {
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null
     let pendingKeys = new Set<string>()
 
-    const bump = (keys: readonly string[]) => {
+    const bump = (keys: readonly (readonly string[])[]) => {
       if (keys.length === 0) return
-      for (const key of keys) pendingKeys.add(key)
+      for (const key of keys) pendingKeys.add(key.join('\0'))
       if (invalidateTimer) clearTimeout(invalidateTimer)
       invalidateTimer = setTimeout(() => {
         const batch = [...pendingKeys]
         pendingKeys = new Set()
-        for (const key of batch) {
-          void qc.invalidateQueries({ queryKey: [key] })
+        for (const packed of batch) {
+          void qc.invalidateQueries({ queryKey: packed.split('\0') })
         }
       }, INVALIDATE_DEBOUNCE_MS)
     }
@@ -59,7 +63,7 @@ function useActivityLiveConnection(): boolean {
       onHealthyChange: setStreamHealthy,
       // Frames published while the socket was down are not replayed, so a
       // reconnect refetches rather than trusting what the cache still holds.
-      onResume: () => bump(['runs', 'dashboard', 'tasks', 'conversation']),
+      onResume: () => bump(ACTIVITY_LIVE_RESUME_KEYS),
       onMessage: (data) => {
         let event: ActivityLiveEvent
         try {

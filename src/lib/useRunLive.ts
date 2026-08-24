@@ -3,9 +3,10 @@
  *
  * Opens an SSE connection against `/api/runs/$runId/stream` through
  * `liveStream.ts`, which owns reconnect and the heartbeat watchdog. Log,
- * turn_event, and turn_started frames patch the conversation query cache in
- * place; terminal status still invalidates for a full refetch. While the stream
- * is healthy, HTTP polling stays off; on stream loss it resumes 1s / 5s.
+ * turn_event, turn_started, and status frames patch the conversation query
+ * cache in place. File-panel data still invalidates on status / turn_finished.
+ * While the stream is healthy, HTTP polling stays off; on stream loss it
+ * resumes 1s / 5s.
  */
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -40,6 +41,9 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
         const result = applyRunLiveEvent(cached, event)
         if (result.action === 'patch') {
           qc.setQueryData(convKey, result.data)
+          if (event.type === 'status' || event.type === 'turn_finished') {
+            void qc.invalidateQueries({ queryKey: ['runWorkspace', runId] })
+          }
         } else if (result.action === 'refetch') {
           refetchConversation()
           return

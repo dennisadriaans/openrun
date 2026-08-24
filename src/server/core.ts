@@ -1300,12 +1300,15 @@ export function getConversation(runId: string) {
 }
 
 /** Files / repo / gh for the run detail right panel — deferred from chat load. */
-export function getRunWorkspace(runId: string) {
+export async function getRunWorkspace(runId: string) {
   const run = getRun(runId)
   if (!run) return null
 
-  const files = git.changedFiles(run.cwd, run.baseSnapshot || undefined)
-  const repo = git.repoInfo(run.cwd)
+  const [files, repo, gh] = await Promise.all([
+    git.changedFilesAsync(run.cwd, run.baseSnapshot || undefined),
+    git.repoInfoAsync(run.cwd),
+    git.ghStatusAsync(),
+  ])
   // Derive dirty from the same file list — avoid a second changedFiles pass.
   if (run.baseSnapshot) {
     repo.dirty = files.length > 0
@@ -1319,7 +1322,7 @@ export function getRunWorkspace(runId: string) {
       additions: files.reduce((n, f) => n + f.additions, 0),
       deletions: files.reduce((n, f) => n + f.deletions, 0),
     },
-    gh: git.ghStatus(),
+    gh,
     taskName: run.taskName,
     baseBranch: run.baseBranch,
   }
@@ -1393,6 +1396,8 @@ export function postMessage(input: {
   model?: string
   effort?: string
   runtimeMode?: string
+  userMessageId?: string
+  assistantMessageId?: string
 }) {
   const prompt = input.prompt.trim()
   if (!prompt) throw new Error('Message cannot be empty')
@@ -1407,6 +1412,8 @@ export function postMessage(input: {
     model: input.model,
     effort: input.effort,
     runtimeMode: input.runtimeMode,
+    userMessageId: input.userMessageId,
+    assistantMessageId: input.assistantMessageId,
   })
 }
 

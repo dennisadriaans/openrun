@@ -1,5 +1,6 @@
 /** React Query hooks wrapping the server functions. */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback } from 'react'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
 import {
   applyRunLiveEvent,
@@ -7,11 +8,16 @@ import {
   type ConversationCacheSlice,
 } from './applyRunLiveEvent'
 import { useActivityStreamHealthy } from './useActivityLive'
+import { newMessageId } from './messageId.ts'
 import type { PlanProposal } from './planProposals.ts'
 import type { McpServerConfig } from './mcp.ts'
 import type { UsageRange } from './usage.ts'
 
-const SEND_MESSAGE_SAFETY_REFETCH_MS = 400
+/** Conversation stays fresh via SSE; avoid window-focus refetches that hitch chat. */
+export const CONVERSATION_STALE_MS = 60_000
+/** Intent preload of `/runs/$runId` is considered fresh for this long. */
+export const RUN_PRELOAD_STALE_MS = 15_000
+const WORKSPACE_IDLE_PREFETCH_MS = 400
 
 type McpConfigKey = { runtimeId: string; workspaceId?: string }
 
@@ -310,6 +316,61 @@ export function useRemoveRun() {
   })
 }
 
+export function conversationQueryOptions(runId: string) {
+  return {
+    queryKey: ['conversation', runId] as const,
+    queryFn: () => fns.getConversation({ data: { runId } }),
+    staleTime: CONVERSATION_STALE_MS,
+    refetchOnWindowFocus: false as const,
+  }
+}
+
+export function runWorkspaceQueryOptions(runId: string) {
+  return {
+    queryKey: ['runWorkspace', runId] as const,
+    queryFn: () => fns.getRunWorkspace({ data: { runId } }),
+  }
+}
+
+const MAX_IN_FLIGHT_CONVERSATION_PREFETCH = 4
+
+export function prefetchConversation(qc: QueryClient, runId: string) {
+  if (
+    !qc.getQueryState(['conversation', runId]) &&
+    qc.isFetching({ queryKey: ['conversation'] }) >= MAX_IN_FLIGHT_CONVERSATION_PREFETCH
+  ) {
+    return Promise.resolve()
+  }
+  return qc.prefetchQuery(conversationQueryOptions(runId))
+}
+
+export function prefetchRunWorkspace(qc: QueryClient, runId: string) {
+  return qc.prefetchQuery(runWorkspaceQueryOptions(runId))
+}
+
+/** After chat has painted, warm the files panel without blocking first paint. */
+export function scheduleIdleWorkspacePrefetch(qc: QueryClient, runId: string) {
+  const timeout = setTimeout(() => {
+    void prefetchRunWorkspace(qc, runId)
+  }, WORKSPACE_IDLE_PREFETCH_MS)
+  return () => clearTimeout(timeout)
+}
+
+/** A run row already in a list query — used to seed the composer before conversation lands. */
+export function peekCachedRunSummary(
+  qc: QueryClient,
+  runId: string,
+): { id: string; runtimeId: string; status: string } | undefined {
+  for (const [, data] of qc.getQueriesData({ queryKey: ['runs'] })) {
+    if (!Array.isArray(data)) continue
+    const hit = data.find((row): row is { id: string; runtimeId: string; status: string } =>
+      Boolean(row && typeof row === 'object' && 'id' in row && row.id === runId),
+    )
+    if (hit) return hit
+  }
+  return undefined
+}
+
 export function useRun(id: string, opts?: { streamHealthy?: boolean }) {
   const streamHealthy = opts?.streamHealthy ?? false
   return useQuery({
@@ -327,9 +388,7 @@ export function useRun(id: string, opts?: { streamHealthy?: boolean }) {
 export function useConversation(runId: string, opts?: { streamHealthy?: boolean }) {
   const streamHealthy = opts?.streamHealthy ?? false
   return useQuery({
-    queryKey: ['conversation', runId],
-    queryFn: () => fns.getConversation({ data: { runId } }),
-    // Live stream drives updates while healthy; resume 1s/5s if the stream drops.
+    ...conversationQueryOptions(runId),
     refetchInterval: (q) => {
       if (streamHealthy) return false
       const running = q.state.data?.run.status === 'running'
@@ -345,13 +404,11 @@ export function useRunWorkspace(
 ) {
   const streamHealthy = opts?.streamHealthy ?? false
   return useQuery({
-    queryKey: ['runWorkspace', runId],
-    queryFn: () => fns.getRunWorkspace({ data: { runId } }),
+    ...runWorkspaceQueryOptions(runId),
     enabled: opts?.enabled ?? true,
     refetchInterval: () => {
-      // Panel can refresh slower than chat; invalidate on status/git writes.
-      if (!streamHealthy) return 5_000
-      return false
+      if (streamHealthy) return false
+      return 5_000
     },
   })
 }
@@ -366,32 +423,34 @@ export function useFileDiff(runId: string, path: string | null) {
 
 export function useSendMessage(runId: string) {
   const qc = useQueryClient()
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (input: {
       prompt: string
       model?: string
       effort?: string
       runtimeMode?: string
+      userMessageId: string
+      assistantMessageId: string
     }) => fns.postMessage({ data: { runId, ...input } }),
-    onSuccess: (data, vars) => {
+    onMutate: async (vars) => {
+      const convKey = ['conversation', runId] as const
+      const runKey = ['run', runId] as const
+      await qc.cancelQueries({ queryKey: convKey })
+      const previous = qc.getQueryData<ConversationCacheSlice>(convKey)
       const turnStarted = {
         type: 'turn_started' as const,
-        userMessageId: data.userMessageId,
-        assistantMessageId: data.assistantMessageId,
+        userMessageId: vars.userMessageId,
+        assistantMessageId: vars.assistantMessageId,
         prompt: vars.prompt.trim(),
         createdAt: Date.now(),
       }
-
-      const convKey = ['conversation', runId] as const
-      const cached = qc.getQueryData<ConversationCacheSlice>(convKey)
-      if (cached) {
-        const result = applyRunLiveEvent(cached, turnStarted)
-        if (result.action === 'patch') {
-          qc.setQueryData(convKey, result.data)
-        }
+      const base: ConversationCacheSlice = previous ?? {
+        run: { id: runId, status: 'idle', stdout: '', stderr: '', exitCode: null },
+        messages: [],
+        canFollowUp: true,
       }
-
-      const runKey = ['run', runId] as const
+      const result = applyRunLiveEvent(base, turnStarted)
+      if (result.action === 'patch') qc.setQueryData(convKey, result.data)
       const runCached = qc.getQueryData<{
         id: string
         status: string
@@ -401,19 +460,56 @@ export function useSendMessage(runId: string) {
       }>(runKey)
       if (runCached) {
         const runResult = applyRunLiveEventToRunRow(runCached, turnStarted)
-        if (runResult.action === 'patch') {
-          qc.setQueryData(runKey, runResult.data)
-        }
+        if (runResult.action === 'patch') qc.setQueryData(runKey, runResult.data)
       }
-
-      // Soft safety net — avoid an immediate refetch that races the first live
-      // patches and hitch the chat UI.
-      setTimeout(() => {
-        void qc.invalidateQueries({ queryKey: convKey })
-        void qc.invalidateQueries({ queryKey: runKey })
-      }, SEND_MESSAGE_SAFETY_REFETCH_MS)
+      return { previous }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(['conversation', runId], context.previous)
+      } else {
+        qc.removeQueries({ queryKey: ['conversation', runId] })
+      }
+    },
+    onSuccess: (_data, _vars, context) => {
+      if (!context?.previous) {
+        void qc.refetchQueries({ queryKey: ['conversation', runId] })
+      }
     },
   })
+
+  type FollowUpInput = {
+    prompt: string
+    model?: string
+    effort?: string
+    runtimeMode?: string
+  }
+
+  const mutate = useCallback(
+    (input: FollowUpInput, opts?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(sendFollowUpVars(input), opts),
+    [mutation.mutate],
+  )
+  const mutateAsync = useCallback(
+    (input: FollowUpInput, opts?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(sendFollowUpVars(input), opts),
+    [mutation.mutateAsync],
+  )
+
+  return { ...mutation, mutate, mutateAsync }
+}
+
+function sendFollowUpVars(input: {
+  prompt: string
+  model?: string
+  effort?: string
+  runtimeMode?: string
+}) {
+  return {
+    ...input,
+    userMessageId: newMessageId(),
+    assistantMessageId: newMessageId(),
+  }
 }
 
 /**
@@ -594,10 +690,7 @@ export function useRunNow() {
       qc.invalidateQueries({ queryKey: ['dashboard'] })
       const runId = data?.runId
       if (runId) {
-        await qc.prefetchQuery({
-          queryKey: ['conversation', runId],
-          queryFn: () => fns.getConversation({ data: { runId } }),
-        })
+        await prefetchConversation(qc, runId)
       }
     },
   })
@@ -740,10 +833,7 @@ export function useStartChat() {
       qc.invalidateQueries({ queryKey: ['dashboard'] })
       const runId = data?.runId
       if (runId) {
-        await qc.prefetchQuery({
-          queryKey: ['conversation', runId],
-          queryFn: () => fns.getConversation({ data: { runId } }),
-        })
+        await prefetchConversation(qc, runId)
       }
     },
   })

@@ -67,12 +67,18 @@ describe('applyRunLiveEvent', () => {
     )
   })
 
-  it('refetches on a status frame, which carries more than the cache models', () => {
-    assert.equal(
-      applyRunLiveEvent(cache('running'), { type: 'status', status: 'success', exitCode: 0 })
-        .action,
-      'refetch',
-    )
+  it('patches status and canFollowUp without refetching the transcript', () => {
+    const result = applyRunLiveEvent(cache('running', { canFollowUp: false }), {
+      type: 'status',
+      status: 'success',
+      exitCode: 0,
+      canFollowUp: true,
+    })
+    assert.equal(result.action, 'patch')
+    if (result.action !== 'patch') return
+    assert.equal(result.data.run.status, 'success')
+    assert.equal(result.data.run.exitCode, 0)
+    assert.equal(result.data.canFollowUp, true)
   })
 
   it('drops late output from a run the user cancelled', () => {
@@ -320,6 +326,18 @@ describe('applyRunLiveEventToRunRow', () => {
     ]) {
       assert.equal(applyRunLiveEventToRunRow(run, event).action, 'ignore')
     }
+  })
+
+  it('patches status on the bare run row', () => {
+    const result = applyRunLiveEventToRunRow(run, {
+      type: 'status',
+      status: 'success',
+      exitCode: 0,
+    })
+    assert.equal(result.action, 'patch')
+    if (result.action !== 'patch') return
+    assert.equal(result.data.status, 'success')
+    assert.equal(result.data.exitCode, 0)
   })
 
   it('appends log chunks to the run row too', () => {

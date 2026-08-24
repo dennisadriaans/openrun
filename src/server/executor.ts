@@ -41,6 +41,7 @@ import {
   type TurnEventRow,
 } from './turnEvents'
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
+import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
 import { assertWorkspaceId } from '../lib/workspaceRef'
@@ -166,6 +167,28 @@ export function answerApproval(input: {
 
 function randomId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
+
+function runtimeSupportsLastResume(bin: string) {
+  return (bin.split(/[\\/]/).pop() ?? bin).includes('codex')
+}
+
+function publishRunStatus(runId: string, status: string, exitCode: number | null) {
+  const db = getDb()
+  const run = db.prepare('SELECT sessionId, runtimeId FROM runs WHERE id = ?').get(runId) as
+    | { sessionId: string; runtimeId: string }
+    | undefined
+  const runtime = run
+    ? (db.prepare('SELECT bin, transport FROM runtimes WHERE id = ?').get(run.runtimeId) as
+        | { bin: string; transport: string }
+        | undefined)
+    : undefined
+  const canFollowUp =
+    status !== 'running' &&
+    !!runtime &&
+    supportsResume(runtime.bin, runtime.transport) &&
+    ((run?.sessionId.length ?? 0) > 0 || runtimeSupportsLastResume(runtime.bin))
+  publishRunLive(runId, { type: 'status', status, exitCode, canFollowUp })
 }
 
 export type StartRunInput = {
@@ -365,6 +388,8 @@ export function sendFollowUp(input: {
   effort?: string
   runtimeMode?: RuntimeMode | string
   timeoutMs?: number
+  userMessageId?: string
+  assistantMessageId?: string
   /**
    * Internal repair turns resume a run the executor is still holding: the run
    * row is legitimately `running` and this very run owns the workspace lock,
@@ -443,6 +468,8 @@ export function sendFollowUp(input: {
     turn,
     timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
     unattended: input.internal === true,
+    userMessageId: input.userMessageId,
+    assistantMessageId: input.assistantMessageId,
   })
 }
 
@@ -482,13 +509,17 @@ function spawnTurn(input: {
   unattended: boolean
   /** Origin badge for the user message; only webhook turns carry one. */
   source?: MessageSource
+  userMessageId?: string
+  assistantMessageId?: string
 }): { userMessageId: string; assistantMessageId: string } {
   const { runId, runtime, cwd, prompt, turn, timeoutMs, unattended, source } = input
   const db = getDb()
   const now = Date.now()
 
-  const userMsgId = randomId('msg')
-  const assistantMsgId = randomId('msg')
+  const userMsgId = isMessageId(input.userMessageId ?? '') ? input.userMessageId! : randomId('msg')
+  const assistantMsgId = isMessageId(input.assistantMessageId ?? '')
+    ? input.assistantMessageId!
+    : randomId('msg')
 
   const insertMessage = db.prepare(
     `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
@@ -931,7 +962,7 @@ function spawnTurn(input: {
       | undefined
     if (current?.status === 'cancelled') {
       finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
-      publishRunLive(runId, { type: 'status', status: 'cancelled', exitCode: code })
+      publishRunStatus(runId, 'cancelled', code)
       publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
       return
     }
@@ -1256,7 +1287,7 @@ function spawnAcpTurn(input: {
           | undefined
         if (current?.status === 'cancelled') {
           finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
-          publishRunLive(runId, { type: 'status', status: 'cancelled', exitCode: code })
+          publishRunStatus(runId, 'cancelled', code)
           publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
           return
         }
@@ -1359,7 +1390,7 @@ function finalizeRun(
   getDb()
     .prepare('UPDATE runs SET status = ?, exitCode = ?, verdict = ?, finishedAt = ? WHERE id = ?')
     .run(status, code, verdict, Date.now(), runId)
-  publishRunLive(runId, { type: 'status', status, exitCode: code })
+  publishRunStatus(runId, status, code)
   publishActivityLive({ type: 'run_changed', runId, status, verdict })
   onRunFinalized(runId)
 }
@@ -1704,7 +1735,7 @@ export function cancelRun(runId: string): boolean {
     "UPDATE messages SET status = 'cancelled', finishedAt = ? WHERE runId = ? AND status = 'running'",
   ).run(Date.now(), runId)
 
-  publishRunLive(runId, { type: 'status', status: 'cancelled', exitCode: null })
+  publishRunStatus(runId, 'cancelled', null)
   publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
   onRunFinalized(runId)
 
@@ -1780,7 +1811,7 @@ export function reconcileOrphanRuns(): { marked: number; killed: number } {
     db.prepare(
       "UPDATE messages SET status = 'error', finishedAt = ? WHERE runId = ? AND status = 'running'",
     ).run(now, row.id)
-    publishRunLive(row.id, { type: 'status', status: 'error', exitCode: null })
+    publishRunStatus(row.id, 'error', null)
     publishActivityLive({ type: 'run_changed', runId: row.id, status: 'error' })
     onRunFinalized(row.id)
   }

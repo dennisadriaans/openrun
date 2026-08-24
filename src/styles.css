@@ -868,3 +868,20 @@ body {
     0 1px 2px var(--shadow-primary),
     0 0 1px var(--shadow-secondary);
 }
+
+::view-transition-old(run-chat) {
+  animation: none;
+}
+
+::view-transition-new(run-chat) {
+  animation: or-run-chat-in 120ms ease-out;
+}
+
+@keyframes or-run-chat-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

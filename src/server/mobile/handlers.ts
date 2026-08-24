@@ -205,7 +205,7 @@ export async function handleGetRun(runId: string): Promise<MobileResult> {
 export async function handleRunDiff(runId: string): Promise<MobileResult> {
   if (!(await core()).getRun(runId)) return NOT_FOUND
   try {
-    const workspace = (await core()).getRunWorkspace(runId)
+    const workspace = await (await core()).getRunWorkspace(runId)
     if (!workspace) return NOT_FOUND
     return ok({
       files: workspace.files,

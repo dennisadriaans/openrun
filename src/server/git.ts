@@ -10,7 +10,7 @@
  * When a run has a `baseSnapshot` (captured at start), diffs/commits/discards
  * are scoped to the delta from that snapshot so pre-existing dirt is ignored.
  */
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { ensureProcessPathAugmented, findOnPath } from './userPath.ts'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -78,6 +78,44 @@ function git(
   }
 }
 
+function gitAsync(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+  input?: string,
+): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn('git', args, {
+        cwd,
+        env: env ?? gitEnv(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      let stdout = ''
+      let stderr = ''
+      if (input != null) child.stdin.write(input)
+      child.stdin.end()
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk
+        if (stdout.length > MAX_BUFFER) child.kill('SIGTERM')
+      })
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk
+      })
+      child.on('error', (err) => {
+        resolve({ ok: false, stdout: '', stderr: String(err) })
+      })
+      child.on('close', (code) => {
+        resolve({ ok: code === 0, stdout, stderr })
+      })
+    } catch (err) {
+      resolve({ ok: false, stdout: '', stderr: String(err) })
+    }
+  })
+}
+
 /**
  * Extract the actionable line from git's stderr.
  *
@@ -142,6 +180,43 @@ export function repoInfo(cwd: string): RepoInfo {
   const dirty = git(cwd, ['status', '--porcelain']).stdout.trim().length > 0
 
   return { isRepo: true, branch, head, remote, hasUpstream, ahead, dirty }
+}
+
+export async function repoInfoAsync(cwd: string): Promise<RepoInfo> {
+  const empty: RepoInfo = {
+    isRepo: false,
+    branch: '',
+    head: '',
+    remote: '',
+    hasUpstream: false,
+    ahead: 0,
+    dirty: false,
+  }
+  const inside = await gitAsync(cwd, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.stdout.trim() !== 'true') return empty
+
+  const [branchRes, headRes, remoteRes, upstream] = await Promise.all([
+    gitAsync(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    gitAsync(cwd, ['rev-parse', '--short', 'HEAD']),
+    gitAsync(cwd, ['remote', 'get-url', 'origin']),
+    gitAsync(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']),
+  ])
+  const hasUpstream = upstream.ok && upstream.stdout.trim().length > 0
+  let ahead = 0
+  if (hasUpstream) {
+    const counts = await gitAsync(cwd, ['rev-list', '--left-right', '--count', '@{u}...HEAD'])
+    ahead = Number(counts.stdout.trim().split(/\s+/)[1] ?? 0) || 0
+  }
+  const dirtyRes = await gitAsync(cwd, ['status', '--porcelain'])
+  return {
+    isRepo: true,
+    branch: branchRes.stdout.trim(),
+    head: headRes.stdout.trim(),
+    remote: remoteRes.stdout.trim(),
+    hasUpstream,
+    ahead,
+    dirty: dirtyRes.stdout.trim().length > 0,
+  }
 }
 
 function statusFromCode(code: string): FileStatus {
@@ -349,6 +424,142 @@ export function changedFiles(cwd: string, since?: string): DiffFile[] {
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
+export async function changedFilesAsync(cwd: string, since?: string): Promise<DiffFile[]> {
+  const inside = await gitAsync(cwd, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.stdout.trim() !== 'true') return []
+
+  const base = since && since.length > 0 ? since : 'HEAD'
+  const files = new Map<string, DiffFile>()
+
+  const [nameStatusRes, numstatRes, untrackedRes] = await Promise.all([
+    gitAsync(cwd, ['diff', base, '--name-status', '-M', '-z']),
+    gitAsync(cwd, ['diff', base, '--numstat', '-M', '-z']),
+    gitAsync(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
+  ])
+
+  const parts = nameStatusRes.stdout.split('\0').filter((p) => p.length > 0)
+  const pendingHash: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const code = parts[i]!
+    if (code.startsWith('R')) {
+      const oldPath = parts[++i] ?? ''
+      const path = parts[++i] ?? ''
+      files.set(path, {
+        path,
+        oldPath,
+        status: 'renamed',
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      })
+    } else {
+      const path = parts[++i] ?? ''
+      if (!path) continue
+      if (code.includes('D') && existsSync(join(cwd, path))) {
+        pendingHash.push(path)
+        continue
+      }
+      files.set(path, {
+        path,
+        oldPath: null,
+        status: statusFromCode(code),
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      })
+    }
+  }
+
+  await Promise.all(
+    pendingHash.map(async (path) => {
+      const [prev, cur] = await Promise.all([
+        gitAsync(cwd, ['rev-parse', `${base}:${path}`]),
+        gitAsync(cwd, ['hash-object', '--', path]),
+      ])
+      const prevHash = prev.ok ? prev.stdout.trim() : ''
+      const curHash = cur.ok ? cur.stdout.trim() : ''
+      if (prevHash && curHash && prevHash === curHash) return
+      files.set(path, {
+        path,
+        oldPath: null,
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      })
+    }),
+  )
+
+  const nparts = numstatRes.stdout.split('\0').filter((p) => p.length > 0)
+  for (let i = 0; i < nparts.length; i++) {
+    const line = nparts[i]!
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.*)$/)
+    if (!m) continue
+    const [, addRaw, delRaw, tail] = m
+    let path = tail!
+    if (path === '') {
+      i++
+      path = nparts[++i] ?? ''
+    }
+    const entry = files.get(path)
+    if (!entry) continue
+    entry.binary = addRaw === '-' || delRaw === '-'
+    entry.additions = entry.binary ? 0 : Number(addRaw)
+    entry.deletions = entry.binary ? 0 : Number(delRaw)
+  }
+
+  const untrackedPaths = untrackedRes.stdout.split('\0').filter((p) => p.length > 0)
+  await Promise.all(
+    untrackedPaths.map(async (path) => {
+      const statsRes = await gitAsync(cwd, ['diff', '--no-index', '--numstat', '/dev/null', path])
+      const statMatch = statsRes.stdout.match(/^(\d+|-)\t(\d+|-)\t/)
+      const binary = statMatch ? statMatch[1] === '-' : false
+      const additions = binary || !statMatch ? 0 : Number(statMatch[1])
+
+      if (files.has(path)) {
+        const entry = files.get(path)!
+        entry.additions = additions
+        entry.deletions = 0
+        entry.binary = binary
+        return
+      }
+
+      if (since && since.length > 0) {
+        const inTree = await gitAsync(cwd, ['cat-file', '-e', `${base}:${path}`])
+        if (inTree.ok) {
+          const [prev, cur] = await Promise.all([
+            gitAsync(cwd, ['rev-parse', `${base}:${path}`]),
+            gitAsync(cwd, ['hash-object', '--', path]),
+          ])
+          const prevHash = prev.ok ? prev.stdout.trim() : ''
+          const curHash = cur.ok ? cur.stdout.trim() : ''
+          if (prevHash && curHash && prevHash === curHash) return
+          files.set(path, {
+            path,
+            oldPath: null,
+            status: 'modified',
+            additions,
+            deletions: 0,
+            binary,
+          })
+          return
+        }
+      }
+
+      files.set(path, {
+        path,
+        oldPath: null,
+        status: 'untracked',
+        additions,
+        deletions: 0,
+        binary,
+      })
+    }),
+  )
+
+  return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
+}
+
 /** True when the working tree has any delta relative to `since` (or HEAD). */
 export function isDirtySince(cwd: string, since?: string): boolean {
   return changedFiles(cwd, since).length > 0
@@ -543,6 +754,32 @@ export function ghStatus(): { installed: boolean; authenticated: boolean } {
     }
     const auth = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' })
     const value = { installed: true, authenticated: auth.status === 0 }
+    ghStatusCache = { at: now, value }
+    return value
+  } catch {
+    const value = { installed: false, authenticated: false }
+    ghStatusCache = { at: now, value }
+    return value
+  }
+}
+
+export async function ghStatusAsync(): Promise<{ installed: boolean; authenticated: boolean }> {
+  const now = Date.now()
+  if (ghStatusCache && now - ghStatusCache.at < GH_STATUS_TTL_MS) {
+    return ghStatusCache.value
+  }
+  try {
+    ensureProcessPathAugmented()
+    if (!findOnPath('gh')) {
+      const value = { installed: false, authenticated: false }
+      ghStatusCache = { at: now, value }
+      return value
+    }
+    const value = await new Promise<{ installed: boolean; authenticated: boolean }>((resolve) => {
+      const child = spawn('gh', ['auth', 'status'], { stdio: ['ignore', 'ignore', 'ignore'] })
+      child.on('error', () => resolve({ installed: true, authenticated: false }))
+      child.on('close', (code) => resolve({ installed: true, authenticated: code === 0 }))
+    })
     ghStatusCache = { at: now, value }
     return value
   } catch {

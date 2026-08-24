@@ -840,6 +840,8 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_turn_events_message
       ON turn_events(messageId, seq ASC);
+    CREATE INDEX IF NOT EXISTS idx_turn_events_run
+      ON turn_events(runId, createdAt ASC, seq ASC);
     -- Models the installed CLIs actually offer, discovered in the background so
     -- the composer never pays for it. The fingerprint identifies the binary the
     -- rows came from; a mismatch is what schedules the next refresh. Pure

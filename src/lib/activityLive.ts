@@ -41,25 +41,22 @@ export function activityLiveStreamPath(): string {
   return '/api/activity/stream'
 }
 
-/**
- * React Query key prefixes list pages should invalidate for an activity frame.
- *
- * `ping` / `hello` keep the socket marked healthy but carry no data. Queue depth
- * rides its own event type — it must not wait for a coincidental `run_changed`
- * while stream-healthy polling is off.
- */
-export function activityLiveInvalidateKeys(event: ActivityLiveEvent): readonly string[] {
+/** Queue depth has its own event; approval frames target one conversation. */
+export const ACTIVITY_LIVE_RESUME_KEYS = [['runs'], ['dashboard'], ['tasks']] as const
+
+/** React Query keys list pages should invalidate for an activity frame. */
+export function activityLiveInvalidateKeys(
+  event: ActivityLiveEvent,
+): readonly (readonly string[])[] {
   switch (event.type) {
     case 'run_changed':
-      return ['runs', 'dashboard', 'tasks']
+      return [['runs'], ['dashboard'], ['tasks']]
     case 'queue_changed':
       // No run row yet — only the dashboard subtitle and automations badges.
-      return ['dashboard', 'tasks']
+      return [['dashboard'], ['tasks']]
     case 'approval_pending':
     case 'approval_settled':
-      // The prompt itself lives in the run's conversation; list pages only need
-      // the "waiting on you" affordance to appear and clear.
-      return ['conversation', 'runs', 'dashboard']
+      return [['conversation', event.runId], ['runs'], ['dashboard']]
     case 'hello':
     case 'ping':
       return []

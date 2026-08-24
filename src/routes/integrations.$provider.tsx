@@ -336,6 +336,7 @@ function ProviderDetail({
                             key={runId}
                             to="/runs/$runId"
                             params={{ runId }}
+                            viewTransition
                             className="mono text-ui-sm text-tier-secondary underline underline-offset-2 hover:text-foreground"
                           >
                             {runId}
