@@ -72,7 +72,7 @@ import {
   type ParsedSchedule,
 } from '../lib/schedule'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
-import { pickDefaultWorkspace } from '../lib/pickWorkspace'
+import { isMainCheckout, pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
 import { workspaceBlockedReason } from '../lib/runPrereqGate'
@@ -1685,6 +1685,13 @@ export function TaskForm({
             className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300"
           >
             {workspaceError}
+          </p>
+        ) : null}
+
+        {isMainCheckout(selectedWorkspace) ? (
+          <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-300">
+            This automation writes into your main checkout — the branch your editor has open.
+            Pick another branch to give it a worktree of its own under <code>~/.openrun</code>.
           </p>
         ) : null}
 

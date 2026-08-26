@@ -3,7 +3,7 @@
  * anywhere an agent run needs to be pinned to a workspace's worktree.
  */
 import { useEffect, useState } from 'react'
-import { pickDefaultWorkspace } from '../lib/pickWorkspace'
+import { isMainCheckout, pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { useProjects, useWorkspaces } from '../lib/queries'
 import { ManageProjectsModal } from './ProjectsManager'
@@ -41,8 +41,8 @@ export function WorkspacePicker({
   }, [workspaces])
 
   // When the project is set but no workspace is chosen yet, auto-pick a ready
-  // worktree (main preferred). Also covers the creating→ready poll: once a
-  // ready row appears, Create no longer stays blocked on an empty select.
+  // worktree (main only as a fallback). Also covers the creating→ready poll:
+  // once a ready row appears, Create no longer stays blocked on an empty select.
   useEffect(() => {
     if (!projectId || workspaceId || loadingWorkspaces || !workspaces) return
     const picked = pickDefaultWorkspace(activeWorkspaces)
@@ -130,6 +130,12 @@ export function WorkspacePicker({
       {selectedNotReady ? (
         <p className="md:col-span-2 text-ui-sm text-rose-300">
           {workspaceNotReadyMessage(selectedWorkspace.status)}
+        </p>
+      ) : null}
+      {isMainCheckout(selectedWorkspace) ? (
+        <p className="md:col-span-2 text-ui-sm text-amber-300">
+          This runs in your main checkout — the one your editor has open. Pick or create a
+          worktree to keep the agent off those files.
         </p>
       ) : null}
       {managing ? <ManageProjectsModal onClose={() => setManaging(false)} /> : null}
