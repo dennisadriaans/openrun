@@ -35,6 +35,12 @@ import {
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
 import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
+import {
+  NO_RUN_COMMITS,
+  shortSha,
+  undoCommitsBlockedReason,
+  undoCommitsLabel,
+} from '../lib/undoRun'
 import { isDemoDetailRun, isDemoMode } from '../lib/demoData.ts'
 import { useRunLive } from '../lib/useRunLive'
 
@@ -105,6 +111,7 @@ function RunDetail() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [reviewPath, setReviewPath] = useState<string | null>(null)
   const [confirmUndoAll, setConfirmUndoAll] = useState(false)
+  const [dropCommits, setDropCommits] = useState(false)
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout(runId))
   const layoutChosenRef = useRef(hasStoredLayout(runId))
   const [newBranchOpen, setNewBranchOpen] = useState(false)
@@ -114,9 +121,11 @@ function RunDetail() {
   const navigate = useNavigate()
   const createWorkspace = useCreateWorkspace()
   const showRight = layout.rightPanelOpen || layout.maximized
+  // The undo dialog reads this run's commits, and it opens from the chat's
+  // diff overlay too — where the right panel may well be closed.
   const { data: workspacePanel } = useRunWorkspace(runId, {
     streamHealthy,
-    enabled: showRight,
+    enabled: showRight || confirmUndoAll,
   })
 
   const sendMessage = useSendMessage(runId)
@@ -239,6 +248,9 @@ function RunDetail() {
   const checkResults = data?.checkResults ?? []
   const canFollowUp = data?.canFollowUp ?? listRow?.status !== 'running'
   const gh = workspacePanel?.gh ?? { installed: false, authenticated: false }
+  const runCommits = workspacePanel?.commits ?? NO_RUN_COMMITS
+  const commitsBlockedReason = undoCommitsBlockedReason(runCommits)
+  const canDropCommits = commitsBlockedReason === null
   const workspace = data?.workspace ?? null
   const project = data?.project ?? null
   const workspaces = data?.workspaces ?? []
@@ -441,7 +453,10 @@ function RunDetail() {
       {confirmUndoAll ? (
         <Modal
           title="Undo all changes"
-          onClose={() => setConfirmUndoAll(false)}
+          onClose={() => {
+            setConfirmUndoAll(false)
+            setDropCommits(false)
+          }}
           className="z-[110]"
         >
           <div className="space-y-4">
@@ -449,13 +464,62 @@ function RunDetail() {
               Restore every file this run changed to the snapshot taken when it started. This cannot
               be undone.
             </p>
+
+            {runCommits.commits.length > 0 ? (
+              <div className="space-y-2 rounded-md border border-border px-3 py-2.5">
+                <label className="flex items-start gap-2 text-ui-base text-tier-secondary">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={dropCommits && canDropCommits}
+                    disabled={!canDropCommits}
+                    onChange={(e) => setDropCommits(e.target.checked)}
+                  />
+                  <span>
+                    {undoCommitsLabel(runCommits)}
+                    <span className="block text-ui-sm text-tier-tertiary">
+                      Without this the files go back but the commits stay on the branch, so
+                      <code className="mono"> git log </code>
+                      still shows them.
+                    </span>
+                  </span>
+                </label>
+
+                <ul className="space-y-0.5 pl-6 text-ui-sm text-tier-tertiary">
+                  {runCommits.commits.slice(0, 5).map((commit) => (
+                    <li key={commit.sha} className="truncate">
+                      <span className="mono">{shortSha(commit.sha)}</span> {commit.subject}
+                    </li>
+                  ))}
+                  {runCommits.commits.length > 5 ? (
+                    <li>+{runCommits.commits.length - 5} more</li>
+                  ) : null}
+                </ul>
+
+                {commitsBlockedReason ? (
+                  <p className="text-ui-sm text-amber-300">{commitsBlockedReason}</p>
+                ) : dropCommits ? (
+                  <p className="text-ui-sm text-tier-tertiary">
+                    The branch moves back to {shortSha(runCommits.baseCommit)}. The dropped commits
+                    stay in your reflog.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             {discard.isError ? (
               <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">
                 {discard.error instanceof Error ? discard.error.message : String(discard.error)}
               </p>
             ) : null}
             <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost" onClick={() => setConfirmUndoAll(false)}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setConfirmUndoAll(false)
+                  setDropCommits(false)
+                }}
+              >
                 Cancel
               </Button>
               <Button
@@ -463,17 +527,22 @@ function RunDetail() {
                 disabled={discard.isPending || runBusy}
                 onClick={() =>
                   discard.mutate(
-                    {},
+                    { resetCommits: dropCommits && canDropCommits },
                     {
                       onSuccess: () => {
                         setConfirmUndoAll(false)
+                        setDropCommits(false)
                         setReviewPath(null)
                       },
                     },
                   )
                 }
               >
-                {discard.isPending ? 'Undoing…' : 'Undo all'}
+                {discard.isPending
+                  ? 'Undoing…'
+                  : dropCommits && canDropCommits
+                    ? 'Undo all and drop commits'
+                    : 'Undo all'}
               </Button>
             </div>
           </div>

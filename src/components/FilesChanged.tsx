@@ -2,8 +2,9 @@
  * Changed-files card — Cursor-style summary above the composer / in the panel.
  *
  * Chevron toggles the file list; composer starts collapsed. Review and a file
- * row open the fullscreen diff viewer. Undo All is the run-scoped discard of
- * every remaining path.
+ * row open the fullscreen diff viewer. Undo All opens the confirm dialog in
+ * `routes/runs.$runId.tsx`, which discards every remaining path and can also
+ * walk the branch back past the commits the run made (`lib/undoRun.ts`).
  */
 import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'

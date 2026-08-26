@@ -327,7 +327,7 @@ export const pushChanges = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => (await core()).pushChanges(data))
 
 export const discardChanges = createServerFn({ method: 'POST' })
-  .validator((d: { runId: string; paths?: string[] }) => d)
+  .validator((d: { runId: string; paths?: string[]; resetCommits?: boolean }) => d)
   .handler(async ({ data }) => (await core()).discardChanges(data))
 
 export const discardHunk = createServerFn({ method: 'POST' })

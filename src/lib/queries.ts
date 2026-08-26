@@ -577,7 +577,7 @@ export function usePush(runId: string) {
 }
 
 export function useDiscard(runId: string) {
-  return useGitMutation(runId, (vars: { paths?: string[] }) =>
+  return useGitMutation(runId, (vars: { paths?: string[]; resetCommits?: boolean }) =>
     fns.discardChanges({ data: { runId, ...vars } }),
   )
 }

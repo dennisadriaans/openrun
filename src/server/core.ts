@@ -1304,10 +1304,11 @@ export async function getRunWorkspace(runId: string) {
   const run = getRun(runId)
   if (!run) return null
 
-  const [files, repo, gh] = await Promise.all([
+  const [files, repo, gh, commits] = await Promise.all([
     git.changedFilesAsync(run.cwd, run.baseSnapshot || undefined),
     git.repoInfoAsync(run.cwd),
     git.ghStatusAsync(),
+    git.runCommitsAsync(run.cwd, run.baseSnapshot || ''),
   ])
   // Derive dirty from the same file list — avoid a second changedFiles pass.
   if (run.baseSnapshot) {
@@ -1323,6 +1324,7 @@ export async function getRunWorkspace(runId: string) {
       deletions: files.reduce((n, f) => n + f.deletions, 0),
     },
     gh,
+    commits,
     taskName: run.taskName,
     baseBranch: run.baseBranch,
   }
@@ -1488,10 +1490,31 @@ export function pushChanges(input: { runId: string }) {
   return git.push(runCwd(input.runId))
 }
 
-export function discardChanges(input: { runId: string; paths?: string[] }) {
+/**
+ * Undo a run's work. Files always go back to the base snapshot; `resetCommits`
+ * additionally walks the branch back to where the run found it, which is the
+ * only way the tree and `git log` end up telling the same story.
+ *
+ * Files first, then the branch: the restore is computed against the snapshot
+ * tree, and doing it while the commits are still on HEAD keeps that delta the
+ * same one the user reviewed.
+ */
+export function discardChanges(input: {
+  runId: string
+  paths?: string[]
+  resetCommits?: boolean
+}) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
-  return git.discard(run.cwd, input.paths, run.baseSnapshot || undefined)
+  if (input.resetCommits && input.paths && input.paths.length > 0) {
+    throw new Error('Dropping commits undoes the whole run, so it cannot be scoped to files')
+  }
+
+  const discarded = git.discard(run.cwd, input.paths, run.baseSnapshot || undefined)
+  if (!input.resetCommits) return { ...discarded, commitsDropped: 0, previousHead: '' }
+
+  const reset = git.resetRunCommits(run.cwd, run.baseSnapshot || '')
+  return { ...discarded, commitsDropped: reset.dropped, previousHead: reset.previousHead }
 }
 
 export function discardHunk(input: { runId: string; path: string; hunkIndex: number }) {

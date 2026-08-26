@@ -22,6 +22,12 @@ import {
   missingOriginRemoteMessage,
 } from '../lib/gitActionGate.ts'
 import { parseGitForEachRef, type GitBranchRow } from '../lib/gitBranches.ts'
+import {
+  NO_RUN_COMMITS,
+  undoCommitsBlockedReason,
+  type RunCommit,
+  type RunCommitSummary,
+} from '../lib/undoRun.ts'
 
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
 
@@ -299,6 +305,131 @@ export function captureBaseSnapshot(cwd: string): string {
       // best-effort cleanup
     }
   }
+}
+
+/** Field separator inside one `git log --format` record; never appears in a subject. */
+const LOG_SEP = '\x1f'
+
+function parseRunCommitLog(stdout: string): RunCommit[] {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [sha = '', subject = ''] = line.split(LOG_SEP)
+      return { sha, subject }
+    })
+    .filter((c) => c.sha.length > 0)
+}
+
+/**
+ * The commit the branch pointed at when the run started, or '' when nothing
+ * safe to reset to remains.
+ *
+ * `captureBaseSnapshot` writes a dangling commit whose *parent* is that HEAD,
+ * so the snapshot itself must never become a reset target — it carries the
+ * working tree as its tree. When capture fell back to HEAD (clean tree, or a
+ * failure) the snapshot is already the commit we want, which is exactly the
+ * case where it is reachable from HEAD.
+ *
+ * A base that is no longer an ancestor of HEAD means the history moved under
+ * us — a rebase, an amend, a reset by hand. Resetting to it then would throw
+ * away work this run never made, so we report nothing instead.
+ */
+function runBaseCommit(cwd: string, baseSnapshot: string): string {
+  const base = baseSnapshot.trim()
+  if (!base) return ''
+  if (!git(cwd, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) return ''
+
+  const candidate = git(cwd, ['merge-base', '--is-ancestor', base, 'HEAD']).ok
+    ? base
+    : git(cwd, ['rev-parse', '--verify', '--quiet', `${base}^`]).stdout.trim()
+
+  if (!candidate) return ''
+  return git(cwd, ['merge-base', '--is-ancestor', candidate, 'HEAD']).ok ? candidate : ''
+}
+
+/**
+ * Commits made during the run, and how many of them a remote already has.
+ *
+ * `--not --remotes` is the cheap form of "which of these has never left this
+ * machine": anything reachable from a remote-tracking ref drops out, so the
+ * remainder is what a reset could drop without rewriting published history.
+ */
+export function runCommits(cwd: string, baseSnapshot: string): RunCommitSummary {
+  if (!isRepo(cwd)) return NO_RUN_COMMITS
+
+  const baseCommit = runBaseCommit(cwd, baseSnapshot)
+  if (!baseCommit) return NO_RUN_COMMITS
+
+  const log = git(cwd, ['log', `--format=%H${LOG_SEP}%s`, `${baseCommit}..HEAD`])
+  const commits = log.ok ? parseRunCommitLog(log.stdout) : []
+  if (commits.length === 0) return { baseCommit, commits: [], published: 0 }
+
+  const unpublished = git(cwd, ['rev-list', '--count', `${baseCommit}..HEAD`, '--not', '--remotes'])
+  const local = unpublished.ok ? Number(unpublished.stdout.trim()) || 0 : commits.length
+  return { baseCommit, commits, published: Math.max(0, commits.length - local) }
+}
+
+/** Async twin of {@link runCommits} for the read path. */
+export async function runCommitsAsync(
+  cwd: string,
+  baseSnapshot: string,
+): Promise<RunCommitSummary> {
+  const inside = await gitAsync(cwd, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.stdout.trim() !== 'true') return NO_RUN_COMMITS
+
+  const base = baseSnapshot.trim()
+  if (!base) return NO_RUN_COMMITS
+  if (!(await gitAsync(cwd, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`])).ok) {
+    return NO_RUN_COMMITS
+  }
+
+  const snapshotOnBranch = await gitAsync(cwd, ['merge-base', '--is-ancestor', base, 'HEAD'])
+  const candidate = snapshotOnBranch.ok
+    ? base
+    : (await gitAsync(cwd, ['rev-parse', '--verify', '--quiet', `${base}^`])).stdout.trim()
+  if (!candidate) return NO_RUN_COMMITS
+  if (!(await gitAsync(cwd, ['merge-base', '--is-ancestor', candidate, 'HEAD'])).ok) {
+    return NO_RUN_COMMITS
+  }
+
+  const [log, unpublished] = await Promise.all([
+    gitAsync(cwd, ['log', `--format=%H${LOG_SEP}%s`, `${candidate}..HEAD`]),
+    gitAsync(cwd, ['rev-list', '--count', `${candidate}..HEAD`, '--not', '--remotes']),
+  ])
+  const commits = log.ok ? parseRunCommitLog(log.stdout) : []
+  if (commits.length === 0) return { baseCommit: candidate, commits: [], published: 0 }
+
+  const local = unpublished.ok ? Number(unpublished.stdout.trim()) || 0 : commits.length
+  return { baseCommit: candidate, commits, published: Math.max(0, commits.length - local) }
+}
+
+/**
+ * Move the branch back to where the run found it, keeping the working tree.
+ *
+ * `--mixed` rather than `--hard` on purpose: the caller has already restored
+ * every file to the base snapshot, and that snapshot includes changes the user
+ * had in flight *before* the run. A hard reset would take those with it.
+ * Afterwards the branch is back, the index is clean, and anything the user was
+ * mid-edit on is still sitting in the worktree as unstaged work.
+ *
+ * The dropped commits stay in the reflog; `previousHead` is what you hand
+ * someone who wants them back.
+ */
+export function resetRunCommits(
+  cwd: string,
+  baseSnapshot: string,
+): { baseCommit: string; previousHead: string; dropped: number } {
+  if (!isRepo(cwd)) throw new Error('Not a git repository')
+
+  const summary = runCommits(cwd, baseSnapshot)
+  const blocked = undoCommitsBlockedReason(summary)
+  if (blocked) throw new Error(blocked)
+
+  const previousHead = git(cwd, ['rev-parse', 'HEAD']).stdout.trim()
+  gitOrThrow(cwd, ['reset', '--mixed', summary.baseCommit])
+  return { baseCommit: summary.baseCommit, previousHead, dropped: summary.commits.length }
 }
 
 /**
