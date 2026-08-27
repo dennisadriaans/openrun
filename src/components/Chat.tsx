@@ -63,12 +63,7 @@ import {
   slashMenuQuery,
   type SlashCommand,
 } from '../lib/slashCommands'
-import {
-  applyPluginMention,
-  matchPlugins,
-  pluginMenuQuery,
-  type AgentPlugin,
-} from '../lib/plugins'
+import { applyPluginMention, matchPlugins, pluginMenuQuery, type AgentPlugin } from '../lib/plugins'
 import { Button, Modal } from './ui'
 import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
@@ -1505,9 +1500,7 @@ export function Chat({
                   ? 'relative z-10 w-full'
                   : 'w-full pt-2'
               }
-              disabled={
-                !running && ((!canFollowUp && !switching) || switchBlockedReason !== null)
-              }
+              disabled={!running && ((!canFollowUp && !switching) || switchBlockedReason !== null)}
               disabledReason={switchBlockedReason ?? followUpReason}
               pending={pending}
               running={running}

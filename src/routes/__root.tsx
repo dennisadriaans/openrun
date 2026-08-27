@@ -277,7 +277,9 @@ function RootDocument({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
         {/* Sets data-chat-theme / data-term-palette before paint so the transcript never flashes. */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static boot script generated from allowlisted values */}
         <script dangerouslySetInnerHTML={{ __html: CHAT_THEME_BOOT_SCRIPT }} />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static boot script generated from allowlisted values */}
         <script dangerouslySetInnerHTML={{ __html: TERMINAL_PALETTE_BOOT_SCRIPT }} />
       </head>
       <body>

@@ -35,8 +35,11 @@ const BASIC_COLORS = [
 ] as const
 
 /** CSI / OSC / two-byte escapes. Only `CSI … m` carries paint; the rest is dropped. */
-const ESCAPE =
-  /\u001b\[[0-9;:?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g
+const ESC = String.fromCharCode(0x1b)
+const ESCAPE = new RegExp(
+  `${ESC}\\[[0-9;:?]*[ -/]*[@-~]|${ESC}\\][^\\u0007${ESC}]*(?:\\u0007|${ESC}\\\\)|${ESC}[@-Z\\\\-_]`,
+  'g',
+)
 
 const SGR_START = '\u001b['
 
@@ -119,7 +122,8 @@ function ansiTokens(line: string, state: Sgr): { tokens: TerminalToken[]; painte
 
   ESCAPE.lastIndex = 0
   let match: RegExpExecArray | null
-  while ((match = ESCAPE.exec(line))) {
+  match = ESCAPE.exec(line)
+  while (match) {
     if (match.index > last) {
       tokens.push({ text: line.slice(last, match.index), className: sgrClass(state) })
     }
@@ -129,6 +133,7 @@ function ansiTokens(line: string, state: Sgr): { tokens: TerminalToken[]; painte
       applySgr(state, seq.slice(2, -1))
       painted = true
     }
+    match = ESCAPE.exec(line)
   }
   if (last < line.length) tokens.push({ text: line.slice(last), className: sgrClass(state) })
   return { tokens, painted }
@@ -190,12 +195,14 @@ function inlineTokens(text: string, base: string): TerminalToken[] {
 
   INLINE.lastIndex = 0
   let match: RegExpExecArray | null
-  while ((match = INLINE.exec(text))) {
+  match = INLINE.exec(text)
+  while (match) {
     const groups = match.groups ?? {}
     const group = Object.keys(groups).find((name) => groups[name] != null)
     if (match.index > last) tokens.push({ text: text.slice(last, match.index), className: base })
     tokens.push({ text: match[0], className: (group ? INLINE_CLASS[group] : undefined) ?? base })
     last = match.index + match[0].length
+    match = INLINE.exec(text)
   }
   if (last < text.length) tokens.push({ text: text.slice(last), className: base })
   return tokens.length > 0 ? tokens : [{ text, className: base }]

@@ -103,6 +103,7 @@ export function makeProj(yaw: number, tilt: number, cx: number, cy: number, scal
  * depth language on an inverted substrate.
  */
 export function paint(ctx: CanvasRenderingContext2D, dots: Dot[], dark: boolean, rMin = 0.3): void {
+  void rMin;
   for (const d of dots) {
     const alpha = d.a ?? 1;
     const w = Math.min(1, Math.max(0, d.white));
