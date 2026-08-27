@@ -1368,6 +1368,7 @@ export function TaskForm({
             error={nativeQuery.data?.error}
             selectedId={v.resumeSessionId ?? ''}
             selectedLabel={v.resumeSessionLabel ?? ''}
+            onOpen={() => nativeQuery.refetch()}
             disabled={!hasWorkspaceId(v.workspaceId)}
             disabledReason={!projectId ? 'Select a project first' : 'Select a branch first'}
             onSelectNew={() => {

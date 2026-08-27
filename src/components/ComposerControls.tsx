@@ -90,6 +90,7 @@ export function FooterMenu({
   align = 'start',
   invalid,
   'aria-describedby': ariaDescribedBy,
+  onOpen,
   children,
 }: {
   label: string
@@ -100,6 +101,7 @@ export function FooterMenu({
   align?: 'start' | 'end'
   invalid?: boolean
   'aria-describedby'?: string
+  onOpen?: () => void
   children: (close: () => void) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -162,7 +164,10 @@ export function FooterMenu({
         aria-haspopup="menu"
         aria-invalid={invalid || undefined}
         aria-describedby={ariaDescribedBy}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) onOpen?.()
+          setOpen((v) => !v)
+        }}
         className={`inline-flex h-8 max-w-52 min-w-0 items-center gap-2 truncate rounded-lg px-2.5 text-ui-base transition-colors hover:bg-hover disabled:pointer-events-none disabled:opacity-40 sm:max-w-60 ${
           invalid
             ? 'text-rose-300 hover:text-rose-200'
@@ -539,11 +544,14 @@ export type BranchOption = {
   hint?: string
 }
 
+const BRANCH_PAGE_SIZE = 5
+
 export function BranchPicker({
   workspaces,
   workspaceId,
   disabled,
   placeholder = 'Select branch',
+  newBranchLabel = 'New branch',
   onChange,
   onRequestNewBranch,
 }: {
@@ -551,10 +559,14 @@ export function BranchPicker({
   workspaceId: string
   disabled?: boolean
   placeholder?: string
+  newBranchLabel?: string
   onChange: (id: string) => void
   onRequestNewBranch?: () => void
 }) {
   const selected = workspaces.find((w) => w.id === workspaceId)
+  const [visibleCount, setVisibleCount] = useState(BRANCH_PAGE_SIZE)
+  const visibleWorkspaces = workspaces.slice(0, visibleCount)
+  const hasMore = visibleWorkspaces.length < workspaces.length
 
   return (
     <FooterMenu
@@ -563,13 +575,14 @@ export function BranchPicker({
       tooltip="Branch to check out"
       disabled={disabled}
       leading={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
+      onOpen={() => setVisibleCount(BRANCH_PAGE_SIZE)}
     >
       {(close) => (
         <>
           {workspaces.length === 0 ? (
             <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">No branches yet</div>
           ) : (
-            workspaces.map((w) => (
+            visibleWorkspaces.map((w) => (
               <MenuItem
                 key={w.id}
                 active={w.id === workspaceId}
@@ -586,9 +599,19 @@ export function BranchPicker({
               />
             ))
           )}
+          {hasMore ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setVisibleCount((count) => count + BRANCH_PAGE_SIZE)}
+              className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground"
+            >
+              Load more
+            </button>
+          ) : null}
           {onRequestNewBranch ? (
             <MenuItem
-              label="New branch"
+              label={newBranchLabel}
               leading={<Plus className="h-3.5 w-3.5 shrink-0" />}
               onSelect={() => {
                 close()
