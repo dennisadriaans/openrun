@@ -359,12 +359,28 @@ function RunDetail() {
 
   const submitNewBranch = async () => {
     if (!project || !newBranchName.trim()) return
-    await createWorkspace.mutateAsync({
-      projectId: project.id,
-      branch: newBranchName.trim(),
-    })
-    setNewBranchOpen(false)
-    setNewBranchName('')
+    try {
+      const created = await createWorkspace.mutateAsync({
+        projectId: project.id,
+        branch: newBranchName.trim(),
+        fromBranch: workspace?.branch || project.defaultBranch,
+      })
+      setNewBranchOpen(false)
+      setNewBranchName('')
+      void navigate({
+        to: '/runs/new',
+        search: {
+          projectId: project.id,
+          workspaceId: created.id,
+          runtimeId: data?.runtime?.id,
+          model: data?.model || undefined,
+          effort: data?.effort || undefined,
+          runtimeMode: data?.runtimeMode,
+        },
+      })
+    } catch {
+      // Mutation state renders the server's Git/setup error in the dialog.
+    }
   }
 
   return (
@@ -392,7 +408,7 @@ function RunDetail() {
                 isMainCheckout={workspace?.kind === 'main'}
                 workspace={workspace}
                 workspaces={workspaces}
-                branchDisabled={booting || run?.status === 'running'}
+                branchDisabled={booting}
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
               />
 
@@ -724,7 +740,8 @@ function RunDetail() {
               New branch workspace
             </div>
             <p className="mb-4 text-xs text-muted-foreground">
-              Creates a worktree under {project.name}. Start a chat from Projects when it is ready.
+              Creates a separate worktree from {workspace?.branch || project.defaultBranch}, then
+              opens a new chat in it. Only committed Git state is copied.
             </p>
             <input
               autoFocus
@@ -737,6 +754,13 @@ function RunDetail() {
                 if (e.key === 'Escape') setNewBranchOpen(false)
               }}
             />
+            {createWorkspace.isError ? (
+              <p className="mb-4 text-xs text-danger">
+                {createWorkspace.error instanceof Error
+                  ? createWorkspace.error.message
+                  : String(createWorkspace.error)}
+              </p>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setNewBranchOpen(false)}>
                 Cancel

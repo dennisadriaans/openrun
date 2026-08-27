@@ -1,0 +1,1 @@
+You no longer get stuck on the new-run page when another session is using the selected branch. You can now open an existing branch in its own worktree or create and select a new isolated workspace without leaving the page.

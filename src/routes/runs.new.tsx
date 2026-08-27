@@ -15,6 +15,8 @@ import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
 import { WorkingIndicator } from '../components/chat/WorkingIndicator'
 import { NativeSessionMenu } from '../components/NativeSessionMenu'
+import { Button, Field, inputClass, Modal } from '../components/ui'
+import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
 import {
   defaultEffort,
   defaultModel,
@@ -27,6 +29,8 @@ import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { nativeResumeKindFor } from '../lib/nativeSessions'
 import {
   useNativeSessions,
+  useCreateWorkspace,
+  useProjectBranches,
   useProjects,
   useRuntimes,
   usePlugins,
@@ -67,6 +71,7 @@ function NewRun() {
   const { data: projects } = useProjects()
   const { data: runtimes } = useRuntimes()
   const startChat = useStartChat()
+  const createWorkspace = useCreateWorkspace()
 
   const [projectId, setProjectId] = useState(search.projectId ?? '')
   const [workspaceId, setWorkspaceId] = useState(search.workspaceId ?? '')
@@ -92,12 +97,32 @@ function NewRun() {
   // transcript is faked here to cover the boot round-trip.
   const [sent, setSent] = useState<{ prompt: string; startedAt: number } | null>(null)
   const [addingProject, setAddingProject] = useState(false)
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
+  const [newBranchName, setNewBranchName] = useState('')
+  const [baseBranch, setBaseBranch] = useState('')
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
+  const { data: gitBranches } = useProjectBranches(projectId || undefined)
   const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
   const workspaces = useMemo(
     () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
     [allWorkspaces],
+  )
+  const project = projects?.find((row) => row.id === projectId)
+  const branchChoices = useMemo(
+    () =>
+      projectBranchChoices({
+        gitBranches: gitBranches ?? [],
+        workspaces: workspaces.map((w) => ({
+          id: w.id,
+          branch: w.branch,
+          kind: w.kind,
+          status: w.status,
+          activeRunId: w.activeRunId,
+        })),
+      }),
+    [gitBranches, workspaces],
   )
 
   useEffect(() => {
@@ -161,6 +186,52 @@ function NewRun() {
             ? 'Pick a runtime.'
             : null
 
+  const selectBranch = async (id: string) => {
+    setWorkspaceError(null)
+    const pending = parsePendingGitBranchId(id)
+    if (!pending) {
+      setWorkspaceId(id)
+      return
+    }
+    if (!projectId) return
+    const gitRow = (gitBranches ?? []).find((row) => row.name === pending)
+    try {
+      const created = await createWorkspace.mutateAsync({
+        projectId,
+        branch: pending,
+        fromBranch: pending,
+        useExistingBranch: gitRow ? !gitRow.remote : true,
+      })
+      setWorkspaceId(created.id)
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const openNewWorkspace = () => {
+    setWorkspaceError(null)
+    setNewBranchName('')
+    setBaseBranch(workspace?.branch || project?.defaultBranch || '')
+    setNewWorkspaceOpen(true)
+  }
+
+  const submitNewWorkspace = async () => {
+    if (!projectId || !newBranchName.trim()) return
+    setWorkspaceError(null)
+    try {
+      const created = await createWorkspace.mutateAsync({
+        projectId,
+        branch: newBranchName.trim(),
+        fromBranch: baseBranch.trim() || undefined,
+      })
+      setWorkspaceId(created.id)
+      setNewWorkspaceOpen(false)
+      setNewBranchName('')
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const send = (prompt: string) => {
     if (!workspace || !runtime || sent) return
     setError(null)
@@ -212,20 +283,12 @@ function NewRun() {
             /
           </span>
           <BranchPicker
-            workspaces={workspaces.map((w) => ({
-              id: w.id,
-              branch: w.branch,
-              kind: w.kind,
-              status: w.status,
-              blockedReason: !isWorkspaceReady(w.status)
-                ? w.status
-                : w.activeRunId
-                  ? 'run active'
-                  : null,
-            }))}
+            workspaces={branchChoices}
             workspaceId={workspaceId}
-            disabled={startChat.isPending}
-            onChange={setWorkspaceId}
+            disabled={startChat.isPending || createWorkspace.isPending}
+            newBranchLabel="New branch and workspace"
+            onChange={(id) => void selectBranch(id)}
+            onRequestNewBranch={projectId ? openNewWorkspace : undefined}
           />
           {!sent ? (
             <>
@@ -239,6 +302,7 @@ function NewRun() {
                 error={nativeQuery.data?.error}
                 selectedId={resumeSessionId}
                 selectedLabel={resumeSessionLabel}
+                onOpen={() => nativeQuery.refetch()}
                 disabled={!workspaceId || startChat.isPending}
                 disabledReason="Pick a branch first"
                 onSelectNew={() => {
@@ -280,7 +344,32 @@ function NewRun() {
               <p className="mt-1.5 text-ui-base text-tier-tertiary">
                 Confirm the project and branch above, pick a runtime, then send the first message.
               </p>
+              {workspace?.activeRunId ? (
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={openNewWorkspace}
+                    disabled={createWorkspace.isPending}
+                  >
+                    Create isolated workspace
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      void navigate({
+                        to: '/runs/$runId',
+                        params: { runId: workspace.activeRunId! },
+                      })
+                    }
+                  >
+                    Open active run
+                  </Button>
+                </div>
+              ) : null}
               {error ? <p className="mt-3 text-ui-base text-danger">{error}</p> : null}
+              {workspaceError ? (
+                <p className="mt-3 text-ui-base text-danger">{workspaceError}</p>
+              ) : null}
             </div>
           </div>
         )}
@@ -356,6 +445,48 @@ function NewRun() {
             setWorkspaceId('')
           }}
         />
+      ) : null}
+
+      {newWorkspaceOpen && project ? (
+        <Modal title={`New workspace — ${project.name}`} onClose={() => setNewWorkspaceOpen(false)}>
+          <div className="space-y-4">
+            <p className="text-ui-base text-tier-secondary">
+              Creates a separate Git worktree so this run can work in parallel with other sessions.
+            </p>
+            <Field label="New branch">
+              <input
+                autoFocus
+                className={`${inputClass} mono text-[13px]`}
+                value={newBranchName}
+                onChange={(event) => setNewBranchName(event.target.value)}
+                placeholder="feature/my-change"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void submitNewWorkspace()
+                }}
+              />
+            </Field>
+            <Field label="Base branch" hint="only committed Git state is copied">
+              <input
+                className={`${inputClass} mono text-[13px]`}
+                value={baseBranch}
+                onChange={(event) => setBaseBranch(event.target.value)}
+              />
+            </Field>
+            {workspaceError ? <p className="text-ui-base text-danger">{workspaceError}</p> : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setNewWorkspaceOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!newBranchName.trim() || createWorkspace.isPending}
+                onClick={() => void submitNewWorkspace()}
+              >
+                {createWorkspace.isPending ? 'Creating…' : 'Create workspace'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </div>
   )

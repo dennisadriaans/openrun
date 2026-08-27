@@ -821,10 +821,12 @@ export function useCreateWorkspace() {
   return useMutation({
     mutationFn: (data: Parameters<typeof fns.createWorkspace>[0]['data']) =>
       fns.createWorkspace({ data }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['workspaces'] })
-      qc.invalidateQueries({ queryKey: ['projects'] })
-      qc.invalidateQueries({ queryKey: ['projectBranches'] })
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['workspaces'] }),
+        qc.invalidateQueries({ queryKey: ['projects'] }),
+        qc.invalidateQueries({ queryKey: ['projectBranches'] }),
+      ])
     },
   })
 }
