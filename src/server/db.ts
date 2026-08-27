@@ -171,6 +171,8 @@ export type MessageRow = {
   exitCode: number | null
   /** JSON array of DiffFile summaries captured after this turn finished. */
   diffSummary: string
+  /** JSON `TurnUsage` the runtime last reported for this turn; '' when it reports none. */
+  usage: string
   /** Integration this message was triggered by; empty for anything else. */
   sourceProvider: string
   /** The ticket the webhook fired for. Rendered as a badge, never prompted. */
@@ -649,6 +651,8 @@ function migrate(db: Database.Database) {
 
   // Where a webhook-triggered message came from. Held beside the message
   // rather than inside it so the link never reaches the agent's prompt.
+  // Live token accounting for the turn, as the CLI last reported it.
+  addColumn(db, 'messages', 'usage', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'messages', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'messages', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'messages', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")

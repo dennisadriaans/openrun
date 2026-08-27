@@ -28,6 +28,7 @@ import {
 } from './resume'
 import { publishActivityLive } from './activityLive'
 import { publishRunLive } from './runLive'
+import { createTurnUsageSink } from './turnUsage'
 import { pushApprovalRequest, pushApprovalSettled } from './mobile/apns'
 import {
   AssistantDeltaCoalescer,
@@ -75,7 +76,16 @@ import {
   resumedNativeChatStub,
 } from '../lib/nativeSessions.ts'
 import { checksForWorkspace, clearCheckPass, runCheckPass } from './checks'
-import { RUN_KILL_GRACE_MS, resolveRunTimeoutMs, runTimedOutMessage } from '../lib/runBudget'
+import {
+  RUN_KILL_GRACE_MS,
+  RUN_STALL_AFTER_MS,
+  RUN_STALL_CHECK_MS,
+  TURN_DONE_LINGER_MS,
+  resolveRunTimeoutMs,
+  runStalledMessage,
+  runTimedOutMessage,
+} from '../lib/runBudget'
+import { isUsageLimitMessage, usageLimitStopMessage } from '../lib/agentLimits.ts'
 import { meaningfulStderr } from '../lib/stderrNoise.ts'
 import {
   buildRepairPrompt,
@@ -753,9 +763,41 @@ function spawnTurn(input: {
     killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
   }, timeoutMs)
 
+  const noteTurn = (text: string) => {
+    appendRunStderr.run(text, runId)
+    appendMsgStderr.run(text, assistantMsgId)
+    publishRunLive(runId, {
+      type: 'log',
+      stream: 'stderr',
+      chunk: text,
+      messageId: assistantMsgId,
+    })
+  }
+
+  // Silence watchdog. The budget above only fires at the very end, so a CLI
+  // that goes quiet — Codex waiting out a usage limit does exactly that —
+  // otherwise spins the transcript with no explanation until it elapses.
+  let lastOutputAt = Date.now()
+  let stallNotes = 0
+  let stallTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+    const silentMs = Date.now() - lastOutputAt
+    const due = Math.floor(silentMs / RUN_STALL_AFTER_MS)
+    if (due <= stallNotes) return
+    stallNotes = due
+    noteTurn(`\n[executor] ${runStalledMessage(silentMs)}\n`)
+  }, RUN_STALL_CHECK_MS)
+
+  // A turn that ended on an error can leave the CLI lingering with nothing
+  // left to say; without this the run stays `running` until its budget.
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null
+
   const clearBudget = () => {
     if (budgetTimer) clearTimeout(budgetTimer)
     budgetTimer = null
+    if (stallTimer) clearInterval(stallTimer)
+    stallTimer = null
+    if (lingerTimer) clearTimeout(lingerTimer)
+    lingerTimer = null
   }
 
   const kind = eventKindFor(runtimeKind(runtime.bin))
@@ -788,12 +830,19 @@ function spawnTurn(input: {
     }
   >()
 
+  const recordUsage = createTurnUsageSink(db, runId, assistantMsgId)
+
   const persistEvents = (events: ParsedTurnEvent[]) => {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
     if (current?.status === 'cancelled') return
     for (const ev of events) {
+      // A gauge, not a transcript row: fold it onto the message and move on.
+      if (ev.kind === 'usage') {
+        recordUsage(ev.payload.usage)
+        continue
+      }
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
           name: ev.payload.name,
@@ -853,6 +902,23 @@ function spawnTurn(input: {
             // stdin already closed — nothing to do.
           }
         }
+      }
+
+      // A usage limit is terminal for this turn: the CLI has nothing left to
+      // report and may simply idle until its window resets, so stop it now
+      // with the reason in the log instead of a silent hour of `running`.
+      if (ev.kind === 'error' && isUsageLimitMessage(ev.payload.message ?? '')) {
+        noteTurn(`\n[executor] ${usageLimitStopMessage(ev.payload.message ?? '')}\n`)
+        killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
+      }
+
+      if (ev.kind === 'turn_done' && !lingerTimer) {
+        lingerTimer = setTimeout(() => {
+          lingerTimer = null
+          if (!isPidAlive(child.pid ?? 0)) return
+          noteTurn('\n[executor] The agent reported the turn done but did not exit; stopping it.\n')
+          killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
+        }, TURN_DONE_LINGER_MS)
       }
     }
   }
@@ -958,6 +1024,7 @@ function spawnTurn(input: {
   }
 
   const ingestStdoutChunk = (text: string) => {
+    lastOutputAt = Date.now()
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
@@ -983,6 +1050,7 @@ function spawnTurn(input: {
     ingestStdoutChunk(d.toString())
   })
   child.stderr?.on('data', (d: Buffer) => {
+    lastOutputAt = Date.now()
     const text = d.toString()
     appendRunStderr.run(text, runId)
     appendMsgStderr.run(text, assistantMsgId)
@@ -1203,7 +1271,15 @@ function spawnAcpTurn(input: {
   // one paragraph per stretch instead of a row per token.
   const coalescer = new AssistantDeltaCoalescer()
 
+  // Same three guards as the CLI path: an agent that goes silent says so in the
+  // log, a usage limit ends the turn, and a finished agent may not linger.
+  let lastOutputAt = Date.now()
+  let stallNotes = 0
+  let stallTimer: ReturnType<typeof setInterval> | null = null
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null
+
   const appendLog = (stream: 'stdout' | 'stderr', chunk: string) => {
+    lastOutputAt = Date.now()
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
@@ -1218,12 +1294,19 @@ function spawnAcpTurn(input: {
     publishRunLive(runId, { type: 'log', stream, chunk, messageId: assistantMsgId })
   }
 
+  const recordUsage = createTurnUsageSink(db, runId, assistantMsgId)
+
   const persistEvents = (events: ParsedTurnEvent[]) => {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
     if (current?.status === 'cancelled') return
     for (const ev of events) {
+      // A gauge, not a transcript row: fold it onto the message and move on.
+      if (ev.kind === 'usage') {
+        recordUsage(ev.payload.usage)
+        continue
+      }
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
           name: ev.payload.name,
@@ -1268,7 +1351,30 @@ function spawnAcpTurn(input: {
         payload: ev.payload as TurnEventPayload,
         createdAt,
       })
+
+      if (ev.kind === 'error' && isUsageLimitMessage(ev.payload.message ?? '')) {
+        appendLog('stderr', `\n[executor] ${usageLimitStopMessage(ev.payload.message ?? '')}\n`)
+        stopAgent()
+      }
+
+      if (ev.kind === 'turn_done' && !lingerTimer) {
+        lingerTimer = setTimeout(() => {
+          lingerTimer = null
+          if (settled || !isPidAlive(handle.child.pid ?? 0)) return
+          appendLog(
+            'stderr',
+            '\n[executor] The agent reported the turn done but did not exit; stopping it.\n',
+          )
+          stopAgent()
+        }, TURN_DONE_LINGER_MS)
+      }
     }
+  }
+
+  /** End the agent now, whatever it is waiting for. */
+  function stopAgent() {
+    handle.cancelTurn()
+    killChildTree(handle.child, { graceMs: RUN_KILL_GRACE_MS })
   }
 
   function scheduleApprovalTimeout(requestId: string, toolName: string) {
@@ -1364,6 +1470,11 @@ function spawnAcpTurn(input: {
         if (settled) return
         settled = true
         if (budgetTimer) clearTimeout(budgetTimer)
+        budgetTimer = null
+        if (stallTimer) clearInterval(stallTimer)
+        stallTimer = null
+        if (lingerTimer) clearTimeout(lingerTimer)
+        lingerTimer = null
         persistEvents(coalescer.flush())
         for (const timer of approvalTimers.values()) clearTimeout(timer)
         approvalTimers.clear()
@@ -1401,6 +1512,17 @@ function spawnAcpTurn(input: {
     answer: (rid, answer) => resolveApproval(rid, answer),
     hasPending: () => approvalTimers.size > 0,
   })
+
+  stallTimer = setInterval(() => {
+    const silentMs = Date.now() - lastOutputAt
+    const due = Math.floor(silentMs / RUN_STALL_AFTER_MS)
+    if (due <= stallNotes) return
+    stallNotes = due
+    const quietSince = lastOutputAt
+    appendLog('stderr', `\n[executor] ${runStalledMessage(silentMs)}\n`)
+    // Our own note is not the agent speaking, so it must not restart the clock.
+    lastOutputAt = quietSince
+  }, RUN_STALL_CHECK_MS)
 
   budgetTimer = setTimeout(() => {
     budgetTimer = null

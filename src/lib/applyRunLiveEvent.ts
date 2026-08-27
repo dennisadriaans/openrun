@@ -6,6 +6,7 @@
  */
 import type { CheckResultFrame, RunLiveEvent } from './runLive'
 import type { TurnEventRow } from './turnEvents'
+import type { TurnUsage } from './turnUsage'
 
 /**
  * A check as the conversation cache holds it. `outcome: 'running'` is the
@@ -38,6 +39,8 @@ export type ConversationCacheSlice = {
     status: string
     exitCode: number | null
     events: TurnEventRow[]
+    /** Live token accounting; absent until the runtime reports any. */
+    usage?: TurnUsage | null
     diffSummary?: unknown[]
     createdAt?: number
     finishedAt?: number | null
@@ -79,6 +82,8 @@ export function applyRunLiveEvent<T extends ConversationCacheSlice>(
     case 'turn_event':
       if (data.run.status === 'cancelled') return { action: 'ignore' }
       return patchTurnEvent(data, event)
+    case 'turn_usage':
+      return patchTurnUsage(data, event)
     case 'check_started':
       return patchCheckStarted(data, event)
     case 'check_finished':
@@ -264,6 +269,18 @@ function patchTurnEvent<T extends ConversationCacheSlice>(
   return { action: 'patch', data: { ...data, messages } }
 }
 
+function patchTurnUsage<T extends ConversationCacheSlice>(
+  data: T,
+  event: Extract<RunLiveEvent, { type: 'turn_usage' }>,
+): ApplyRunLiveResult<T> {
+  const idx = data.messages.findIndex((m) => m.id === event.messageId)
+  // The gauge is not worth a refetch — the next poll or frame carries it.
+  if (idx < 0) return { action: 'ignore' }
+  const messages = data.messages.slice()
+  messages[idx] = { ...messages[idx], usage: event.usage }
+  return { action: 'patch', data: { ...data, messages } }
+}
+
 /** Patch a bare run row cache (`['run', id]`) when present. */
 export function applyRunLiveEventToRunRow<
   T extends { id: string; status: string; stdout: string; stderr: string; exitCode: number | null },
@@ -283,6 +300,7 @@ export function applyRunLiveEventToRunRow<
         data: { ...run, status: 'running', exitCode: null },
       }
     case 'turn_event':
+    case 'turn_usage':
     case 'turn_finished':
     case 'check_started':
     case 'check_finished':

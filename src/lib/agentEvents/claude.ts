@@ -17,11 +17,47 @@ import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
 import {
   AssistantDeltaCoalescer,
   locationsFromToolInput,
+  pickNumber,
+  recordAt,
   textFromContentBlocks,
   toolInputSummary,
   toolResultContent,
   type ParsedTurnEvent,
 } from './types.ts'
+import type { TurnUsage } from '../turnUsage.ts'
+
+/**
+ * Anthropic `usage` block → a context snapshot.
+ *
+ * Every `assistant` message carries one, and it describes *that request*: the
+ * fresh input, what the cache served, and what was written into it. Summed,
+ * that is what the model was holding — Claude never states a window, so
+ * `contextLimit` is left for the model table to fill in.
+ */
+function claudeUsage(
+  message: Record<string, unknown> | undefined,
+): Partial<TurnUsage> | undefined {
+  const usage = recordAt(message, 'usage')
+  if (!usage) return undefined
+  const input = pickNumber(usage, 'input_tokens') ?? 0
+  const output = pickNumber(usage, 'output_tokens') ?? 0
+  const cacheRead = pickNumber(usage, 'cache_read_input_tokens') ?? 0
+  const creation = recordAt(usage, 'cache_creation')
+  const cacheWrite =
+    pickNumber(usage, 'cache_creation_input_tokens') ??
+    (pickNumber(creation, 'ephemeral_5m_input_tokens') ?? 0) +
+      (pickNumber(creation, 'ephemeral_1h_input_tokens') ?? 0)
+  if (input + output + cacheRead + cacheWrite <= 0) return undefined
+  const model = typeof message?.model === 'string' ? message.model : ''
+  return { input, output, cacheRead, cacheWrite, model }
+}
+
+function claudeUsageEvent(
+  message: Record<string, unknown> | undefined,
+): ParsedTurnEvent[] {
+  const usage = claudeUsage(message)
+  return usage ? [{ kind: 'usage', payload: { usage } }] : []
+}
 
 export function parseClaudeObject(obj: Record<string, unknown>): ParsedTurnEvent[] {
   const type = String(obj.type ?? '')
@@ -98,6 +134,7 @@ export function parseClaudeObject(obj: Record<string, unknown>): ParsedTurnEvent
       const text = textFromContentBlocks(content)
       if (text) out.push({ kind: 'assistant', payload: { text } })
     }
+    out.push(...claudeUsageEvent(message))
     return out
   }
 
@@ -150,6 +187,8 @@ export function parseClaudeObject(obj: Record<string, unknown>): ParsedTurnEvent
         : errored
           ? undefined
           : ('end_turn' as const)
+    // No usage here: `result.usage` sums every request in the turn, which is
+    // spend, not context. The per-message snapshots above are the gauge.
     out.push({
       kind: 'turn_done',
       payload: {

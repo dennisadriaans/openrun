@@ -11,7 +11,52 @@
 import { isToolCallStatus, isToolKind, resolveToolKind, toolCallTitle } from '../acp.ts'
 import type { PlanEntry, ToolCallLocation, ToolCallStatus } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
-import { pickString, toolInputSummary, toolResultContent, type ParsedTurnEvent } from './types.ts'
+import {
+  pickNumber,
+  pickString,
+  recordAt,
+  toolInputSummary,
+  toolResultContent,
+  type ParsedTurnEvent,
+} from './types.ts'
+import type { TurnUsage } from '../turnUsage.ts'
+
+/**
+ * Grok's `usage` envelope → a context snapshot.
+ *
+ * Builds disagree on the spelling: some send Anthropic-style `input_tokens`
+ * (which excludes the cached part), others OpenAI-style `prompt_tokens` (which
+ * includes it). `total_tokens` settles it when present; otherwise the shape of
+ * the key we matched decides whether the cached tokens are already counted.
+ */
+function grokUsage(obj: Record<string, unknown>): Partial<TurnUsage> | undefined {
+  const usage = recordAt(obj, 'usage') ?? obj
+  const promptStyle = typeof usage.prompt_tokens === 'number'
+  const input = pickNumber(usage, 'input_tokens', 'inputTokens', 'prompt_tokens') ?? 0
+  const output =
+    pickNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens') ?? 0
+  const cacheRead =
+    pickNumber(
+      usage,
+      'cache_read_input_tokens',
+      'cached_input_tokens',
+      'cached_prompt_text_tokens',
+      'num_cached_prompt_tokens',
+    ) ?? 0
+  const cacheWrite = pickNumber(usage, 'cache_creation_input_tokens') ?? 0
+  const total = pickNumber(usage, 'total_tokens', 'totalTokens')
+  if (input + output + cacheRead + cacheWrite <= 0 && !total) return undefined
+  const contextTokens =
+    total ?? (promptStyle ? input + output : input + cacheRead + cacheWrite + output)
+  return {
+    input: promptStyle ? Math.max(0, input - cacheRead) : input,
+    output,
+    cacheRead,
+    cacheWrite,
+    contextTokens,
+    ...(pickString(obj, 'model') ? { model: pickString(obj, 'model') as string } : {}),
+  }
+}
 
 /** Unwrap nested Grok tool output (e.g. ListDir Content.content). */
 export function grokToolOutput(raw: unknown): string {
@@ -54,7 +99,7 @@ function statusFrom(obj: Record<string, unknown>, fallback: ToolCallStatus): Too
 
 /**
  * Map one parsed Grok streaming-json object into canonical turn events.
- * Noise (`available_commands`, `usage`, …) returns [].
+ * Noise (`available_commands`, …) returns [].
  */
 export function parseGrokObject(obj: Record<string, unknown>): ParsedTurnEvent[] {
   const type = String(obj.type ?? obj.event ?? '')
@@ -62,6 +107,11 @@ export function parseGrokObject(obj: Record<string, unknown>): ParsedTurnEvent[]
   if (type === 'text') {
     const data = pickString(obj, 'data', 'text') ?? ''
     return data ? [{ kind: 'assistant', payload: { text: data } }] : []
+  }
+
+  if (type === 'usage') {
+    const usage = grokUsage(obj)
+    return usage ? [{ kind: 'usage', payload: { usage } }] : []
   }
 
   // Reasoning used to be dropped on the floor; it is a first-class ACP update

@@ -10,6 +10,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
 import { Chat } from '../components/Chat'
+import { ChatDebugToggle } from '../components/chat/ChatDebugToggle'
+import { ContextMeter } from '../components/chat/ContextMeter'
+import { TerminalPalettePicker } from '../components/chat/TerminalPalettePicker'
+import { useChatTheme } from '../components/chat/ChatThemeProvider'
 import { DiffPanel } from '../components/DiffPanel'
 import { EmptyState, Modal } from '../components/ui'
 import { Button } from '../components/ui'
@@ -109,6 +113,7 @@ function RunDetail() {
   const { data, isLoading } = useConversation(runId, { streamHealthy })
   const { data: runtimes } = useRuntimes()
   const { open: sidebarOpen } = useSidebar()
+  const debug = useChatTheme().theme === 'terminal'
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [reviewPath, setReviewPath] = useState<string | null>(null)
   const [confirmUndoAll, setConfirmUndoAll] = useState(false)
@@ -272,6 +277,9 @@ function RunDetail() {
 
   const run = data?.run
   const messages = data?.messages ?? []
+  // The newest turn that reported any: context is a property of the session,
+  // so it survives a turn that said nothing about itself.
+  const contextUsage = [...messages].reverse().find((m) => m.usage)?.usage ?? null
   const files = workspacePanel?.files ?? []
   const repo = workspacePanel?.repo ?? {
     isRepo: false,
@@ -388,6 +396,8 @@ function RunDetail() {
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
               />
 
+              <ContextMeter usage={contextUsage} />
+
               <div className="flex shrink-0 items-center gap-2">
                 <div ref={newRunMenuRef} className="relative flex">
                   <Button
@@ -461,6 +471,9 @@ function RunDetail() {
                     <Ban className="h-4 w-4" /> Cancel
                   </Button>
                 ) : null}
+
+                {debug ? <TerminalPalettePicker /> : null}
+                <ChatDebugToggle />
 
                 {/*
                   The layout controls live in the right panel. Only the reopen
