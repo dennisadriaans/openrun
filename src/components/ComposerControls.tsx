@@ -50,6 +50,10 @@ export type RuntimeOption = {
   description?: string
   /** False / missing means the binary is not on PATH. */
   installed?: boolean
+  /** 'cli' or 'acp' — decides whether Supervised is offered. */
+  transport?: string
+  /** Discovered catalog, when the caller has one; falls back to the seed. */
+  models?: ModelOption[]
 }
 
 function useClickOutside(

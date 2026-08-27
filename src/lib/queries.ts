@@ -189,6 +189,26 @@ export function useSlashCommands(
   })
 }
 
+export function usePlugins(
+  input: { runtimeId: string; workspaceId?: string },
+  opts?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['plugins', input.runtimeId, input.workspaceId ?? ''],
+    queryFn: () => fns.listPlugins({ data: input }),
+    enabled: (opts?.enabled ?? true) && !!input.runtimeId,
+    staleTime: 30_000,
+  })
+}
+
+export function useInstalledPlugins(input: { workspaceId?: string } = {}) {
+  return useQuery({
+    queryKey: ['installedPlugins', input.workspaceId ?? ''],
+    queryFn: () => fns.listInstalledPlugins({ data: input }),
+    staleTime: 30_000,
+  })
+}
+
 export function useTasks() {
   const streamHealthy = useActivityStreamHealthy()
   return useQuery({
@@ -434,6 +454,7 @@ export function useSendMessage(runId: string) {
   const mutation = useMutation({
     mutationFn: (input: {
       prompt: string
+      runtimeId?: string
       model?: string
       effort?: string
       runtimeMode?: string
@@ -488,6 +509,8 @@ export function useSendMessage(runId: string) {
 
   type FollowUpInput = {
     prompt: string
+    /** Set only when this turn hands the chat to a different runtime. */
+    runtimeId?: string
     model?: string
     effort?: string
     runtimeMode?: string
@@ -509,6 +532,7 @@ export function useSendMessage(runId: string) {
 
 function sendFollowUpVars(input: {
   prompt: string
+  runtimeId?: string
   model?: string
   effort?: string
   runtimeMode?: string
@@ -834,6 +858,8 @@ export function useStartChat() {
       model?: string
       effort?: string
       runtimeMode?: string
+      resumeSessionId?: string
+      resumeSessionLabel?: string
     }) => fns.startChat({ data }),
     onSuccess: async (data) => {
       qc.invalidateQueries({ queryKey: ['runs'] })
@@ -1079,10 +1105,12 @@ export function useCompleteCloudLogin() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: { code: string; state: string }) => fns.completeCloudLogin({ data }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['cloudStatus'] })
+    // Awaited, not fired and forgotten: the callback navigates as soon as this
+    // resolves, and a stale `signedIn: false` status bounces it back to /welcome.
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['cloudStatus'] })
       // A fresh sign-in can reach a plane the cached catalog never saw.
-      qc.invalidateQueries({ queryKey: ['cloudProviders'] })
+      void qc.invalidateQueries({ queryKey: ['cloudProviders'] })
     },
   })
 }

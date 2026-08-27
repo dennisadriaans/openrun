@@ -58,6 +58,13 @@ import { startAcpTurn } from './acpTurn'
 import { protocolMcpServers } from './mcp.ts'
 import { OPENRUN_APP_DIR_ENV, OPENRUN_RUN_ID_ENV } from '../lib/openrunTools.ts'
 import { withPrCapability } from '../lib/prCapability'
+import { buildHandoffPrompt, handoffSystemNote, type HandoffMessage } from '../lib/handoffPrompt.ts'
+import {
+  isRuntimeSwitch,
+  resolveSwitchMode,
+  resolveSwitchModel,
+} from '../lib/runtimeSwitch.ts'
+import { cachedModelsForBin } from './modelCatalog.ts'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { nativeSessionExists } from './nativeSessions'
@@ -69,6 +76,7 @@ import {
 } from '../lib/nativeSessions.ts'
 import { checksForWorkspace, clearCheckPass, runCheckPass } from './checks'
 import { RUN_KILL_GRACE_MS, resolveRunTimeoutMs, runTimedOutMessage } from '../lib/runBudget'
+import { meaningfulStderr } from '../lib/stderrNoise.ts'
 import {
   buildRepairPrompt,
   deriveVerdict,
@@ -384,6 +392,12 @@ export function startRun(input: StartRunInput): string {
 export function sendFollowUp(input: {
   runId: string
   prompt: string
+  /**
+   * Continue the conversation on a different runtime. Sessions are per-CLI and
+   * opaque, so this is a handoff: a new session on the new binary, seeded with
+   * a summary of the transcript (see `lib/handoffPrompt.ts`).
+   */
+  runtimeId?: string
   model?: string
   effort?: string
   runtimeMode?: RuntimeMode | string
@@ -410,6 +424,7 @@ export function sendFollowUp(input: {
         model: string
         effort: string
         runtimeMode: string
+        baseSnapshot: string
       }
     | undefined
   if (!run) throw new Error('Run not found')
@@ -423,33 +438,79 @@ export function sendFollowUp(input: {
     assertWorkspaceFree(run.workspaceId)
   }
 
-  const runtime = db.prepare('SELECT * FROM runtimes WHERE id = ?').get(run.runtimeId) as
+  const switching = isRuntimeSwitch(run.runtimeId, input.runtimeId)
+  const readRuntime = db.prepare('SELECT * FROM runtimes WHERE id = ?')
+  const runtime = readRuntime.get(switching ? input.runtimeId!.trim() : run.runtimeId) as
     | RuntimeRow
     | undefined
   if (!runtime) throw new Error('Runtime not found for this run')
+  const previous = switching
+    ? (readRuntime.get(run.runtimeId) as RuntimeRow | undefined)
+    : runtime
 
   // Same preflight as startRun — don't flip the run back to running if the
   // binary disappeared between turns.
   assertRuntimeOnPath(runtime.bin)
 
-  const model = input.model?.trim() ?? run.model ?? ''
-  const effort = input.effort?.trim() ?? run.effort ?? ''
-  const runtimeMode = parseRuntimeMode(input.runtimeMode ?? run.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+  let model = input.model?.trim() ?? run.model ?? ''
+  let effort = input.effort?.trim() ?? run.effort ?? ''
+  let runtimeMode = parseRuntimeMode(input.runtimeMode ?? run.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+  if (switching) {
+    // A slug and an access mode from the old CLI mean nothing to the new one.
+    const picked = resolveSwitchModel(cachedModelsForBin(runtime.bin), model)
+    if (picked.model !== model) {
+      model = picked.model
+      effort = picked.effort
+    }
+    runtimeMode = resolveSwitchMode(runtimeMode, runtime)
+  }
 
   assertSupervisedSupported({ bin: runtime.bin, transport: runtime.transport, mode: runtimeMode })
 
+  // The stored user message stays the user's own text; only the CLI sees the
+  // handoff summary in front of it.
+  const cliPrompt = switching
+    ? buildHandoffPrompt({
+        fromLabel: previous?.label ?? 'another runtime',
+        toLabel: runtime.label,
+        messages: handoffTranscript(input.runId),
+        files: handoffChangedFiles(run.cwd, run.baseSnapshot),
+        prompt: input.prompt,
+      })
+    : input.prompt
+
   const turn = buildTurnCommand({
     runtime,
-    prompt: input.prompt,
+    prompt: cliPrompt,
     cwd: run.cwd,
-    sessionId: run.sessionId,
-    isFollowUp: true,
+    // A handoff cannot resume anything — the new CLI has never seen this chat.
+    sessionId: switching ? '' : run.sessionId,
+    isFollowUp: !switching,
     model,
     effort,
     runtimeMode,
   })
-  if (!turn.canResume) {
+  if (!switching && !turn.canResume) {
     throw new Error(`The "${runtime.label}" runtime does not support resuming a conversation`)
+  }
+
+  if (switching) {
+    db.prepare("UPDATE runs SET runtimeId = ?, sessionId = '', command = ? WHERE id = ?").run(
+      runtime.id,
+      turn.display,
+      input.runId,
+    )
+    const at = Date.now() - 1
+    db.prepare(
+      `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
+       VALUES (?, ?, 'system', ?, '', '', 'success', NULL, '', ?, ?)`,
+    ).run(
+      randomId('msg'),
+      input.runId,
+      handoffSystemNote(previous?.label ?? 'another runtime', runtime.label),
+      at,
+      at,
+    )
   }
 
   // A new turn re-opens the question of whether the run's work is good, so the
@@ -471,6 +532,34 @@ export function sendFollowUp(input: {
     userMessageId: input.userMessageId,
     assistantMessageId: input.assistantMessageId,
   })
+}
+
+/** Transcript replayed to a runtime taking over the conversation. */
+function handoffTranscript(runId: string): HandoffMessage[] {
+  const rows = getDb()
+    .prepare('SELECT id, role, content FROM messages WHERE runId = ? ORDER BY createdAt ASC')
+    .all(runId) as Array<{ id: string; role: string; content: string }>
+
+  return rows.flatMap((row) => {
+    if (row.role !== 'user' && row.role !== 'assistant') return []
+    // Assistant text lives in turn events whenever the runtime had an adapter;
+    // `content` is only populated for plain-CLI runs.
+    const content =
+      row.role === 'assistant' && !row.content.trim()
+        ? assistantTextFromEvents(listTurnEventsForMessage(row.id))
+        : row.content
+    if (!content.trim()) return []
+    return [{ role: row.role, content }]
+  })
+}
+
+/** Paths the run has already touched, so the new agent reads before editing. */
+function handoffChangedFiles(cwd: string, baseSnapshot: string): string[] {
+  try {
+    return changedFiles(cwd, baseSnapshot || undefined).map((file) => file.path)
+  } catch {
+    return []
+  }
 }
 
 /**
@@ -1344,7 +1433,8 @@ function finalizeMessage(
 
   const events = listTurnEventsForMessage(messageId)
   const fromEvents = assistantTextFromEvents(events)
-  const content = fromEvents || parseAssistantText(row?.stdout ?? '') || (row?.stderr ?? '').trim()
+  const content =
+    fromEvents || parseAssistantText(row?.stdout ?? '') || meaningfulStderr(row?.stderr).trim()
 
   const run = row?.runId
     ? (db.prepare('SELECT baseSnapshot FROM runs WHERE id = ?').get(row.runId) as

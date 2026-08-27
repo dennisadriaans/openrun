@@ -105,6 +105,8 @@ import {
 import type { McpServerConfig } from '../lib/mcp.ts'
 import { mcpSupportRefusal } from '../lib/mcpTargets.ts'
 import { listSlashCommands, type SlashCommandListing } from './slashCommands.ts'
+import { listAllPlugins, listPlugins } from './plugins.ts'
+import type { PluginHost, PluginListing } from '../lib/plugins.ts'
 import { APP_SLASH_COMMANDS } from '../lib/slashCommands.ts'
 import { listNativeSessionsForKind, nativeSessionExists } from './nativeSessions'
 import { collectUsage } from './usage'
@@ -540,6 +542,27 @@ export function listSlashCommandsFor(input: {
   const listing = listSlashCommands({ bin: runtime.bin, cwd: mcpCwd(input.workspaceId) })
   if (!input.includeApp) return listing
   return { ...listing, commands: [...APP_SLASH_COMMANDS, ...listing.commands] }
+}
+
+// ---------------------------------------------------------------------------
+// Plugins
+// ---------------------------------------------------------------------------
+
+/**
+ * Plugins the runtime's CLI already has installed, for the composer's `$` menu
+ * and the MCP page. Read-only — installing one is the CLI's own command.
+ */
+export function listPluginsFor(input: { runtimeId: string; workspaceId?: string }): PluginListing {
+  const runtime = getRuntime(input.runtimeId)
+  if (!runtime) return { plugins: [] }
+  return listPlugins({ bin: runtime.bin, cwd: mcpCwd(input.workspaceId) })
+}
+
+/** Every plugin on the machine, grouped by the CLI that owns it. */
+export function listInstalledPlugins(input: {
+  workspaceId?: string
+}): Record<PluginHost, PluginListing> {
+  return listAllPlugins({ cwd: mcpCwd(input.workspaceId) })
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,6 +1028,8 @@ export function startChat(input: {
   model?: string
   effort?: string
   runtimeMode?: string
+  resumeSessionId?: string
+  resumeSessionLabel?: string
 }): { runId: string } {
   const workspace = getWorkspace(input.workspaceId)
   if (!workspace) throw new Error('Workspace not found')
@@ -1026,6 +1051,8 @@ export function startChat(input: {
     model: input.model,
     effort: input.effort,
     runtimeMode: input.runtimeMode,
+    resumeSessionId: input.resumeSessionId,
+    resumeSessionLabel: input.resumeSessionLabel,
   })
   return { runId }
 }
@@ -1278,6 +1305,11 @@ export function getConversation(runId: string) {
       !!runtime &&
       supportsResume(runtime.bin, runtime.transport) &&
       (run.sessionId.length > 0 || runtimeSupportsLastResume(runtime.bin)),
+    /**
+     * A handoff starts a fresh session, so it needs nothing from the current
+     * runtime — a run that cannot resume can still be continued elsewhere.
+     */
+    canSwitchRuntime: run.status !== 'running',
     workspace: workspaceWithMeta,
     project,
     workspaces: siblingWorkspaces,
@@ -1395,6 +1427,8 @@ const MAX_MESSAGE_PROMPT_CHARS = 100_000
 export function postMessage(input: {
   runId: string
   prompt: string
+  /** Hand the conversation to a different runtime on this turn. */
+  runtimeId?: string
   model?: string
   effort?: string
   runtimeMode?: string
@@ -1411,6 +1445,7 @@ export function postMessage(input: {
   return sendFollowUp({
     runId: input.runId,
     prompt,
+    runtimeId: input.runtimeId,
     model: input.model,
     effort: input.effort,
     runtimeMode: input.runtimeMode,
@@ -1499,11 +1534,7 @@ export function pushChanges(input: { runId: string }) {
  * tree, and doing it while the commits are still on HEAD keeps that delta the
  * same one the user reviewed.
  */
-export function discardChanges(input: {
-  runId: string
-  paths?: string[]
-  resetCommits?: boolean
-}) {
+export function discardChanges(input: { runId: string; paths?: string[]; resetCommits?: boolean }) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
   if (input.resetCommits && input.paths && input.paths.length > 0) {

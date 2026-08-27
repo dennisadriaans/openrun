@@ -20,9 +20,21 @@ import type { ChatMessage } from '../server/core'
 import type { DiffFile } from '../server/git'
 import type { ApprovalDecision } from '../lib/claudeControl'
 import type { TurnEventPayload, TurnEventRow } from '../lib/turnEvents'
-import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
+import {
+  defaultEffort,
+  defaultModel,
+  findModel,
+  modelsForRuntime,
+  type ModelOption,
+} from '../lib/models'
 import { formatChatTimestampTooltip, formatShortTimestamp } from '../lib/format'
-import { useAnswerApproval, useDiscard, useRestoreFile, useSlashCommands } from '../lib/queries'
+import {
+  useAnswerApproval,
+  useDiscard,
+  usePlugins,
+  useRestoreFile,
+  useSlashCommands,
+} from '../lib/queries'
 import * as fns from '../fns'
 import {
   DEFAULT_RUNTIME_MODE,
@@ -33,7 +45,16 @@ import {
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
 import { isSupervised, supportsSupervised } from '../lib/supervisedPolicy'
-import { ComposerModelControls } from './ComposerControls'
+import { ComposerModelControls, RuntimePicker, type RuntimeOption } from './ComposerControls'
+import {
+  RUNTIME_SWITCH_NOTE_POINTS,
+  RUNTIME_SWITCH_NOTE_TITLE,
+  isRuntimeSwitch,
+  resolveSwitchMode,
+  resolveSwitchModel,
+  runtimeSwitchBlockedReason,
+} from '../lib/runtimeSwitch'
+import { PluginMentionMenu } from './PluginMentionMenu'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import {
   appCommandFor,
@@ -42,6 +63,13 @@ import {
   slashMenuQuery,
   type SlashCommand,
 } from '../lib/slashCommands'
+import {
+  applyPluginMention,
+  matchPlugins,
+  pluginMenuQuery,
+  type AgentPlugin,
+} from '../lib/plugins'
+import { Button, Modal } from './ui'
 import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
 import { MessageSourceBadge } from './MessageSourceBadge'
@@ -63,6 +91,7 @@ import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
 import { foldedRows, planTurnFold, type TurnFoldStage, type TurnRowKind } from '../lib/turnFold'
 import { hasEditHunks } from '../lib/toolCallView'
 import { mergeThoughtText } from '../lib/orbState'
+import { meaningfulStderr } from '../lib/stderrNoise'
 
 function isJsonlNoiseLine(line: string): boolean {
   const t = line.trim()
@@ -544,6 +573,7 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const [foldStage, setFoldStage] = useState<TurnFoldStage>('closed')
   const running = message.status === 'running'
+  const realStderr = meaningfulStderr(message.stderr)
   const hasEvents = message.events.length > 0
   // Planner / plain CLI dumps used to store one `raw` event per line while
   // `content` already held the real answer — prefer content in that case.
@@ -664,10 +694,10 @@ const AssistantMessage = memo(function AssistantMessage({
           </pre>
         ) : null}
 
-        {!running && (message.stderr || (!showEvents && !showContentOverRaw && !showPlanCards)) ? (
+        {!running && (realStderr || (!showEvents && !showContentOverRaw && !showPlanCards)) ? (
           <ActivityLog
             stdout={showEvents || showContentOverRaw || showPlanCards ? '' : message.stdout}
-            stderr={message.stderr}
+            stderr={realStderr}
           />
         ) : null}
 
@@ -731,6 +761,8 @@ export function Composer({
   className,
   commands,
   commandNote,
+  plugins,
+  pluginNote,
   onAppCommand,
 }: {
   disabled: boolean
@@ -758,6 +790,10 @@ export function Composer({
   commands?: SlashCommand[]
   /** Caveat shown under the menu (see `server/slashCommands.ts`). */
   commandNote?: string
+  /** Plugins the runtime's CLI has installed, offered behind `$`. */
+  plugins?: AgentPlugin[]
+  /** Caveat shown under the `$` menu (see `server/plugins.ts`). */
+  pluginNote?: string
   /**
    * Run an app command instead of prompting the agent. Returning a string
    * shows it as an error under the composer; `/help` never gets here.
@@ -785,6 +821,18 @@ export function Composer({
   const menuOpen = !menuDismissed && !disabled && matches.length > 0
   const active = menuOpen ? matches[Math.min(activeIndex, matches.length - 1)] : undefined
 
+  // A `$` mention can sit anywhere in the prompt, so its menu is driven by the
+  // caret rather than the first character — the two never open together.
+  const mentionQuery = menuOpen ? null : pluginMenuQuery(value)
+  const pluginMatches = useMemo(
+    () => (mentionQuery === null || !plugins ? [] : matchPlugins(plugins, mentionQuery)),
+    [mentionQuery, plugins],
+  )
+  const pluginMenuOpen = !menuDismissed && !disabled && pluginMatches.length > 0
+  const activePlugin = pluginMenuOpen
+    ? pluginMatches[Math.min(activeIndex, pluginMatches.length - 1)]
+    : undefined
+
   const setText = (next: string) => {
     setValue(next)
     setActiveIndex(0)
@@ -794,6 +842,11 @@ export function Composer({
 
   const pick = (command: SlashCommand) => {
     setText(applySlashCommand(command))
+    ref.current?.focus()
+  }
+
+  const pickPlugin = (plugin: AgentPlugin) => {
+    setText(applyPluginMention(value, plugin))
     ref.current?.focus()
   }
 
@@ -836,6 +889,14 @@ export function Composer({
           onPick={pick}
         />
       ) : null}
+      {pluginMenuOpen ? (
+        <PluginMentionMenu
+          plugins={pluginMatches}
+          activeIndex={Math.min(activeIndex, pluginMatches.length - 1)}
+          {...(pluginNote ? { note: pluginNote } : {})}
+          onPick={pickPlugin}
+        />
+      ) : null}
       <div className="chat-composer-shell rounded-[22px] p-px">
         <div
           className={`chat-composer-glass rounded-[20px] border transition-[background-color,border-color] duration-200 focus-within:border-ring/45 ${
@@ -851,6 +912,30 @@ export function Composer({
               disabled={disabled || running}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
+                if (pluginMenuOpen && pluginMatches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i + 1) % pluginMatches.length)
+                    return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i - 1 + pluginMatches.length) % pluginMatches.length)
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setMenuDismissed(true)
+                    return
+                  }
+                  if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                    if (activePlugin) {
+                      e.preventDefault()
+                      pickPlugin(activePlugin)
+                      return
+                    }
+                  }
+                }
                 if (menuOpen && matches.length > 0) {
                   if (e.key === 'ArrowDown') {
                     e.preventDefault()
@@ -965,6 +1050,8 @@ export function Chat({
   runtimeId,
   runtimeBin,
   runtimeTransport,
+  runtimes,
+  canSwitchRuntime = false,
   runTrigger,
   installWorkspaceId,
   installWorkspaceReady,
@@ -1006,6 +1093,10 @@ export function Chat({
   runtimeBin?: string
   /** 'cli' or 'acp'; ACP runtimes can always be supervised. */
   runtimeTransport?: string
+  /** Runtimes this chat may be handed over to. Empty hides the picker. */
+  runtimes?: RuntimeOption[]
+  /** A handoff needs no resumable session — only an idle run. */
+  canSwitchRuntime?: boolean
   /** e.g. planner — drives proposal install cards in chat. */
   runTrigger?: string
   /** Planner install target (from the run row). */
@@ -1030,6 +1121,8 @@ export function Chat({
     model: string
     effort: string
     runtimeMode: RuntimeMode
+    /** Present only when this turn hands the chat to another runtime. */
+    runtimeId?: string
   }) => void
   onStop?: () => void
   /** Workspace the run lives in; scopes project slash-command discovery. */
@@ -1041,7 +1134,7 @@ export function Chat({
   const scrollerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
-  const { remember } = usePickerPrefs()
+  const { prefs, remember } = usePickerPrefs()
   const [composerHeight, setComposerHeight] = useState(140)
   const composerOverlayRef = useRef<HTMLDivElement | null>(null)
   const [model, setModel] = useState(initialModel)
@@ -1049,7 +1142,29 @@ export function Chat({
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
     parseRuntimeMode(initialRuntimeMode ?? DEFAULT_RUNTIME_MODE),
   )
-  const canSupervise = supportsSupervised({ bin: runtimeBin, transport: runtimeTransport })
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimeId ?? '')
+  const [pendingRuntimeId, setPendingRuntimeId] = useState<string | null>(null)
+  const [dismissSwitchNote, setDismissSwitchNote] = useState(false)
+
+  const runtimeCatalog = useMemo(() => runtimes ?? [], [runtimes])
+  // A handoff is only pending until the turn is sent; once the run row moves,
+  // `runtimeId` comes back as the new runtime and this is false again.
+  const switching = isRuntimeSwitch(runtimeId, selectedRuntimeId)
+  const selectedRuntime = runtimeCatalog.find((r) => r.id === selectedRuntimeId)
+  const activeModels = switching && selectedRuntime ? modelsForRuntime(selectedRuntime) : models
+  const canSupervise = supportsSupervised(
+    switching
+      ? { bin: selectedRuntime?.bin, transport: selectedRuntime?.transport }
+      : { bin: runtimeBin, transport: runtimeTransport },
+  )
+  const switchBlockedReason = switching
+    ? runtimeSwitchBlockedReason({
+        running,
+        next: selectedRuntime
+          ? { label: selectedRuntime.label, installed: selectedRuntime.installed }
+          : null,
+      })
+    : null
   const discardFile = useDiscard(runId)
   const restoreFile = useRestoreFile(runId)
   const discardMutate = discardFile.mutate
@@ -1138,13 +1253,17 @@ export function Chat({
   }, [initialModel, initialEffort, initialRuntimeMode])
 
   useEffect(() => {
-    if (models.length === 0) return
-    if (findModel(models, model)) return
-    const next = defaultModel(models)
+    setSelectedRuntimeId(runtimeId ?? '')
+  }, [runtimeId])
+
+  useEffect(() => {
+    if (activeModels.length === 0) return
+    if (findModel(activeModels, model)) return
+    const next = defaultModel(activeModels)
     if (!next) return
     setModel(next.slug)
     setEffort(defaultEffort(next))
-  }, [models, model])
+  }, [activeModels, model])
 
   // The transcript keeps growing after mount and while a turn streams, so stay
   // pinned to the bottom on every resize rather than scrolling once per message.
@@ -1183,13 +1302,41 @@ export function Chat({
   // records it as the last-used default for future new chats and automations.
   const handleModelChange = (slug: string) => {
     setModel(slug)
-    const nextEffort = defaultEffort(findModel(models, slug))
+    const nextEffort = defaultEffort(findModel(activeModels, slug))
     setEffort(nextEffort)
-    remember({ runtimeId, forRuntimeId: runtimeId, model: slug, effort: nextEffort })
+    remember({
+      runtimeId: selectedRuntimeId,
+      forRuntimeId: selectedRuntimeId,
+      model: slug,
+      effort: nextEffort,
+    })
   }
   const handleEffortChange = (value: string) => {
     setEffort(value)
-    remember({ runtimeId, forRuntimeId: runtimeId, effort: value })
+    remember({ runtimeId: selectedRuntimeId, forRuntimeId: selectedRuntimeId, effort: value })
+  }
+
+  /**
+   * Take the pickers to the new runtime. The old runtime's model slug and a
+   * Supervised mode it may not support cannot travel with the conversation.
+   */
+  const applyRuntimeSwitch = (id: string) => {
+    setSelectedRuntimeId(id)
+    const next = runtimeCatalog.find((r) => r.id === id)
+    const picked = resolveSwitchModel(next ? modelsForRuntime(next) : [], model)
+    setModel(picked.model)
+    setEffort(picked.effort)
+    setRuntimeMode((mode) =>
+      resolveSwitchMode(mode, { bin: next?.bin, transport: next?.transport }),
+    )
+  }
+  const handleRuntimePick = (id: string) => {
+    if (id === selectedRuntimeId) return
+    if (id !== runtimeId && !prefs.runtimeSwitchNoteDismissed) {
+      setPendingRuntimeId(id)
+      return
+    }
+    applyRuntimeSwitch(id)
   }
   const handleRuntimeModeChange = (mode: RuntimeMode) => {
     setRuntimeMode(mode)
@@ -1199,6 +1346,10 @@ export function Chat({
   const navigate = useNavigate()
   const { data: commandListing } = useSlashCommands(
     { runtimeId: runtimeId ?? '', ...(workspaceId ? { workspaceId } : {}), includeApp: true },
+    { enabled: !!runtimeId },
+  )
+  const { data: pluginListing } = usePlugins(
+    { runtimeId: runtimeId ?? '', ...(workspaceId ? { workspaceId } : {}) },
     { enabled: !!runtimeId },
   )
 
@@ -1350,12 +1501,29 @@ export function Chat({
                   ? 'relative z-10 w-full'
                   : 'w-full pt-2'
               }
-              disabled={!canFollowUp && !running}
-              disabledReason={followUpReason}
+              disabled={
+                !running && ((!canFollowUp && !switching) || switchBlockedReason !== null)
+              }
+              disabledReason={switchBlockedReason ?? followUpReason}
               pending={pending}
               running={running}
               {...(phase ? { runningLabel: `${phase.label}…` } : {})}
-              models={models}
+              {...(canSwitchRuntime && runtimeCatalog.length > 0 && selectedRuntimeId
+                ? {
+                    leading: (
+                      <div className="flex min-w-0 shrink items-center gap-0.5">
+                        <RuntimePicker
+                          runtimes={runtimeCatalog}
+                          runtimeId={selectedRuntimeId}
+                          disabled={pending || running}
+                          align="start"
+                          onChange={handleRuntimePick}
+                        />
+                      </div>
+                    ),
+                  }
+                : {})}
+              models={activeModels}
               model={model}
               effort={effort}
               runtimeMode={runtimeMode}
@@ -1364,15 +1532,80 @@ export function Chat({
               onEffortChange={handleEffortChange}
               onRuntimeModeChange={handleRuntimeModeChange}
               onStop={onStop}
-              onSend={(text) => onSend({ prompt: text, model, effort, runtimeMode })}
+              onSend={(text) =>
+                onSend({
+                  prompt: text,
+                  model,
+                  effort,
+                  runtimeMode,
+                  ...(switching ? { runtimeId: selectedRuntimeId } : {}),
+                })
+              }
               commands={commandListing?.commands ?? []}
               {...(commandListing?.note ? { commandNote: commandListing.note } : {})}
+              plugins={pluginListing?.plugins ?? []}
+              {...(pluginListing?.note ? { pluginNote: pluginListing.note } : {})}
               onAppCommand={handleAppCommand}
             />
           </div>
           <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
         </div>
       </div>
+
+      {pendingRuntimeId ? (
+        <Modal
+          title={RUNTIME_SWITCH_NOTE_TITLE}
+          onClose={() => {
+            setPendingRuntimeId(null)
+            setDismissSwitchNote(false)
+          }}
+          className="z-[110]"
+        >
+          <div className="space-y-4">
+            <p className="text-ui-base text-tier-secondary">
+              {runtimeCatalog.find((r) => r.id === pendingRuntimeId)?.label ?? 'The new runtime'}{' '}
+              cannot resume this agent session, so the next turn starts a fresh one.
+            </p>
+            <ul className="space-y-1.5 text-ui-sm text-tier-tertiary">
+              {RUNTIME_SWITCH_NOTE_POINTS.map((point) => (
+                <li key={point} className="flex gap-2">
+                  <span aria-hidden="true">•</span>
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+            <label className="flex items-center gap-2 text-ui-sm text-tier-secondary">
+              <input
+                type="checkbox"
+                checked={dismissSwitchNote}
+                onChange={(e) => setDismissSwitchNote(e.target.checked)}
+              />
+              <span>Don’t show this again</span>
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setPendingRuntimeId(null)
+                  setDismissSwitchNote(false)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (dismissSwitchNote) remember({ runtimeSwitchNoteDismissed: true })
+                  applyRuntimeSwitch(pendingRuntimeId)
+                  setPendingRuntimeId(null)
+                  setDismissSwitchNote(false)
+                }}
+              >
+                Switch runtime
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

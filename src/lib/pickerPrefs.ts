@@ -38,6 +38,11 @@ export type PickerPrefs = {
    * never reads this.
    */
   hiddenRuntimes?: string[]
+  /**
+   * The user ticked "Don't show this again" on the runtime-handoff warning, so
+   * switching a chat's runtime stops asking. Display-only, like the lists above.
+   */
+  runtimeSwitchNoteDismissed?: boolean
 }
 
 /** Patch applied via {@link usePickerPrefs}'s `remember`. */
@@ -50,6 +55,7 @@ export type PickerPrefsPatch = {
   effort?: string
   hiddenModels?: string[]
   hiddenRuntimes?: string[]
+  runtimeSwitchNoteDismissed?: boolean
 }
 
 function sanitize(raw: unknown): PickerPrefs {
@@ -75,6 +81,9 @@ function sanitize(raw: unknown): PickerPrefs {
   }
   if (Array.isArray(obj.hiddenRuntimes)) {
     out.hiddenRuntimes = obj.hiddenRuntimes.filter((s): s is string => typeof s === 'string')
+  }
+  if (typeof obj.runtimeSwitchNoteDismissed === 'boolean') {
+    out.runtimeSwitchNoteDismissed = obj.runtimeSwitchNoteDismissed
   }
   return out
 }
@@ -103,6 +112,9 @@ export function applyPatch(prev: PickerPrefs, patch: PickerPrefsPatch): PickerPr
   if (patch.runtimeMode !== undefined) next.runtimeMode = patch.runtimeMode
   if (patch.hiddenModels !== undefined) next.hiddenModels = patch.hiddenModels
   if (patch.hiddenRuntimes !== undefined) next.hiddenRuntimes = patch.hiddenRuntimes
+  if (patch.runtimeSwitchNoteDismissed !== undefined) {
+    next.runtimeSwitchNoteDismissed = patch.runtimeSwitchNoteDismissed
+  }
 
   const scope = patch.forRuntimeId ?? patch.runtimeId ?? prev.runtimeId
   if (scope && (patch.model !== undefined || patch.effort !== undefined)) {
