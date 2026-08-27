@@ -153,6 +153,7 @@ Neither hook may open an `EventSource` of its own.
 | Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `lib/models.ts`; stored as `hiddenModels` in `lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |
 | Hiding runtimes from the picker | `visibleRuntimes` / `hiddenRuntimesIn` / `toggleHiddenRuntime` in `lib/pickRuntime.ts`; stored as `hiddenRuntimes` in `lib/pickerPrefs.ts` (same display-only contract) |
 | CLI stdout → chat events | `lib/agentEvents/` — one adapter per CLI (`claude.ts`, `codex.ts`, `grok.ts`, `acp.ts`); `server/turnEvents.ts` is the server-side re-export |
+| Live context gauge (how full the window is) | `lib/turnUsage.ts` (the math + fallback context windows), per-CLI extraction in the `lib/agentEvents/` adapters, `server/turnUsage.ts` (folds it onto the message, publishes `turn_usage`), `components/chat/ContextMeter.tsx` |
 | The event vocabulary itself (ACP subset) | `lib/acp.ts` (+ `lib/acpConformance.ts` guard), shapes in `lib/turnEvents.ts` |
 | ACP transport: driving an agent over JSON-RPC | `server/acpTurn.ts`, `lib/acpTransport.ts` |
 | Verification checks, verdicts, the repair loop | `lib/checks.ts` (defs), `server/checks.ts` (runner), `lib/verdict.ts` (judgement); `executor.concludeTurn` decides *whether* a turn is verified — unattended turns only |
@@ -184,6 +185,8 @@ Neither hook may open an `EventSource` of its own.
 | Slash commands | `lib/slashCommands.ts` (parsing, app commands), `server/slashCommands.ts` (discovery on disk), `components/SlashCommandMenu.tsx` |
 | Assistant prose: markdown, code fences, file chips | `components/chat/ChatMarkdown.tsx`; `lib/codeLanguage.ts`, `lib/filePathToken.ts`; `.chat-markdown` / `.chat-code` in `styles.css` |
 | Custom / MCP tool call rendering | `lib/toolCallView.ts` — `humanizeToolName`, `toolCallFields`, `formatToolResult` |
+| Command output paint (ANSI + heuristics) | `lib/terminalOutput.ts` (tokenizer) → `components/chat/TerminalOutput.tsx`; the `--term-ansi-*` slots, the `--term-*` roles, and the `.term-*` classes in `styles.css`. Paint is opt-in via `var(--term-x, currentColor)`, so a theme that maps no slots prints plain — never branch on the theme in the tokenizer |
+| Terminal palettes (Nord, Dracula, Gruvbox…) | `lib/terminalPalette.ts` (ids + boot script) → `components/chat/TerminalPalettePicker.tsx`; the values are `[data-chat-theme='terminal'][data-term-palette='…']` blocks in `styles.css`, each carrying the scheme's own 16 slots plus the `--term-bg` / `--term-fg` it was drawn against |
 | Transcript rows: tool calls, sub-agents, the working line | `components/chat/` — `ToolCall.tsx`, `SubagentCall.tsx`, `EditDiff.tsx`, `WorkingIndicator.tsx`; label from `lib/turnActivity.ts` |
 | Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
 | Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
@@ -195,6 +198,7 @@ Neither hook may open an `EventSource` of its own.
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |
 | Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `components/ui.tsx` |
 | Design tokens | `src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |
+| Chat transcript themes (Open Run / Terminal) | `lib/chatTheme.ts` (ids + what starts expanded) → `components/chat/ChatThemeProvider.tsx` (`data-chat-theme` on `<html>`) → the `--chat-*` tokens and the `[data-chat-theme='terminal']` block in `styles.css`; toggle in `components/chat/ChatDebugToggle.tsx` (the Debug button in the run top bar). A theme is tokens — if a component hardcodes the look, tokenize it rather than branching on the theme in JSX |
 | Planner proposals → install automations | `lib/planProposals.ts`; UI in `components/PlanProposalCard.tsx`, `PlanProposalsInChat.tsx`, `routes/planner.tsx` |
 
 Routes: `index.tsx` redirects to Automations · `mcp.tsx` MCP servers · `tasks.index.tsx` /
