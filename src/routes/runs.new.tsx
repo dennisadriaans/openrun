@@ -14,6 +14,7 @@ import { BranchPicker, ProjectPicker, RuntimePicker } from '../components/Compos
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
 import { WorkingIndicator } from '../components/chat/WorkingIndicator'
+import { NativeSessionMenu } from '../components/NativeSessionMenu'
 import {
   defaultEffort,
   defaultModel,
@@ -23,9 +24,12 @@ import {
 } from '../lib/models'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
+import { nativeResumeKindFor } from '../lib/nativeSessions'
 import {
+  useNativeSessions,
   useProjects,
   useRuntimes,
+  usePlugins,
   useSlashCommands,
   useStartChat,
   useWorkspaces,
@@ -34,9 +38,29 @@ import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib
 import { supportsSupervised } from '../lib/supervisedPolicy'
 import { isWorkspaceReady } from '../lib/workspaceReady'
 
-export const Route = createFileRoute('/runs/new')({ component: NewRun })
+type NewRunSearch = {
+  projectId?: string
+  workspaceId?: string
+  runtimeId?: string
+  model?: string
+  effort?: string
+  runtimeMode?: string
+}
+
+export const Route = createFileRoute('/runs/new')({
+  validateSearch: (search: Record<string, unknown>): NewRunSearch => ({
+    projectId: typeof search.projectId === 'string' ? search.projectId : undefined,
+    workspaceId: typeof search.workspaceId === 'string' ? search.workspaceId : undefined,
+    runtimeId: typeof search.runtimeId === 'string' ? search.runtimeId : undefined,
+    model: typeof search.model === 'string' ? search.model : undefined,
+    effort: typeof search.effort === 'string' ? search.effort : undefined,
+    runtimeMode: typeof search.runtimeMode === 'string' ? search.runtimeMode : undefined,
+  }),
+  component: NewRun,
+})
 
 function NewRun() {
+  const search = Route.useSearch()
   const navigate = useNavigate()
   const { open: sidebarOpen } = useSidebar()
   const { prefs, remember } = usePickerPrefs()
@@ -44,18 +68,24 @@ function NewRun() {
   const { data: runtimes } = useRuntimes()
   const startChat = useStartChat()
 
-  const [projectId, setProjectId] = useState('')
-  const [workspaceId, setWorkspaceId] = useState('')
-  const [runtimeId, setRuntimeId] = useState('')
+  const [projectId, setProjectId] = useState(search.projectId ?? '')
+  const [workspaceId, setWorkspaceId] = useState(search.workspaceId ?? '')
+  const [runtimeId, setRuntimeId] = useState(search.runtimeId ?? '')
+  const [resumeSessionId, setResumeSessionId] = useState('')
+  const [resumeSessionLabel, setResumeSessionLabel] = useState('')
   // File commands only: `/clear` and friends need a conversation to act on.
   const { data: commands } = useSlashCommands(
     { runtimeId, ...(workspaceId ? { workspaceId } : {}) },
     { enabled: !!runtimeId },
   )
-  const [model, setModel] = useState('')
-  const [effort, setEffort] = useState('')
+  const { data: pluginListing } = usePlugins(
+    { runtimeId, ...(workspaceId ? { workspaceId } : {}) },
+    { enabled: !!runtimeId },
+  )
+  const [model, setModel] = useState(search.model ?? '')
+  const [effort, setEffort] = useState(search.effort ?? '')
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
-    parseRuntimeMode(prefs.runtimeMode ?? DEFAULT_RUNTIME_MODE),
+    parseRuntimeMode(search.runtimeMode ?? prefs.runtimeMode ?? DEFAULT_RUNTIME_MODE),
   )
   const [error, setError] = useState<string | null>(null)
   // Optimistic first turn: the run only exists once the server answers, so the
@@ -64,6 +94,7 @@ function NewRun() {
   const [addingProject, setAddingProject] = useState(false)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
+  const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
   const workspaces = useMemo(
     () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
     [allWorkspaces],
@@ -83,6 +114,11 @@ function NewRun() {
   }, [workspaces, workspaceId])
 
   useEffect(() => {
+    setResumeSessionId('')
+    setResumeSessionLabel('')
+  }, [workspaceId])
+
+  useEffect(() => {
     if (runtimeId || !runtimes?.length) return
     const preferred = pickDefaultRuntime(
       visibleRuntimes(runtimes, prefs.hiddenRuntimes),
@@ -97,9 +133,17 @@ function NewRun() {
   useEffect(() => {
     const remembered = pickerPrefForRuntime(prefs, runtimeId)
     const seeded =
-      findModel(models, remembered.model) ?? defaultModel(visibleModels(models, prefs.hiddenModels))
+      findModel(models, runtimeId === search.runtimeId ? search.model : undefined) ??
+      findModel(models, remembered.model) ??
+      defaultModel(visibleModels(models, prefs.hiddenModels))
     setModel(seeded?.slug ?? '')
-    setEffort(remembered.effort || defaultEffort(seeded))
+    setEffort(
+      (runtimeId === search.runtimeId && seeded?.slug === search.model
+        ? search.effort
+        : undefined) ||
+        remembered.effort ||
+        defaultEffort(seeded),
+    )
     // Re-seed only when the catalog (i.e. runtime) changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models, runtimeId])
@@ -122,7 +166,16 @@ function NewRun() {
     setError(null)
     setSent({ prompt, startedAt: Date.now() })
     startChat.mutate(
-      { workspaceId: workspace.id, runtimeId: runtime.id, prompt, model, effort, runtimeMode },
+      {
+        workspaceId: workspace.id,
+        runtimeId: runtime.id,
+        prompt,
+        model,
+        effort,
+        runtimeMode,
+        resumeSessionId,
+        resumeSessionLabel,
+      },
       {
         onSuccess: ({ runId }) => navigate({ to: '/runs/$runId', params: { runId } }),
         onError: (err) => {
@@ -174,6 +227,33 @@ function NewRun() {
             disabled={startChat.isPending}
             onChange={setWorkspaceId}
           />
+          {!sent ? (
+            <>
+              <span aria-hidden className="shrink-0 text-muted-foreground/40">
+                /
+              </span>
+              <NativeSessionMenu
+                workspaceId={workspaceId}
+                groups={nativeQuery.data?.groups ?? []}
+                loading={nativeQuery.isFetching}
+                error={nativeQuery.data?.error}
+                selectedId={resumeSessionId}
+                selectedLabel={resumeSessionLabel}
+                disabled={!workspaceId || startChat.isPending}
+                disabledReason="Pick a branch first"
+                onSelectNew={() => {
+                  setResumeSessionId('')
+                  setResumeSessionLabel('')
+                }}
+                onSelect={(session, group) => {
+                  setRuntimeId(group.runtimeId)
+                  setResumeSessionId(session.sessionId)
+                  setResumeSessionLabel(session.title)
+                  remember({ runtimeId: group.runtimeId })
+                }}
+              />
+            </>
+          ) : null}
         </nav>
       </header>
 
@@ -230,6 +310,14 @@ function NewRun() {
                     align="start"
                     onChange={(id) => {
                       setRuntimeId(id)
+                      const previousKind = nativeResumeKindFor(runtime ?? {})
+                      const nextKind = nativeResumeKindFor(
+                        runtimes?.find((row) => row.id === id) ?? {},
+                      )
+                      if (!nextKind || nextKind !== previousKind) {
+                        setResumeSessionId('')
+                        setResumeSessionLabel('')
+                      }
                       remember({ runtimeId: id })
                     }}
                   />
@@ -252,6 +340,8 @@ function NewRun() {
               onSend={send}
               commands={commands?.commands ?? []}
               {...(commands?.note ? { commandNote: commands.note } : {})}
+              plugins={pluginListing?.plugins ?? []}
+              {...(pluginListing?.note ? { pluginNote: pluginListing.note } : {})}
             />
             <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
           </div>

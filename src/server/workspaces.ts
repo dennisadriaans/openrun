@@ -128,7 +128,9 @@ export type LocalDirListing = {
 export function listLocalDirectories(dir?: string): LocalDirListing {
   const home = os.homedir()
   const raw = (dir ?? home).trim() || home
-  const resolved = path.resolve(raw)
+  const expanded =
+    raw === '~' ? home : raw.startsWith(`~${path.sep}`) ? path.join(home, raw.slice(2)) : raw
+  const resolved = path.resolve(expanded)
 
   if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
     throw new Error(`Not a directory: ${resolved}`)

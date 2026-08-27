@@ -5,7 +5,7 @@
  * Panel chrome adapted from t3code ChatView (MIT, T3 Tools Inc.).
  */
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowLeft, Ban, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Ban, ChevronDown, ChevronRight, Plus, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
@@ -30,6 +30,7 @@ import {
   useRemoveRun,
   useRuntimes,
   useRunWorkspace,
+  useStartChat,
   useSendMessage,
 } from '../lib/queries'
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
@@ -116,6 +117,8 @@ function RunDetail() {
   const layoutChosenRef = useRef(hasStoredLayout(runId))
   const [newBranchOpen, setNewBranchOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
+  const [newRunMenuOpen, setNewRunMenuOpen] = useState(false)
+  const newRunMenuRef = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
   const listRow = peekCachedRunSummary(qc, runId)
   const navigate = useNavigate()
@@ -129,6 +132,7 @@ function RunDetail() {
   })
 
   const sendMessage = useSendMessage(runId)
+  const startNewRun = useStartChat()
   const discard = useDiscard(runId)
   const remove = useRemoveRun()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -145,6 +149,22 @@ function RunDetail() {
     setReviewPath(null)
     setConfirmUndoAll(false)
   }, [runId])
+
+  useEffect(() => {
+    if (!newRunMenuOpen) return
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!newRunMenuRef.current?.contains(event.target as Node)) setNewRunMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNewRunMenuOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [newRunMenuOpen])
 
   const patchLayout = useCallback((partial: Partial<LayoutState>) => {
     layoutChosenRef.current = true
@@ -197,12 +217,30 @@ function RunDetail() {
   const onUndoAllFiles = useCallback(() => setConfirmUndoAll(true), [])
   const sendFollowUp = sendMessage.mutate
   const onSend = useCallback(
-    (input: { prompt: string; model: string; effort: string; runtimeMode: RuntimeMode }) => {
+    (input: {
+      prompt: string
+      model: string
+      effort: string
+      runtimeMode: RuntimeMode
+      runtimeId?: string
+    }) => {
       sendFollowUp(input)
     },
     [sendFollowUp],
   )
-  const onNewChat = useCallback(() => navigate({ to: '/runs/new' }), [navigate])
+  const onNewChat = useCallback(() => {
+    void navigate({
+      to: '/runs/new',
+      search: {
+        projectId: data?.project?.id,
+        workspaceId: data?.workspace?.id,
+        runtimeId: data?.runtime?.id,
+        model: data?.model || undefined,
+        effort: data?.effort || undefined,
+        runtimeMode: data?.runtimeMode,
+      },
+    })
+  }, [data, navigate])
   const onStop = useCallback(() => {
     const current = data?.run
     if (!current) return
@@ -277,6 +315,40 @@ function RunDetail() {
     ? 'Wait for the agent to finish before undoing changes.'
     : undefined
 
+  const newRunRuntimeId = data?.runtime?.id ?? fallbackRuntime?.id
+  const firstPrompt = messages.find((message) => message.role === 'user')?.content.trim() ?? ''
+  const newRunBlockedReason = !run
+    ? 'Loading run details'
+    : runBusy
+      ? 'Wait for the current run to finish'
+      : !workspace?.id
+        ? 'This run has no workspace to reuse'
+        : !newRunRuntimeId
+          ? 'The run runtime is unavailable'
+          : !firstPrompt
+            ? 'This run has no prompt to repeat'
+            : null
+  const canStartNewRun = newRunBlockedReason === null && !startNewRun.isPending
+  const startNewRunMutate = startNewRun.mutate
+  const onNewRun = () => {
+    if (!run || !workspace?.id || !newRunRuntimeId || !firstPrompt || runBusy) return
+    startNewRunMutate(
+      {
+        workspaceId: workspace.id,
+        runtimeId: newRunRuntimeId,
+        prompt: firstPrompt,
+        model: data?.model ?? run.model,
+        effort: data?.effort ?? run.effort,
+        runtimeMode: data?.runtimeMode ?? run.runtimeMode,
+      },
+      {
+        onSuccess: ({ runId: newRunId }) =>
+          void navigate({ to: '/runs/$runId', params: { runId: newRunId } }),
+      },
+    )
+    setNewRunMenuOpen(false)
+  }
+
   const submitNewBranch = async () => {
     if (!project || !newBranchName.trim()) return
     await createWorkspace.mutateAsync({
@@ -317,6 +389,73 @@ function RunDetail() {
               />
 
               <div className="flex shrink-0 items-center gap-2">
+                <div ref={newRunMenuRef} className="relative flex">
+                  <Button
+                    variant="primary"
+                    onClick={onNewChat}
+                    disabled={!run}
+                    title="Start an empty chat with the same settings"
+                    className="rounded-r-none pr-2.5"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New chat
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={!run}
+                    aria-label="New run options"
+                    aria-haspopup="menu"
+                    aria-expanded={newRunMenuOpen}
+                    onClick={() => setNewRunMenuOpen((open) => !open)}
+                    className="rounded-l-none border-l border-l-black/15 px-1.5"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </Button>
+                  {newRunMenuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-50 mt-1.5 min-w-48 rounded-xl border border-border bg-elevated p-1.5 shadow-2xl shadow-[var(--shadow-primary)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-foreground transition-colors hover:bg-hover"
+                        onClick={() => {
+                          setNewRunMenuOpen(false)
+                          onNewChat()
+                        }}
+                      >
+                        <Plus className="h-3.5 w-3.5" /> New chat
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!canStartNewRun}
+                        title={
+                          newRunBlockedReason ?? 'Repeat the first prompt with the same settings'
+                        }
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-foreground transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                        onClick={onNewRun}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        {startNewRun.isPending ? 'Starting…' : 'Repeat run'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                {startNewRun.isError ? (
+                  <span
+                    role="alert"
+                    className="max-w-48 truncate text-ui-sm text-danger"
+                    title={
+                      startNewRun.error instanceof Error
+                        ? startNewRun.error.message
+                        : String(startNewRun.error)
+                    }
+                  >
+                    Could not start run
+                  </span>
+                ) : null}
                 {run?.status === 'running' ? (
                   <Button variant="danger" onClick={onStop}>
                     <Ban className="h-4 w-4" /> Cancel
@@ -353,6 +492,8 @@ function RunDetail() {
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
                 runtimeBin={data?.runtime?.bin ?? fallbackRuntime?.bin}
                 runtimeTransport={data?.runtime?.transport ?? fallbackRuntime?.transport}
+                runtimes={runtimes ?? []}
+                canSwitchRuntime={data?.canSwitchRuntime ?? false}
                 runTrigger={run?.trigger}
                 installWorkspaceId={workspace?.id ?? run?.workspaceId}
                 installWorkspaceReady={workspace ? isWorkspaceReady(workspace.status) : false}

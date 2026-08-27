@@ -8,7 +8,7 @@ import {
   FolderPlus,
   House,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as fns from '../fns'
 import type { LocalDirEntry } from '../fns'
 import { folderNameError } from '../lib/folderName'
@@ -35,23 +35,64 @@ export function AddProjectModal({
   const [selected, setSelected] = useState<{ path: string; isGitRepo: boolean } | null>(null)
   // Non-null while the inline "new folder" name input is open.
   const [newName, setNewName] = useState<string | null>(null)
+  const [pathInput, setPathInput] = useState('')
+  const [selectTypedPath, setSelectTypedPath] = useState(false)
 
   const listing = useQuery({
     queryKey: ['local-directories', root ?? ''],
     queryFn: () => fns.listLocalDirectories({ data: { dir: root } }),
   })
-
   const current = listing.data
   const newFolderParent = selected?.path ?? current?.path
+  const folderFilter = (() => {
+    const typed = pathInput.trim()
+    if (!typed || !current || typed === current.path) return ''
+    const separator = Math.max(typed.lastIndexOf('/'), typed.lastIndexOf('\\'))
+    const candidate = separator >= 0 ? typed.slice(separator + 1) : typed
+    return candidate.toLocaleLowerCase()
+  })()
+  const visibleEntries = current?.entries.filter((entry) =>
+    entry.name.toLocaleLowerCase().includes(folderFilter),
+  )
 
   // Empty while the input is untouched — an error before typing reads as a scold.
   const nameError = newName === null || newName === '' ? null : folderNameError(newName)
+
+  useEffect(() => {
+    if (!current || listing.isFetching) return
+    setPathInput(selected?.path ?? current.path)
+    if (selectTypedPath) {
+      setSelected({ path: current.path, isGitRepo: current.isGitRepo })
+      setSelectTypedPath(false)
+    }
+  }, [current, listing.isFetching, selected?.path, selectTypedPath])
+
+  const openTypedPath = () => {
+    const path = pathInput.trim()
+    if (!path) return
+    const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+    if (current && separator < 0) {
+      const exact = current.entries.find(
+        (entry) => entry.name.toLocaleLowerCase() === path.toLocaleLowerCase(),
+      )
+      if (exact) {
+        setSelectTypedPath(false)
+        setSelected(exact)
+        setPathInput(exact.path)
+        return
+      }
+    }
+    setSelected(null)
+    setSelectTypedPath(true)
+    setRoot(path)
+  }
 
   const submitNewFolder = async () => {
     const name = (newName ?? '').trim()
     if (!name || nameError || !newFolderParent) return
     const created = await createFolder.mutateAsync({ parent: newFolderParent, name })
     setNewName(null)
+    setSelectTypedPath(false)
     // Anchor at the parent so the folder we just made is visible at depth 0.
     setRoot(newFolderParent)
     setSelected({ path: created.path, isGitRepo: true })
@@ -78,6 +119,7 @@ export function AddProjectModal({
                 title="Home"
                 disabled={!current || current.path === current.home}
                 onClick={() => {
+                  setSelectTypedPath(false)
                   setRoot(current?.home)
                   setSelected(null)
                 }}
@@ -91,6 +133,7 @@ export function AddProjectModal({
                 disabled={!current?.parent}
                 onClick={() => {
                   if (current?.parent) {
+                    setSelectTypedPath(false)
                     setRoot(current.parent)
                     setSelected(null)
                   }
@@ -108,14 +151,24 @@ export function AddProjectModal({
               >
                 <FolderPlus className="h-3.5 w-3.5" />
               </button>
-              <div
+              <input
+                autoFocus
+                value={pathInput}
+                placeholder={listing.isLoading && !current ? 'Loading…' : 'Type a folder path…'}
+                aria-label="Local folder path"
+                title={pathInput || undefined}
+                onChange={(event) => setPathInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    openTypedPath()
+                  }
+                  if (event.key === 'Escape') {
+                    setPathInput(selected?.path ?? current?.path ?? '')
+                  }
+                }}
                 className={`${inputClass} mono truncate text-[13px]`}
-                title={selected?.path ?? current?.path ?? undefined}
-              >
-                {listing.isLoading && !current
-                  ? 'Loading…'
-                  : (selected?.path ?? current?.path ?? '—')}
-              </div>
+              />
             </div>
 
             {newName !== null ? (
@@ -156,18 +209,23 @@ export function AddProjectModal({
             <div className="scroll-thin max-h-72 min-h-[9rem] overflow-auto rounded-md border border-border bg-[var(--bg-chrome)] p-1">
               {listing.isLoading && !current ? (
                 <div className="px-2 py-2 text-ui-sm text-tier-quaternary">Loading folders…</div>
-              ) : current && current.entries.length > 0 ? (
-                current.entries.map((entry) => (
+              ) : current && visibleEntries && visibleEntries.length > 0 ? (
+                visibleEntries.map((entry) => (
                   <TreeNode
                     key={entry.path}
                     entry={entry}
                     depth={0}
                     selectedPath={selected?.path ?? null}
-                    onSelect={(e) => setSelected({ path: e.path, isGitRepo: e.isGitRepo })}
+                    onSelect={(e) => {
+                      setSelectTypedPath(false)
+                      setSelected({ path: e.path, isGitRepo: e.isGitRepo })
+                    }}
                   />
                 ))
               ) : (
-                <div className="px-2 py-2 text-ui-sm text-tier-quaternary">No subfolders</div>
+                <div className="px-2 py-2 text-ui-sm text-tier-quaternary">
+                  {folderFilter ? 'No matching folders' : 'No subfolders'}
+                </div>
               )}
             </div>
           </div>
