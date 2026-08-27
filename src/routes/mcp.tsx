@@ -11,17 +11,20 @@ import {
   ChevronDown,
   ClipboardPaste,
   Download,
+  Info,
   KeyRound,
   Library,
   LogIn,
   Pencil,
   Plus,
+  Puzzle,
   RefreshCw,
   SlidersHorizontal,
   Trash2,
 } from 'lucide-react'
-import { Button, Card, Field, Modal, PageHeader, inputClass } from '../components/ui'
+import { Button, Card, Field, Modal, PageHeader, Tooltip, inputClass } from '../components/ui'
 import { parseMcpPaste } from '../lib/mcpPaste'
+import { pluginAuthCaveat, pluginHostLabel } from '../lib/plugins'
 import {
   MCP_REGISTRY,
   registryEntryAuthLabel,
@@ -46,6 +49,7 @@ import {
 import {
   useDisconnectMcpServer,
   useImportMcpServers,
+  useInstalledPlugins,
   useMcpDiscovery,
   useMcpOAuth,
   useRemoveSharedMcpServer,
@@ -54,26 +58,13 @@ import {
   useStartMcpOAuth,
   useSyncSharedMcp,
 } from '../lib/queries'
-import {
-  mcpOAuthRedirectUri,
-  mcpOAuthRefusal,
-  mcpOAuthStateLabel,
-  type McpOAuthState,
-  type McpOAuthView,
-} from '../lib/mcpOAuth'
+import { mcpOAuthRedirectUri, mcpOAuthRefusal, type McpOAuthView } from '../lib/mcpOAuth'
 
 export const Route = createFileRoute('/mcp')({ component: McpPage })
 
 /** `Claude Code — this machine` → `Claude Code`, for a per-CLI status chip. */
 function cliName(label: string): string {
   return label.split('—')[0]?.trim() ?? label
-}
-
-const AUTH_CHIP: Record<McpOAuthState, string> = {
-  connected: 'border-emerald-500/40 text-emerald-400',
-  expired: 'border-amber-500/40 text-amber-400',
-  pending: 'border-border text-tier-quaternary',
-  none: 'border-border text-tier-quaternary',
 }
 
 const SYNC_CHIP: Record<SharedSyncState, string> = {
@@ -398,7 +389,6 @@ function McpPage() {
               Import all
             </Button>
           </div>
-
           <div className="divide-y divide-[var(--border-quaternary)]">
             {(discovery?.servers ?? []).map((entry) => (
               <div key={entry.name} className="flex items-start justify-between gap-4 px-4 py-2.5">
@@ -409,34 +399,30 @@ function McpPage() {
                       {discoveredOrigin(entry)}
                     </span>
                     {entry.secretKeys.length > 0 ? (
-                      <span
-                        className="inline-flex items-center gap-1 text-ui-xs text-amber-400"
-                        title={`Importing copies ${entry.secretKeys.join(', ')} into the other CLI configs on this machine`}
-                      >
-                        <KeyRound className="h-3 w-3 shrink-0" />
-                        {entry.secretKeys.join(', ')}
-                      </span>
+                      <KeyRound
+                        className="h-3 w-3 shrink-0 text-amber-400"
+                        aria-label="Contains secrets that will be copied to other CLI configs"
+                      />
                     ) : null}
                   </div>
                   {entry.ambiguous ? (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <span className="text-ui-sm text-amber-400">
-                        Configs disagree — pick one:
-                      </span>
-                      <select
-                        className={inputClass}
-                        value={variantFor(entry)}
-                        onChange={(e) =>
-                          setPickedVariant((prev) => ({ ...prev, [entry.name]: e.target.value }))
-                        }
-                      >
-                        {entry.variants.map((v) => (
-                          <option key={v.targetId} value={v.targetId}>
-                            {cliName(v.targetLabel)} · {mcpServerSummary(v.server)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <select
+                      className={`${inputClass} mt-1.5`}
+                      aria-label={`Choose a configuration for ${entry.name}`}
+                      value={variantFor(entry)}
+                      onChange={(event) =>
+                        setPickedVariant((previous) => ({
+                          ...previous,
+                          [entry.name]: event.target.value,
+                        }))
+                      }
+                    >
+                      {entry.variants.map((variant) => (
+                        <option key={variant.targetId} value={variant.targetId}>
+                          {cliName(variant.targetLabel)} · {mcpServerSummary(variant.server)}
+                        </option>
+                      ))}
+                    </select>
                   ) : (
                     <div className="mt-0.5 truncate mono text-ui-sm text-tier-quaternary">
                       {mcpServerSummary(
@@ -454,6 +440,8 @@ function McpPage() {
         </Card>
       ) : null}
 
+      <PluginsCard />
+
       {(shared?.servers.length ?? 0) === 0 ? (
         <div className="py-16 text-center text-ui-sm text-tier-quaternary">No servers yet.</div>
       ) : (
@@ -462,15 +450,25 @@ function McpPage() {
             const view = connections.get(server.name)
             const managed = view?.state === 'connected' || view?.state === 'expired'
             const refusal = mcpOAuthRefusal(server, managed)
+            const unhealthyTargets = targets.filter(
+              (target) =>
+                target.installed &&
+                (target.state === 'missing' ||
+                  target.state === 'drifted' ||
+                  target.state === 'conflict'),
+            )
             return (
               <div key={server.name} className="group px-4 py-2.5">
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-baseline gap-2">
                       <span className="text-ui-base text-foreground">{server.name}</span>
-                      <span className="text-ui-xs text-tier-quaternary">
-                        {mcpTransportLabel(server.transport)}
-                      </span>
+                      {view?.state === 'connected' ? (
+                        <span className="text-ui-xs text-emerald-400">Connected</span>
+                      ) : null}
+                      {view?.state === 'expired' ? (
+                        <span className="text-ui-xs text-amber-400">Sign-in expired</span>
+                      ) : null}
                     </div>
                     <div className="mt-0.5 truncate mono text-ui-sm text-tier-quaternary">
                       {mcpServerSummary(server)}
@@ -511,36 +509,30 @@ function McpPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {view ? (
-                    <span
-                      className={`rounded border px-1.5 py-0.5 text-ui-xs ${AUTH_CHIP[view.state]}`}
-                      title={`Signed in at ${view.issuer}. Open Run holds the token and refreshes it.`}
-                    >
-                      {mcpOAuthStateLabel(view)}
-                    </span>
-                  ) : null}
-                  {view ? (
-                    <button
-                      type="button"
-                      className="rounded border border-border px-1.5 py-0.5 text-ui-xs text-tier-quaternary hover:text-foreground"
-                      onClick={() => void dropConnection(server.name)}
-                    >
-                      Disconnect
-                    </button>
-                  ) : null}
-                  {targets
-                    .filter((t) => t.installed)
-                    .map((t) => (
-                      <span
-                        key={t.targetId}
-                        title={t.refusal ?? `${t.file} — ${sharedSyncLabel(t.state)}`}
-                        className={`rounded border px-1.5 py-0.5 text-ui-xs ${SYNC_CHIP[t.state]}`}
+                {view || unhealthyTargets.length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    {view ? (
+                      <button
+                        type="button"
+                        className="text-ui-xs text-tier-quaternary hover:text-foreground"
+                        onClick={() => void dropConnection(server.name)}
                       >
-                        {cliName(t.label)} · {sharedSyncLabel(t.state)}
+                        Disconnect
+                      </button>
+                    ) : null}
+                    {unhealthyTargets.map((target) => (
+                      <span
+                        key={target.targetId}
+                        title={
+                          target.refusal ?? `${target.file} — ${sharedSyncLabel(target.state)}`
+                        }
+                        className={`rounded border px-1.5 py-0.5 text-ui-xs ${SYNC_CHIP[target.state]}`}
+                      >
+                        {cliName(target.label)} · {sharedSyncLabel(target.state)}
                       </span>
                     ))}
-                </div>
+                  </div>
+                ) : null}
               </div>
             )
           })}
@@ -948,5 +940,68 @@ function PasteModal({
         </div>
       </div>
     </Modal>
+  )
+}
+
+/**
+ * Plugins the CLIs installed for themselves.
+ *
+ * Read-only on purpose: a Codex or Claude plugin is a bundle of skills, MCP
+ * servers and vendor app connectors that its own CLI installs, versions and
+ * signs in. Open Run shows what a run will actually have — and where a plugin
+ * needs an app connector, says so, because that is the part an unattended run
+ * cannot fix for itself.
+ */
+function PluginsCard() {
+  const { data } = useInstalledPlugins()
+  const groups = (['codex', 'claude'] as const)
+    .map((host) => ({ host, listing: data?.[host] }))
+    .filter((group) => (group.listing?.plugins.length ?? 0) > 0)
+  if (groups.length === 0) return null
+
+  return (
+    <Card className="mb-6">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-ui-base text-foreground">
+        <Puzzle className="h-3.5 w-3.5" /> Plugins in your CLIs
+      </div>
+      <div className="divide-y divide-[var(--border-quaternary)]">
+        {groups.map(({ host, listing }) => (
+          <div key={host} className="px-4 py-4">
+            <div className="mb-3 text-ui-xs text-tier-quaternary">{pluginHostLabel(host)}</div>
+            <div className="space-y-3">
+              {(listing?.plugins ?? []).map((plugin) => {
+                const caveat = pluginAuthCaveat(plugin)
+                return (
+                  <div
+                    key={plugin.name}
+                    className="flex min-w-0 items-center justify-between gap-4"
+                  >
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      <span className="mono text-ui-sm text-foreground">
+                        {host === 'codex' ? `$${plugin.name}` : plugin.name}
+                      </span>
+                      <span className="truncate text-ui-sm text-tier-tertiary">
+                        {plugin.description || plugin.displayName}
+                      </span>
+                    </div>
+                    {caveat ? (
+                      <Tooltip content={caveat}>
+                        <button
+                          type="button"
+                          className="inline-flex shrink-0 rounded p-1 text-amber-400 hover:bg-hover"
+                          aria-label={caveat}
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                        </button>
+                      </Tooltip>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   )
 }

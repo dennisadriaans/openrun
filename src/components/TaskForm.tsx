@@ -48,9 +48,18 @@ import {
   useNativeSessions,
   useProjectBranches,
   useCreateWorkspace,
+  usePlugins,
   useSlashCommands,
 } from '../lib/queries'
 import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
+import {
+  applyPluginMention,
+  matchPlugins,
+  pluginMenuQuery,
+  unknownMentions,
+  type AgentPlugin,
+} from '../lib/plugins'
+import { PluginMentionMenu } from './PluginMentionMenu'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import {
   applySlashCommand,
@@ -1011,6 +1020,24 @@ export function TaskForm({
     [slashQuery, slashCommands],
   )
   const slashMenuOpen = !slashDismissed && slashMatches.length > 0
+
+  // Plugin mentions: the same menu the CLI's own TUI opens on `$`, offered
+  // here because an automation's prompt is the only place an unattended run
+  // can name one.
+  const { data: pluginListing } = usePlugins(
+    { runtimeId: runtime?.id ?? '', ...(v.workspaceId ? { workspaceId: v.workspaceId } : {}) },
+    { enabled: Boolean(runtime?.id) },
+  )
+  const mentionQuery = slashMenuOpen ? null : pluginMenuQuery(v.prompt)
+  const pluginMatches = useMemo(
+    () => (mentionQuery === null ? [] : matchPlugins(pluginListing?.plugins ?? [], mentionQuery)),
+    [mentionQuery, pluginListing],
+  )
+  const pluginMenuOpen = !slashDismissed && pluginMatches.length > 0
+  const missingMentions = useMemo(
+    () => unknownMentions(v.prompt, pluginListing?.plugins ?? []),
+    [v.prompt, pluginListing],
+  )
   const nativeQuery = useNativeSessions(
     { workspaceId: v.workspaceId },
     { enabled: hasWorkspaceId(v.workspaceId) },
@@ -1100,6 +1127,13 @@ export function TaskForm({
 
   const pickSlashCommand = (command: SlashCommand) => {
     set('prompt', applySlashCommand(command))
+    setSlashIndex(0)
+    setSlashDismissed(false)
+    promptRef.current?.focus()
+  }
+
+  const pickPlugin = (plugin: AgentPlugin) => {
+    set('prompt', applyPluginMention(v.prompt, plugin))
     setSlashIndex(0)
     setSlashDismissed(false)
     promptRef.current?.focus()
@@ -1389,6 +1423,14 @@ export function TaskForm({
                 onPick={pickSlashCommand}
               />
             ) : null}
+            {pluginMenuOpen ? (
+              <PluginMentionMenu
+                plugins={pluginMatches}
+                activeIndex={Math.min(slashIndex, pluginMatches.length - 1)}
+                {...(pluginListing?.note ? { note: pluginListing.note } : {})}
+                onPick={pickPlugin}
+              />
+            ) : null}
             <textarea
               ref={promptRef}
               className="min-h-28 flex-1 resize-y bg-transparent px-3.5 py-3 text-ui-base text-foreground outline-none placeholder:text-tier-quaternary"
@@ -1400,6 +1442,25 @@ export function TaskForm({
                 if (promptError) setPromptError(null)
               }}
               onKeyDown={(e) => {
+                if (pluginMenuOpen && pluginMatches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSlashIndex((i) => (i + 1) % pluginMatches.length)
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSlashIndex((i) => (i - 1 + pluginMatches.length) % pluginMatches.length)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setSlashDismissed(true)
+                  } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    const active = pluginMatches[Math.min(slashIndex, pluginMatches.length - 1)]
+                    if (active) {
+                      e.preventDefault()
+                      pickPlugin(active)
+                    }
+                  }
+                  return
+                }
                 if (!slashMenuOpen || slashMatches.length === 0) return
                 if (e.key === 'ArrowDown') {
                   e.preventDefault()
@@ -1425,6 +1486,12 @@ export function TaskForm({
             {promptError ? (
               <p id="prompt-required-error" className="px-3.5 pb-2 text-[12px] text-rose-300">
                 {promptError}
+              </p>
+            ) : null}
+            {missingMentions.length > 0 ? (
+              <p className="px-3.5 pb-1 text-[11px] text-amber-300/90">
+                No installed plugin answers {missingMentions.map((n) => `$${n}`).join(', ')} — the
+                agent will read it as plain text.
               </p>
             ) : null}
             {v.prompt.length > 8_000 ? (

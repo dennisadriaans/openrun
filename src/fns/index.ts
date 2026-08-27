@@ -149,6 +149,16 @@ export const listSlashCommands = createServerFn({ method: 'GET' })
   .validator((d: { runtimeId: string; workspaceId?: string; includeApp?: boolean }) => d)
   .handler(async ({ data }) => (await core()).listSlashCommandsFor(data))
 
+// --- Plugins ---------------------------------------------------------------
+
+export const listPlugins = createServerFn({ method: 'GET' })
+  .validator((d: { runtimeId: string; workspaceId?: string }) => d)
+  .handler(async ({ data }) => (await core()).listPluginsFor(data))
+
+export const listInstalledPlugins = createServerFn({ method: 'GET' })
+  .validator((d: { workspaceId?: string }) => d)
+  .handler(async ({ data }) => (await core()).listInstalledPlugins(data))
+
 // --- Tasks -----------------------------------------------------------------
 
 export const listTasks = createServerFn({ method: 'GET' }).handler(async () =>
@@ -248,6 +258,8 @@ export const startChat = createServerFn({ method: 'POST' })
       model?: string
       effort?: string
       runtimeMode?: string
+      resumeSessionId?: string
+      resumeSessionLabel?: string
     }) => d,
   )
   .handler(async ({ data }) => (await core()).startChat(data))
@@ -267,6 +279,7 @@ export const postMessage = createServerFn({ method: 'POST' })
     (d: {
       runId: string
       prompt: string
+      runtimeId?: string
       model?: string
       effort?: string
       runtimeMode?: string
