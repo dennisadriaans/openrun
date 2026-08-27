@@ -32,6 +32,7 @@ const EFFORT_LABELS: Record<string, string> = {
   high: 'High',
   xhigh: 'Extra High',
   max: 'Max',
+  ultra: 'Ultra',
 }
 
 /** Prompt-injected pseudo-effort we add on top of whatever the CLI reports. */
@@ -282,4 +283,58 @@ function fxDisplayName(slug: string): string {
       return part.charAt(0).toUpperCase() + part.slice(1)
     })
     .join(' ')
+}
+
+// --- Codex (`~/.codex/models_cache.json`) ----------------------------------
+
+/**
+ * Codex has no `models` subcommand, but the CLI refreshes the account's model
+ * list into `models_cache.json` under `CODEX_HOME`, so we read that file:
+ * `{ "models": [{ "slug", "display_name", "visibility", "priority",
+ * "default_reasoning_level", "supported_reasoning_levels": [{ "effort" }] }] }`.
+ *
+ * `visibility: "hide"` entries are internal (auto-review, reserve capacity) and
+ * are not selectable, so they stay out of the picker. `priority` counts up from
+ * the best model, the opposite of our rank.
+ */
+export function parseCodexModelsCache(text: string): DiscoveredModel[] {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) return []
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const models = obj.models
+  if (!Array.isArray(models)) return []
+  const out: DiscoveredModel[] = []
+  for (const raw of models) {
+    if (!raw || typeof raw !== 'object') continue
+    const m = raw as Record<string, unknown>
+    const slug = typeof m.slug === 'string' ? m.slug.trim() : ''
+    if (!slug || slug.includes(' ')) continue
+    if (typeof m.visibility === 'string' && m.visibility !== 'list') continue
+    const levels = Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : []
+    const efforts: string[] = []
+    for (const level of levels) {
+      const value =
+        typeof level === 'string'
+          ? level
+          : level && typeof level === 'object'
+            ? ((level as Record<string, unknown>).effort as string | undefined)
+            : undefined
+      if (typeof value === 'string' && value.trim()) efforts.push(value.trim())
+    }
+    const priority = typeof m.priority === 'number' ? m.priority : 0
+    out.push({
+      slug,
+      name: typeof m.display_name === 'string' && m.display_name.trim() ? m.display_name : slug,
+      efforts,
+      defaultEffort:
+        typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : 'medium',
+      rank: -priority,
+    })
+  }
+  return out
 }

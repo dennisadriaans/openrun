@@ -67,6 +67,12 @@ const CODEX_EFFORTS: EffortOption[] = [
   { value: 'xhigh', label: 'Extra High' },
 ]
 
+const CODEX_EFFORTS_5_6: EffortOption[] = [
+  ...CODEX_EFFORTS,
+  { value: 'max', label: 'Max' },
+  { value: 'ultra', label: 'Ultra' },
+]
+
 const GROK_EFFORTS: EffortOption[] = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium', isDefault: true },
@@ -117,6 +123,28 @@ export const CLAUDE_MODELS: ModelOption[] = [
 ]
 
 export const CODEX_MODELS: ModelOption[] = [
+  {
+    slug: 'gpt-5.6-sol',
+    name: 'GPT-5.6-Sol',
+    shortName: 'Sol',
+    efforts: CODEX_EFFORTS_5_6,
+    provider: 'codex',
+  },
+  {
+    slug: 'gpt-5.6-terra',
+    name: 'GPT-5.6-Terra',
+    shortName: 'Terra',
+    efforts: CODEX_EFFORTS_5_6,
+    provider: 'codex',
+  },
+  {
+    slug: 'gpt-5.6-luna',
+    name: 'GPT-5.6-Luna',
+    shortName: 'Luna',
+    // Luna tops out below Sol/Terra — no `ultra`.
+    efforts: [...CODEX_EFFORTS, { value: 'max', label: 'Max' }],
+    provider: 'codex',
+  },
   {
     slug: 'gpt-5.5',
     name: 'GPT-5.5',
