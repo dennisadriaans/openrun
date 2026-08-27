@@ -134,8 +134,8 @@ export function WorkspacePicker({
       ) : null}
       {isMainCheckout(selectedWorkspace) ? (
         <p className="md:col-span-2 text-ui-sm text-amber-300">
-          This runs in your main checkout — the one your editor has open. Pick or create a
-          worktree to keep the agent off those files.
+          This runs in your main checkout — the one your editor has open. Pick or create a worktree
+          to keep the agent off those files.
         </p>
       ) : null}
       {managing ? <ManageProjectsModal onClose={() => setManaging(false)} /> : null}

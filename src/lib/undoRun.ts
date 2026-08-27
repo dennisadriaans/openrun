@@ -59,9 +59,7 @@ export function canUndoRunCommits(summary: RunCommitSummary): boolean {
 /** Checkbox label — the count is the whole point, so it leads. */
 export function undoCommitsLabel(summary: RunCommitSummary): string {
   const n = summary.commits.length
-  return n === 1
-    ? 'Also drop the commit this run made'
-    : `Also drop the ${n} commits this run made`
+  return n === 1 ? 'Also drop the commit this run made' : `Also drop the ${n} commits this run made`
 }
 
 export function shortSha(sha: string): string {

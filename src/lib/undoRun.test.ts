@@ -41,10 +41,7 @@ describe('undoCommitsBlockedReason', () => {
   })
 
   it('blocks when the base commit is no longer reachable', () => {
-    assert.match(
-      undoCommitsBlockedReason(summary({ baseCommit: '' })) ?? '',
-      /branch has moved/i,
-    )
+    assert.match(undoCommitsBlockedReason(summary({ baseCommit: '' })) ?? '', /branch has moved/i)
   })
 
   it('reports a published conflict before a missing base', () => {

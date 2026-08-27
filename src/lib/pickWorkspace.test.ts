@@ -28,10 +28,7 @@ describe('pickDefaultWorkspace', () => {
   })
 
   it('honours an explicit main preference', () => {
-    assert.equal(
-      pickDefaultWorkspace([featureReady, mainReady], { prefer: 'main' })?.id,
-      'ws-main',
-    )
+    assert.equal(pickDefaultWorkspace([featureReady, mainReady], { prefer: 'main' })?.id, 'ws-main')
   })
 
   it('falls back to a worktree when main is preferred but not ready', () => {
