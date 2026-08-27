@@ -19,6 +19,11 @@ export const ORB_STATES = [
 
 export type ActivityOrbState = (typeof ORB_STATES)[number]
 
+/** Shapes the random orb may pick; `composing` (ribbon) is deliberately out. */
+export const ORB_RANDOM_STATES = ORB_STATES.filter(
+  (state) => state !== 'composing',
+) as readonly ActivityOrbState[]
+
 export function isActivityOrbState(value: unknown): value is ActivityOrbState {
   return typeof value === 'string' && (ORB_STATES as readonly string[]).includes(value)
 }
@@ -85,4 +90,9 @@ export function mergeThoughtText(prev: string, next: string): string {
   if (b.startsWith(a)) return next
   if (a.startsWith(b)) return prev
   return `${a}\n\n${b}`
+}
+
+/** Random orb, so a long transcript cycles the whole set instead of one shape. */
+export function randomOrbState(): ActivityOrbState {
+  return ORB_RANDOM_STATES[Math.floor(Math.random() * ORB_RANDOM_STATES.length)]
 }

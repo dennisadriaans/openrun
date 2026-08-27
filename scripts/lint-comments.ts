@@ -5,7 +5,7 @@ import { globSync, readFileSync } from 'node:fs'
 const MAX_LINES = 3
 
 const files = globSync(['src/**/*.ts', 'src/**/*.tsx', 'scripts/**/*.ts']).filter(
-  (file) => !file.endsWith('routeTree.gen.ts'),
+  (file) => !file.endsWith('routeTree.gen.ts') && !file.startsWith('src/vendor/'),
 )
 
 type Violation = { file: string; line: number; end: number; length: number }
