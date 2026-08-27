@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { latestActivity, latestActivityLabel } from './turnActivity.ts'
+import { activitySteps, latestActivity, latestActivityLabel } from './turnActivity.ts'
 import type { TurnEventKind, TurnEventPayload } from './turnEvents.ts'
 
 function ev(
@@ -84,5 +84,48 @@ describe('latestActivity', () => {
       ev('thought', { text: 'ok' }),
     ]
     assert.equal(latestActivity(events).orb, 'solving')
+  })
+})
+
+describe('activitySteps', () => {
+  it('lists reasoning and tool calls in order with live statuses', () => {
+    const events = [
+      ev('thought', { text: 'Inspect the run detail\nthen make the change' }),
+      ev('tool_start', {
+        toolCallId: 'read',
+        name: 'Read',
+        title: 'Read · app/src/components/Chat.tsx',
+      }),
+      ev('tool_result', { toolCallId: 'read' }),
+      ev('tool_start', {
+        toolCallId: 'shell',
+        name: 'Bash',
+        title: 'Bash · pnpm test',
+        status: 'in_progress',
+      }),
+    ]
+
+    assert.deepEqual(activitySteps(events), [
+      {
+        key: 'thought-0',
+        label: 'Thinking · Inspect the run detail',
+        status: 'completed',
+      },
+      {
+        key: 'tool-read',
+        label: 'Read app/src/components/Chat.tsx',
+        status: 'completed',
+      },
+      { key: 'tool-shell', label: 'Running pnpm test', status: 'in_progress' },
+    ])
+  })
+
+  it('shows a failed tool result as failed', () => {
+    const events = [
+      ev('tool_start', { toolCallId: 'shell', name: 'Bash', title: 'Bash · pnpm test' }),
+      ev('tool_result', { toolCallId: 'shell', status: 'failed' }),
+    ]
+    assert.equal(activitySteps(events)[0]?.status, 'failed')
+    assert.equal(activitySteps(events)[0]?.label, 'Ran pnpm test')
   })
 })

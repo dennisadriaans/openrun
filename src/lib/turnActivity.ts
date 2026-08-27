@@ -7,7 +7,7 @@
  */
 import type { TurnEventPayload, TurnEventRow } from './turnEvents.ts'
 import { toolCallVerb } from './toolCallView.ts'
-import { resolveToolKind, toolKindFromName } from './acp.ts'
+import { resolveToolKind, toolKindFromName, type ToolCallStatus } from './acp.ts'
 import { isToolCallRole, type ToolCallRole } from './toolCallRole.ts'
 import { orbStateForTool, orbVerb, type ActivityOrbState } from './orbState.ts'
 
@@ -47,6 +47,62 @@ export type TurnActivity = {
   orb: ActivityOrbState
   verb: string
   step?: string
+}
+
+export type TurnActivityStep = {
+  key: string
+  label: string
+  status: ToolCallStatus
+}
+
+function toolStepLabel(payload: TurnEventPayload, status: ToolCallStatus): string {
+  const kind =
+    resolveToolKind(payload.name, payload.toolKind, payload.input, payload.title) ??
+    toolKindFromName(payload.name)
+  const verb = toolCallVerb(kind, payload.name, status)
+  const detail = payload.title
+    ? firstLine(payload.title.split(' · ').slice(1).join(' · '), 160)
+    : ''
+  return detail ? `${verb} ${detail}` : verb
+}
+
+/**
+ * Concrete progress reported during a live turn. This can only describe
+ * events the runtime emits; a long-running shell command remains one active
+ * step until the CLI reports its result.
+ */
+export function activitySteps(
+  events: Array<Pick<TurnEventRow, 'kind' | 'payload'>>,
+): TurnActivityStep[] {
+  const results = new Map<string, TurnEventPayload>()
+  for (const event of events) {
+    if (event.kind !== 'tool_result') continue
+    const payload = payloadOf(event)
+    if (payload.toolCallId) results.set(payload.toolCallId, payload)
+  }
+
+  const steps: TurnActivityStep[] = []
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index]!
+    const payload = payloadOf(event)
+    if (event.kind === 'thought' && payload.text?.trim()) {
+      steps.push({
+        key: `thought-${index}`,
+        label: `Thinking · ${firstLine(payload.text, 160)}`,
+        status: 'completed',
+      })
+      continue
+    }
+    if (event.kind !== 'tool_start') continue
+    const result = payload.toolCallId ? results.get(payload.toolCallId) : undefined
+    const status = result ? (result.status ?? 'completed') : (payload.status ?? 'in_progress')
+    steps.push({
+      key: payload.toolCallId ? `tool-${payload.toolCallId}` : `tool-${index}`,
+      label: toolStepLabel(payload, status),
+      status,
+    })
+  }
+  return steps
 }
 
 /**

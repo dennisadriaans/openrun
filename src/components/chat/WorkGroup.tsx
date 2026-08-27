@@ -6,9 +6,12 @@
 import { useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { workOverflow } from '../../lib/turnFold'
+import { useChatThemeBehaviour } from './ChatThemeProvider'
 
 export function WorkGroup({ rows }: { rows: { id: string; node: ReactNode }[] }) {
-  const [expanded, setExpanded] = useState(false)
+  const [picked, setExpanded] = useState<boolean | null>(null)
+  const { unfoldTurns } = useChatThemeBehaviour()
+  const expanded = picked ?? unfoldTurns
   const { hidden, visible } = workOverflow(rows)
   const shown = expanded ? rows : visible
 

@@ -29,8 +29,11 @@ import {
   TopBarActionsProvider,
   useSidebar,
 } from '../components/AppChrome'
+import { ChatThemeProvider } from '../components/chat/ChatThemeProvider'
 import { DevLiveStatus } from '../components/DevLiveStatus'
 import { Toaster } from '../components/toast'
+import { CHAT_THEME_BOOT_SCRIPT } from '../lib/chatTheme'
+import { TERMINAL_PALETTE_BOOT_SCRIPT } from '../lib/terminalPalette'
 import { getQueryClient } from '../lib/queryClient'
 import { ActivityLiveProvider } from '../lib/useActivityLive'
 import { useCloudStatus, useSignOutCloud, useStartCloudLogin } from '../lib/queries'
@@ -273,14 +276,19 @@ function RootDocument({ children }: { children: ReactNode }) {
     <html lang="en" data-theme="dark" className="dark">
       <head>
         <HeadContent />
+        {/* Sets data-chat-theme / data-term-palette before paint so the transcript never flashes. */}
+        <script dangerouslySetInnerHTML={{ __html: CHAT_THEME_BOOT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: TERMINAL_PALETTE_BOOT_SCRIPT }} />
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          <ActivityLiveProvider>
-            {children}
-            <Toaster />
-            <DevLiveStatus />
-          </ActivityLiveProvider>
+          <ChatThemeProvider>
+            <ActivityLiveProvider>
+              {children}
+              <Toaster />
+              <DevLiveStatus />
+            </ActivityLiveProvider>
+          </ChatThemeProvider>
         </QueryClientProvider>
         <Scripts />
       </body>

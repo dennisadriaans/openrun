@@ -84,8 +84,9 @@ import {
   TurnFold,
   WorkGroup,
   WorkingIndicator,
+  useChatThemeBehaviour,
 } from './chat/index'
-import { latestActivity } from '../lib/turnActivity'
+import { activitySteps, latestActivity } from '../lib/turnActivity'
 import { verificationPhase } from '../lib/runPhase'
 import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
 import { foldedRows, planTurnFold, type TurnFoldStage, type TurnRowKind } from '../lib/turnFold'
@@ -491,13 +492,9 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
   const long = message.content.length > 400
 
   return (
-    <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-[10px] border border-border bg-secondary px-3 py-2">
-        <div
-          className={`whitespace-pre-wrap text-sm leading-relaxed text-foreground ${
-            long && !expanded ? 'line-clamp-6' : ''
-          }`}
-        >
+    <div className="chat-user group">
+      <div className="chat-user__bubble">
+        <div className={`chat-user__text ${long && !expanded ? 'line-clamp-6' : ''}`}>
           {message.content}
         </div>
         {long ? (
@@ -510,8 +507,9 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
           </button>
         ) : null}
       </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end gap-1.5 pe-1">
-        <MessageMeta createdAt={message.createdAt} content={message.content} align="end" />
+      {/* `.chat-user__meta` owns the side it sits on, so the theme decides. */}
+      <div className="chat-user__meta">
+        <MessageMeta createdAt={message.createdAt} content={message.content} />
         <MessageSourceBadge
           provider={message.sourceProvider}
           url={message.sourceUrl}
@@ -571,7 +569,11 @@ const AssistantMessage = memo(function AssistantMessage({
   installProjectName?: string | null
   installWorkspaceLabel?: string | null
 }) {
-  const [foldStage, setFoldStage] = useState<TurnFoldStage>('closed')
+  // Null means "whatever the theme says" — a CLI theme replays the turn inline.
+  // Switching theme therefore restyles turns the reader has not touched yet.
+  const [pickedStage, setFoldStage] = useState<TurnFoldStage | null>(null)
+  const { unfoldTurns } = useChatThemeBehaviour()
+  const foldStage: TurnFoldStage = pickedStage ?? (unfoldTurns ? 'all' : 'closed')
   const running = message.status === 'running'
   const realStderr = meaningfulStderr(message.stderr)
   const hasEvents = message.events.length > 0
@@ -596,6 +598,7 @@ const AssistantMessage = memo(function AssistantMessage({
       : []
   const showPlanCards = planProposals.length > 0 && Boolean(runtimeId)
   const activity = running ? latestActivity(message.events) : undefined
+  const liveSteps = running ? activitySteps(message.events) : []
   // A turn whose events are all tool calls still has an answer — it just lives
   // on the message rather than in an `assistant` event (older rows, and CLIs
   // that only report their reply once, at the end).
@@ -685,6 +688,7 @@ const AssistantMessage = memo(function AssistantMessage({
             orb={activity.orb}
             verb={activity.verb}
             {...(activity.step ? { step: activity.step } : {})}
+            steps={liveSteps}
           />
         ) : null}
 
@@ -728,8 +732,8 @@ const AssistantMessage = memo(function AssistantMessage({
 function TranscriptBootSkeleton() {
   return (
     <>
-      <div className="flex flex-col items-end gap-1">
-        <div className="h-14 w-[55%] max-w-[80%] animate-pulse rounded-[10px] border border-border bg-secondary/80" />
+      <div className="chat-user">
+        <div className="chat-user__bubble h-14 w-[55%] animate-pulse" />
       </div>
       <div className="space-y-2 px-1">
         <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />

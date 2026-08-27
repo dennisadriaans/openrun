@@ -29,8 +29,10 @@ import { FileTypeIcon } from '../FileTypeIcon'
 import { ChatEventSection } from './ChatEventShell'
 import { EditDiff } from './EditDiff'
 import { SubagentCall } from './SubagentCall'
+import { TerminalOutput } from './TerminalOutput'
 import { eyebrowForCallRole, iconForCallRole, iconForToolKind } from './chatEventIcons'
 import { ActivityOrb } from './ActivityOrb'
+import { useChatThemeBehaviour } from './ChatThemeProvider'
 import { orbStateForTool } from '../../lib/orbState'
 
 function clip(text: string, maxLines = 16, maxChars = 4000): string {
@@ -139,9 +141,10 @@ function ToolCallGlyph({ role, view }: { role: ToolCallRole; view: ToolCallView 
 
 function ResultPre({ children }: { children: string }) {
   return (
-    <pre className="chat-tool__pre scroll-thin max-h-48 overflow-auto rounded-lg border border-border bg-chrome/80 p-2.5 mono text-[11px] leading-relaxed text-muted-foreground">
-      {clip(children, 40, 8000)}
-    </pre>
+    <TerminalOutput
+      text={clip(children, 40, 8000)}
+      className="chat-tool__pre scroll-thin max-h-48 overflow-auto rounded-lg border border-border bg-chrome/80 p-2.5 mono text-[11px] leading-relaxed text-muted-foreground"
+    />
   )
 }
 
@@ -236,9 +239,10 @@ function ToolCallBody({
           {view.target.command}
         </div>
         {showResult ? (
-          <pre className="scroll-thin max-h-48 overflow-auto p-2.5 mono text-[11px] leading-relaxed text-muted-foreground">
-            {clip(result, 40, 8000)}
-          </pre>
+          <TerminalOutput
+            text={clip(result, 40, 8000)}
+            className="scroll-thin max-h-48 overflow-auto p-2.5 mono text-[11px] leading-relaxed text-muted-foreground"
+          />
         ) : running ? (
           <div className="px-2.5 py-1.5 text-ui-xs text-tier-quaternary">Waiting for result…</div>
         ) : null}
@@ -353,7 +357,8 @@ export function ToolCall({
   undonePaths?: string[]
   redoablePaths?: string[]
 }) {
-  const [open, setOpen] = useState(false)
+  const [picked, setOpen] = useState<boolean | null>(null)
+  const { expandToolKinds } = useChatThemeBehaviour()
   const role = resolveCallRole({ callRole, name, toolInput: input, mcpServer })
   if (role === 'subagent') {
     return (
@@ -410,6 +415,9 @@ export function ToolCall({
     Boolean(mcpServer) ||
     running ||
     (locations && locations.length > 0)
+  // Until the reader clicks, the theme decides: a CLI theme prints shell output
+  // under the row the way `claude` does, but never unrolls a file read.
+  const open = picked ?? expandToolKinds.includes(view.kind)
 
   const pathTarget = view.target.type === 'path' ? view.target.path : undefined
   const headerTarget = roleTitle ? (
