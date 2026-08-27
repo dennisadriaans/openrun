@@ -60,11 +60,7 @@ import { protocolMcpServers } from './mcp.ts'
 import { OPENRUN_APP_DIR_ENV, OPENRUN_RUN_ID_ENV } from '../lib/openrunTools.ts'
 import { withPrCapability } from '../lib/prCapability'
 import { buildHandoffPrompt, handoffSystemNote, type HandoffMessage } from '../lib/handoffPrompt.ts'
-import {
-  isRuntimeSwitch,
-  resolveSwitchMode,
-  resolveSwitchModel,
-} from '../lib/runtimeSwitch.ts'
+import { isRuntimeSwitch, resolveSwitchMode, resolveSwitchModel } from '../lib/runtimeSwitch.ts'
 import { cachedModelsForBin } from './modelCatalog.ts'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
@@ -454,9 +450,7 @@ export function sendFollowUp(input: {
     | RuntimeRow
     | undefined
   if (!runtime) throw new Error('Runtime not found for this run')
-  const previous = switching
-    ? (readRuntime.get(run.runtimeId) as RuntimeRow | undefined)
-    : runtime
+  const previous = switching ? (readRuntime.get(run.runtimeId) as RuntimeRow | undefined) : runtime
 
   // Same preflight as startRun — don't flip the run back to running if the
   // binary disappeared between turns.

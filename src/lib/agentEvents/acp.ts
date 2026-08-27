@@ -13,7 +13,13 @@
 import { isToolCallStatus, isToolKind, resolveToolKind } from '../acp.ts'
 import type { PlanEntry, ToolCallLocation, ToolCallStatus, ToolKind } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
-import { pickNumber, pickString, recordAt, toolResultContent, type ParsedTurnEvent } from './types.ts'
+import {
+  pickNumber,
+  pickString,
+  recordAt,
+  toolResultContent,
+  type ParsedTurnEvent,
+} from './types.ts'
 import type { TurnUsage } from '../turnUsage.ts'
 
 /**
@@ -25,11 +31,13 @@ import type { TurnUsage } from '../turnUsage.ts'
  * flat on the update.
  */
 function acpUsage(update: AcpSessionUpdate): Partial<TurnUsage> | undefined {
-  const u = recordAt(update as Record<string, unknown>, 'usage') ?? (update as Record<string, unknown>)
+  const u =
+    recordAt(update as Record<string, unknown>, 'usage') ?? (update as Record<string, unknown>)
   const input = pickNumber(u, 'inputTokens', 'input_tokens', 'promptTokens') ?? 0
   const output = pickNumber(u, 'outputTokens', 'output_tokens', 'completionTokens') ?? 0
   const cacheRead =
-    pickNumber(u, 'cachedTokens', 'cached_tokens', 'cacheReadTokens', 'cache_read_input_tokens') ?? 0
+    pickNumber(u, 'cachedTokens', 'cached_tokens', 'cacheReadTokens', 'cache_read_input_tokens') ??
+    0
   const used = pickNumber(u, 'usedTokens', 'used_tokens', 'totalTokens', 'total_tokens')
   const limit = pickNumber(
     u,

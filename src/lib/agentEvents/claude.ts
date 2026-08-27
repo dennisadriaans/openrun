@@ -34,9 +34,7 @@ import type { TurnUsage } from '../turnUsage.ts'
  * that is what the model was holding — Claude never states a window, so
  * `contextLimit` is left for the model table to fill in.
  */
-function claudeUsage(
-  message: Record<string, unknown> | undefined,
-): Partial<TurnUsage> | undefined {
+function claudeUsage(message: Record<string, unknown> | undefined): Partial<TurnUsage> | undefined {
   const usage = recordAt(message, 'usage')
   if (!usage) return undefined
   const input = pickNumber(usage, 'input_tokens') ?? 0
@@ -52,9 +50,7 @@ function claudeUsage(
   return { input, output, cacheRead, cacheWrite, model }
 }
 
-function claudeUsageEvent(
-  message: Record<string, unknown> | undefined,
-): ParsedTurnEvent[] {
+function claudeUsageEvent(message: Record<string, unknown> | undefined): ParsedTurnEvent[] {
   const usage = claudeUsage(message)
   return usage ? [{ kind: 'usage', payload: { usage } }] : []
 }

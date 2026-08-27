@@ -27,9 +27,10 @@ export function isUsageLimitMessage(text: string): boolean {
 
 /** "at 3:51 PM" / "in 20 minutes" — whatever the CLI offered, preposition kept. */
 export function usageLimitRetryHint(text: string): string {
-  const match = /(?:try again|retry|resets?|available again)\s+(at|in|after)\s+([^.\n)]{1,40})/i.exec(
-    text ?? '',
-  )
+  const match =
+    /(?:try again|retry|resets?|available again)\s+(at|in|after)\s+([^.\n)]{1,40})/i.exec(
+      text ?? '',
+    )
   return match ? `${match[1].toLowerCase()} ${match[2].trim()}` : ''
 }
 

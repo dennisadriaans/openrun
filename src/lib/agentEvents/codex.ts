@@ -117,7 +117,11 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
       {
         kind: 'usage',
         payload: {
-          usage: { ...usage, ...(window ? { contextLimit: window } : {}), ...(model ? { model } : {}) },
+          usage: {
+            ...usage,
+            ...(window ? { contextLimit: window } : {}),
+            ...(model ? { model } : {}),
+          },
         },
       },
     ]

@@ -33,8 +33,7 @@ function grokUsage(obj: Record<string, unknown>): Partial<TurnUsage> | undefined
   const usage = recordAt(obj, 'usage') ?? obj
   const promptStyle = typeof usage.prompt_tokens === 'number'
   const input = pickNumber(usage, 'input_tokens', 'inputTokens', 'prompt_tokens') ?? 0
-  const output =
-    pickNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens') ?? 0
+  const output = pickNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens') ?? 0
   const cacheRead =
     pickNumber(
       usage,

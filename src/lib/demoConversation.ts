@@ -358,6 +358,7 @@ export function demoConversation(runId: string, now: number = Date.now()) {
     checkResults: [],
     verdict: 'unverified' as const,
     canFollowUp: false,
+    canSwitchRuntime: false,
     workspace: {
       id: WS_ID,
       projectId: PROJECT_ID,
@@ -439,6 +440,7 @@ export function demoRunWorkspace(runId: string, now: number = Date.now()) {
       deletions: DEMO_FILES.reduce((n, f) => n + f.deletions, 0),
     },
     gh: { installed: true, authenticated: true },
+    commits: { baseCommit: '', commits: [], published: 0 },
     taskName: 'Chat',
     baseBranch: 'main',
     startedAt: t0,
