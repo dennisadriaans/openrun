@@ -1758,8 +1758,8 @@ export function TaskForm({
 
         {isMainCheckout(selectedWorkspace) ? (
           <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-300">
-            This automation writes into your main checkout — the branch your editor has open.
-            Pick another branch to give it a worktree of its own under <code>~/.openrun</code>.
+            This automation writes into your main checkout — the branch your editor has open. Pick
+            another branch to give it a worktree of its own under <code>~/.openrun</code>.
           </p>
         ) : null}
 
