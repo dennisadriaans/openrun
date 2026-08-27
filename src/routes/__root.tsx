@@ -236,10 +236,13 @@ function isUngatedPath(pathname: string): boolean {
 function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const navigate = useNavigate()
-  const { data: cloud, isPending } = useCloudStatus()
+  const { data: cloud, isPending, isFetching } = useCloudStatus()
 
   const ungated = isUngatedPath(pathname)
-  const needsWelcome = !isPending && Boolean(cloud) && !cloud!.signedIn && !cloud!.onboardingSkipped
+  // `isFetching` too: a sign-in invalidates this query, and acting on the stale
+  // answer while it reloads sends a freshly linked machine back to /welcome.
+  const needsWelcome =
+    !isPending && !isFetching && Boolean(cloud) && !cloud!.signedIn && !cloud!.onboardingSkipped
 
   useEffect(() => {
     if (needsWelcome && !ungated) void navigate({ to: '/welcome', replace: true })
