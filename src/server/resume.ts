@@ -157,7 +157,11 @@ function stripPermissionFlags(args: string[], kind: RuntimeKind): string[] {
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!
     if (a === SKIP_PERMISSIONS || a === ALWAYS_APPROVE) continue
-    if (kind === 'fx' && (a === '--yolo' || a === '--auto')) continue
+    if ((kind === 'fx' || kind === 'codex') && (a === '--yolo' || a === '--auto')) continue
+    if (a === '-s' && kind === 'codex') {
+      i += 1
+      continue
+    }
     if (a === '--permission-mode' || a === '--sandbox' || a === '--full-auto' || a === '--mode') {
       if (a !== '--full-auto') i += 1
       continue
@@ -195,7 +199,8 @@ function applyRuntimeModeFlags(
     }
   } else if (kind === 'codex') {
     if (runtimeMode === 'full-access') {
-      flags.push('--full-auto')
+      // `codex exec` dropped `--full-auto`; `--yolo` is the bypass flag now.
+      flags.push('--yolo')
     } else if (runtimeMode === 'auto-accept-edits') {
       flags.push('--sandbox', 'workspace-write')
       flags.push('-c', 'approval_policy=on-request')
@@ -252,6 +257,7 @@ function isResumeOwnedFlag(arg: string, next: string | undefined, kind: RuntimeK
     arg === SKIP_PERMISSIONS ||
     arg === ALWAYS_APPROVE ||
     arg === '--full-auto' ||
+    arg === '--yolo' ||
     arg === STREAM_JSON ||
     arg === 'stream-json' ||
     arg === PERMISSION_PROMPT_TOOL ||
