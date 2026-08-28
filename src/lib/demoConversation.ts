@@ -356,8 +356,10 @@ export function demoConversation(runId: string, now: number = Date.now()) {
     },
     messages: messages(runId, t0, t1),
     checkResults: [],
+    queued: [],
     verdict: 'unverified' as const,
     canFollowUp: false,
+    canQueueFollowUp: false,
     canSwitchRuntime: false,
     workspace: {
       id: WS_ID,
