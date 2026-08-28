@@ -444,11 +444,16 @@ function toWorkspaceWithMeta(db: ReturnType<typeof getDb>, ws: WorkspaceRow): Wo
   // shelling out to git for a path that no longer exists.
   const info =
     ws.status === 'archived' || !existsSync(ws.path)
-      ? { dirty: false, ahead: 0 }
+      ? { dirty: false, ahead: 0, branch: '' }
       : git.hasUnpushedWork(ws.path)
+
+  // The checkout can be switched outside openrun, so HEAD wins over the branch
+  // recorded at creation. Detached HEAD reports "HEAD" — keep the record then.
+  const liveBranch = info.branch && info.branch !== 'HEAD' ? info.branch : ws.branch
 
   return {
     ...ws,
+    branch: liveBranch,
     projectName: project?.name ?? '(deleted project)',
     dirty: info.dirty,
     ahead: info.ahead,
