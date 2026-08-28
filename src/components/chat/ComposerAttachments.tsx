@@ -182,7 +182,11 @@ export function AttachmentStrip({
           className={`group relative h-16 w-16 overflow-hidden rounded-lg border ${
             row.error ? 'border-danger' : 'border-border'
           }`}
-          title={row.error ? `${row.name} — ${row.error}` : `${row.name} · ${formatAttachmentSize(row.size)}`}
+          title={
+            row.error
+              ? `${row.name} — ${row.error}`
+              : `${row.name} · ${formatAttachmentSize(row.size)}`
+          }
         >
           <img src={row.previewUrl} alt={row.name} className="h-full w-full object-cover" />
           {!row.path && !row.error ? (

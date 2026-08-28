@@ -64,9 +64,7 @@ export function QueuedMessages({
             onClick={onSendNow}
             disabled={busy}
             title={
-              running
-                ? 'Interrupt the agent and send these now'
-                : 'Send the queued messages now'
+              running ? 'Interrupt the agent and send these now' : 'Send the queued messages now'
             }
             className="h-6 rounded-md border border-border bg-secondary/80 px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
           >
