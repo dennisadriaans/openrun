@@ -353,6 +353,7 @@ export function demoConversation(runId: string, now: number = Date.now()) {
       verdict: 'unverified',
       repairAttempts: 0,
       timedOut: 0,
+      lastReadAt: t1,
     },
     messages: messages(runId, t0, t1),
     checkResults: [],
