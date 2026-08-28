@@ -17,12 +17,7 @@ export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 5
 
-export const ACCEPTED_IMAGE_TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/gif',
-] as const
+export const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
 const EXTENSIONS: Record<string, string> = {
   'image/png': 'png',

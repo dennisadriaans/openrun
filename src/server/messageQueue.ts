@@ -25,9 +25,9 @@ export function listQueuedMessages(runId: string): QueuedMessage[] {
 
 export function queuedMessageDepth(runId: string): number {
   return (
-    getDb()
-      .prepare('SELECT COUNT(*) AS n FROM message_queue WHERE runId = ?')
-      .get(runId) as { n: number }
+    getDb().prepare('SELECT COUNT(*) AS n FROM message_queue WHERE runId = ?').get(runId) as {
+      n: number
+    }
   ).n
 }
 
