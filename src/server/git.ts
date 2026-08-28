@@ -1091,7 +1091,11 @@ export function remoteUrl(repoPath: string): string {
 }
 
 /** Used to guard workspace archive — refuse to discard work that isn't on the remote. */
-export function hasUnpushedWork(repoPath: string): { dirty: boolean; ahead: number } {
+export function hasUnpushedWork(repoPath: string): {
+  dirty: boolean
+  ahead: number
+  branch: string
+} {
   const info = repoInfo(repoPath)
-  return { dirty: info.dirty, ahead: info.ahead }
+  return { dirty: info.dirty, ahead: info.ahead, branch: info.branch }
 }
