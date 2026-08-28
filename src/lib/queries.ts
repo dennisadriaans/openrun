@@ -338,6 +338,16 @@ export function useRemoveRun() {
   })
 }
 
+export function useMarkRunRead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => fns.markRunRead({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['runs'] })
+    },
+  })
+}
+
 export function conversationQueryOptions(runId: string) {
   const demo = isDemoMode() && isDemoDetailRun(runId)
   return {

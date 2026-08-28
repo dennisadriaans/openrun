@@ -31,10 +31,12 @@ import {
   useConversation,
   useCreateWorkspace,
   useDiscard,
+  useMarkRunRead,
   useRemoveRun,
   useRuntimes,
   useRunWorkspace,
   useStartChat,
+  useQueuedMessageActions,
   useSendMessage,
 } from '../lib/queries'
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
@@ -136,7 +138,9 @@ function RunDetail() {
     enabled: showRight || confirmUndoAll,
   })
 
+  const markRead = useMarkRunRead()
   const sendMessage = useSendMessage(runId)
+  const queueActions = useQueuedMessageActions(runId)
   const startNewRun = useStartChat()
   const discard = useDiscard(runId)
   const remove = useRemoveRun()
@@ -146,6 +150,18 @@ function RunDetail() {
     if (showRight) return
     return scheduleIdleWorkspacePrefetch(qc, runId)
   }, [qc, runId, showRight])
+
+  const runStatus = data?.run.status
+  const lastAgentAt = data?.messages.reduce(
+    (at, m) => (m.role === 'assistant' && m.createdAt > at ? m.createdAt : at),
+    0,
+  )
+  // Reading the run here is what clears its dot on the list — re-mark as the
+  // agent writes, so a run finished while open never comes back unread.
+  useEffect(() => {
+    if (isDemoDetailRun(runId)) return
+    markRead.mutate(runId)
+  }, [markRead.mutate, runId, lastAgentAt, runStatus])
 
   useEffect(() => {
     layoutChosenRef.current = hasStoredLayout(runId)

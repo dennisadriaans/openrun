@@ -17,6 +17,7 @@ export type DemoRun = {
   trigger: 'chat' | 'manual' | 'schedule' | 'webhook'
   startedAt: number
   finishedAt: number | null
+  unread?: boolean
 }
 
 export const DEMO_RUNNING_TASK_ID = 'demo-task-1'

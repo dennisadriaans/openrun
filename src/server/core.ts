@@ -1073,6 +1073,8 @@ export type RunSummary = Omit<RunRow, 'stdout' | 'stderr'> & {
   chatTitle: string
   /** One-line activity: in-flight tool, or files the agent edited. */
   activitySummary: string
+  /** Agent wrote something after the user last opened the run. */
+  unread: boolean
 }
 
 function runsListWhere(opts?: { taskId?: string; includeArchived?: boolean }): {
@@ -1125,6 +1127,16 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
     if (!firstPrompt.has(row.runId)) firstPrompt.set(row.runId, row.content)
   }
 
+  const lastAgentAt = new Map<string, number>()
+  const agentRows = db
+    .prepare(
+      `SELECT runId, MAX(createdAt) AS at FROM messages
+       WHERE runId IN (${placeholders}) AND role = 'assistant'
+       GROUP BY runId`,
+    )
+    .all(...ids) as Array<{ runId: string; at: number }>
+  for (const row of agentRows) lastAgentAt.set(row.runId, row.at)
+
   const eventsByRun = new Map<string, Array<Pick<TurnEventRow, 'kind' | 'payload'>>>()
   const eventRows = db
     .prepare(
@@ -1153,6 +1165,7 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
         prompt: firstPrompt.get(row.id) ?? '',
       }),
       activitySummary: summary ?? '',
+      unread: (lastAgentAt.get(row.id) ?? 0) > row.lastReadAt,
     }
   })
 }
@@ -1171,7 +1184,7 @@ export function listRuns(opts?: {
     .prepare(
       `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
               length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
-              archivedAt, verdict, repairAttempts, timedOut
+              archivedAt, verdict, repairAttempts, timedOut, lastReadAt
        FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset) as RunListRow[]
@@ -1190,6 +1203,12 @@ export async function rerunRunChecks(runId: string): Promise<CheckResultRow[]> {
 
 export function getRun(runId: string): RunRow | undefined {
   return getDb().prepare('SELECT * FROM runs WHERE id = ?').get(runId) as RunRow | undefined
+}
+
+/** Clear the unread dot on the runs list; called when the run detail is open. */
+export function markRunRead(runId: string): { ok: true } {
+  getDb().prepare('UPDATE runs SET lastReadAt = ? WHERE id = ?').run(Date.now(), runId)
+  return { ok: true }
 }
 
 export function cancelRun(runId: string) {

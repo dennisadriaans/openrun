@@ -96,7 +96,17 @@ function RunsPage() {
                       className="absolute inset-0"
                       aria-label={r.chatTitle}
                     />
-                    <StatusBadge status={r.status} />
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <StatusBadge status={r.status} />
+                      {r.unread ? (
+                        <span
+                          role="img"
+                          aria-label="Unread messages"
+                          title="Unread messages"
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                        />
+                      ) : null}
+                    </span>
                     <span className="min-w-0">
                       <span
                         className="block truncate text-ui-base text-foreground"

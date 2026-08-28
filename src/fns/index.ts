@@ -239,6 +239,10 @@ export const cancelRun = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => (await core()).cancelRun(data.id) ?? null)
 
+export const markRunRead = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).markRunRead(data.id))
+
 export const removeRun = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => {

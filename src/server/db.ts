@@ -155,6 +155,8 @@ export type RunRow = {
   repairAttempts: number
   /** 1 = the run was killed because it exceeded its wall-clock budget. */
   timedOut: number
+  /** When the user last opened this run; agent messages after it read as unread. */
+  lastReadAt: number
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system'
@@ -592,14 +594,21 @@ export function getDb(): Database.Database {
  * Adds `column` to `table` if it's missing. SQLite has no "ADD COLUMN IF NOT
  * EXISTS", so we diff against table_info instead.
  */
-function addColumn(db: Database.Database, table: string, column: string, ddl: string) {
+function addColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  ddl: string,
+): boolean {
   const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
   // A table created further down this same migration does not exist yet on a
   // fresh database, and `table_info` answers with an empty list rather than an
   // error — so without this the ALTER below throws and first boot dies.
-  if (info.length === 0) return
+  if (info.length === 0) return false
   const cols = new Set(info.map((c) => c.name))
-  if (!cols.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  if (cols.has(column)) return false
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  return true
 }
 
 /**
@@ -644,6 +653,12 @@ function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'verdict', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'repairAttempts', 'INTEGER NOT NULL DEFAULT 0')
   addColumn(db, 'runs', 'timedOut', 'INTEGER NOT NULL DEFAULT 0')
+
+  // Unread markers on the runs list. Existing rows are backfilled to "now" so
+  // upgrading does not light up every historical run as unread.
+  if (addColumn(db, 'runs', 'lastReadAt', 'INTEGER NOT NULL DEFAULT 0')) {
+    db.prepare('UPDATE runs SET lastReadAt = ?').run(Date.now())
+  }
 
   addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
