@@ -10,6 +10,7 @@ import {
 import { useActivityStreamHealthy } from './useActivityLive'
 import { demoConversation, demoFileDiff, demoRunWorkspace } from './demoConversation.ts'
 import { isDemoDetailRun, isDemoMode } from './demoData.ts'
+import { fileToBase64 } from './attachments.ts'
 import { newMessageId } from './messageId.ts'
 import type { PlanProposal } from './planProposals.ts'
 import type { McpServerConfig } from './mcp.ts'
@@ -921,6 +922,20 @@ export function useArchiveWorkspace() {
       qc.invalidateQueries({ queryKey: ['projects'] })
     },
   })
+}
+
+/**
+ * Upload a composer image into a workspace, or `undefined` when no workspace is
+ * settled yet — the composer hides its attachment affordances in that case.
+ */
+export function attachmentUploader(workspaceId: string | undefined) {
+  if (!workspaceId) return undefined
+  return async (file: File) => {
+    const data = await fileToBase64(file)
+    return fns.saveAttachment({
+      data: { workspaceId, name: file.name, mimeType: file.type, data },
+    })
+  }
 }
 
 export function useStartChat() {

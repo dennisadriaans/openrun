@@ -37,6 +37,7 @@ import { Route as ApiMobileActivityStreamRouteImport } from './routes/api/mobile
 import { Route as ApiMobilePushRegisterRouteImport } from './routes/api/mobile/push.register'
 import { Route as ApiMobileRunsIndexRouteImport } from './routes/api/mobile/runs/index'
 import { Route as ApiMobileTasksIndexRouteImport } from './routes/api/mobile/tasks/index'
+import { Route as ApiRunsRunIdAttachmentRouteImport } from './routes/api/runs/$runId/attachment'
 import { Route as ApiRunsRunIdStreamRouteImport } from './routes/api/runs/$runId/stream'
 import { Route as ApiRunsRunIdUiStreamRouteImport } from './routes/api/runs/$runId/ui-stream'
 import { Route as ApiMobileRunsRunIdIndexRouteImport } from './routes/api/mobile/runs/$runId/index'
@@ -191,6 +192,11 @@ const ApiMobileTasksIndexRoute = ApiMobileTasksIndexRouteImport.update({
   path: '/api/mobile/tasks/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRunsRunIdAttachmentRoute = ApiRunsRunIdAttachmentRouteImport.update({
+  id: '/api/runs/$runId/attachment',
+  path: '/api/runs/$runId/attachment',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRunsRunIdStreamRoute = ApiRunsRunIdStreamRouteImport.update({
   id: '/api/runs/$runId/stream',
   path: '/api/runs/$runId/stream',
@@ -291,6 +297,7 @@ export interface FileRoutesByFullPath {
   '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
+  '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
   '/api/mobile/runs/': typeof ApiMobileRunsIndexRoute
@@ -333,6 +340,7 @@ export interface FileRoutesByTo {
   '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
+  '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
   '/api/mobile/runs': typeof ApiMobileRunsIndexRoute
@@ -377,6 +385,7 @@ export interface FileRoutesById {
   '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
+  '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
   '/api/mobile/runs/': typeof ApiMobileRunsIndexRoute
@@ -422,6 +431,7 @@ export interface FileRouteTypes {
     | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
+    | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
     | '/api/mobile/runs/'
@@ -464,6 +474,7 @@ export interface FileRouteTypes {
     | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
+    | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
     | '/api/mobile/runs'
@@ -507,6 +518,7 @@ export interface FileRouteTypes {
     | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
+    | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
     | '/api/mobile/runs/'
@@ -549,6 +561,7 @@ export interface RootRouteChildren {
   ApiMcpOauthCallbackRoute: typeof ApiMcpOauthCallbackRoute
   ApiMobileActivityStreamRoute: typeof ApiMobileActivityStreamRoute
   ApiMobilePushRegisterRoute: typeof ApiMobilePushRegisterRoute
+  ApiRunsRunIdAttachmentRoute: typeof ApiRunsRunIdAttachmentRoute
   ApiRunsRunIdStreamRoute: typeof ApiRunsRunIdStreamRoute
   ApiRunsRunIdUiStreamRoute: typeof ApiRunsRunIdUiStreamRoute
   ApiMobileRunsIndexRoute: typeof ApiMobileRunsIndexRoute
@@ -762,6 +775,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileTasksIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/runs/$runId/attachment': {
+      id: '/api/runs/$runId/attachment'
+      path: '/api/runs/$runId/attachment'
+      fullPath: '/api/runs/$runId/attachment'
+      preLoaderRoute: typeof ApiRunsRunIdAttachmentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/runs/$runId/stream': {
       id: '/api/runs/$runId/stream'
       path: '/api/runs/$runId/stream'
@@ -923,6 +943,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMcpOauthCallbackRoute: ApiMcpOauthCallbackRoute,
   ApiMobileActivityStreamRoute: ApiMobileActivityStreamRoute,
   ApiMobilePushRegisterRoute: ApiMobilePushRegisterRoute,
+  ApiRunsRunIdAttachmentRoute: ApiRunsRunIdAttachmentRoute,
   ApiRunsRunIdStreamRoute: ApiRunsRunIdStreamRoute,
   ApiRunsRunIdUiStreamRoute: ApiRunsRunIdUiStreamRoute,
   ApiMobileRunsIndexRoute: ApiMobileRunsIndexRoute,

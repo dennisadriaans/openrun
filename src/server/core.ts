@@ -83,6 +83,7 @@ import {
   type PreviewCommandResult,
 } from './commandPreview'
 import { getProject, getWorkspace, listWorkspaces, resolveWorkspacePath } from './workspaces'
+import { saveAttachment } from './attachments.ts'
 import {
   openrunToolServer,
   removeMcpServer,
@@ -1602,6 +1603,24 @@ export function writeWorkspaceFile(input: { runId: string; path: string; content
 
 export function restoreWorkspaceFile(input: { runId: string; path: string; content: string }) {
   return files.putWorkspaceFile(runCwd(input.runId), input.path, input.content)
+}
+
+// --- Composer attachments --------------------------------------------------
+
+/**
+ * Write a composer image into the workspace so the agent can read it.
+ *
+ * Keyed by workspace, not by run: the first message of a new chat is composed
+ * before a run exists.
+ */
+export function saveWorkspaceAttachment(input: {
+  workspaceId: string
+  name: string
+  mimeType: string
+  data: string
+}) {
+  const cwd = resolveWorkspacePath(input.workspaceId)
+  return saveAttachment({ cwd, name: input.name, mimeType: input.mimeType, data: input.data })
 }
 
 /**

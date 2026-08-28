@@ -29,6 +29,7 @@ import {
 } from '../lib/models'
 import { formatChatTimestampTooltip, formatShortTimestamp } from '../lib/format'
 import {
+  attachmentUploader,
   useAnswerApproval,
   useDiscard,
   usePlugins,
@@ -490,16 +491,41 @@ function MessageMeta({
   )
 }
 
-const UserMessage = memo(function UserMessage({ message }: { message: ChatMessage }) {
+const UserMessage = memo(function UserMessage({
+  message,
+  runId,
+}: {
+  message: ChatMessage
+  runId: string
+}) {
   const [expanded, setExpanded] = useState(false)
-  const long = message.content.length > 400
+  const attachments = attachmentPathsIn(message.content)
+  const text = attachments.length ? promptWithoutAttachments(message.content) : message.content
+  const long = text.length > 400
 
   return (
     <div className="chat-user group">
       <div className="chat-user__bubble">
-        <div className={`chat-user__text ${long && !expanded ? 'line-clamp-6' : ''}`}>
-          {message.content}
-        </div>
+        {attachments.length ? (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {attachments.map((path) => (
+              <a
+                key={path}
+                href={`/api/runs/${runId}/attachment?path=${encodeURIComponent(path)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block h-20 w-20 overflow-hidden rounded-lg border border-border"
+              >
+                <img
+                  src={`/api/runs/${runId}/attachment?path=${encodeURIComponent(path)}`}
+                  alt={path.split('/').pop() ?? 'Attachment'}
+                  className="h-full w-full object-cover"
+                />
+              </a>
+            ))}
+          </div>
+        ) : null}
+        <div className={`chat-user__text ${long && !expanded ? 'line-clamp-6' : ''}`}>{text}</div>
         {long ? (
           <button
             type="button"
@@ -512,7 +538,7 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
       </div>
       {/* `.chat-user__meta` owns the side it sits on, so the theme decides. */}
       <div className="chat-user__meta">
-        <MessageMeta createdAt={message.createdAt} content={message.content} />
+        <MessageMeta createdAt={message.createdAt} content={text} />
         <MessageSourceBadge
           provider={message.sourceProvider}
           url={message.sourceUrl}
@@ -773,6 +799,7 @@ export function Composer({
   plugins,
   pluginNote,
   onAppCommand,
+  uploadAttachment,
 }: {
   disabled: boolean
   disabledReason?: string
@@ -815,12 +842,23 @@ export function Composer({
    * shows it as an error under the composer; `/help` never gets here.
    */
   onAppCommand?: (input: { command: SlashCommand; args: string }) => string | undefined
+  /**
+   * Store a dropped/pasted image in the workspace and return its path. Omitted
+   * where no workspace is settled yet, which hides the attachment affordances.
+   */
+  uploadAttachment?: AttachmentUploader
 }) {
   const [value, setValue] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [menuDismissed, setMenuDismissed] = useState(false)
   const [commandError, setCommandError] = useState('')
+  const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const dragDepth = useRef(0)
+  const files = usePendingAttachments(uploadAttachment)
+  // Queueing accepts everything a live send does, attachments included.
+  const blocked = disabled || (running && !canQueue)
+  const canAttach = Boolean(uploadAttachment) && !blocked
 
   useEffect(() => {
     const el = ref.current
@@ -866,9 +904,9 @@ export function Composer({
     ref.current?.focus()
   }
 
-  const submit = () => {
+  const submit = (now = false) => {
     const text = value.trim()
-    if (!text || disabled) return
+    if ((!text && files.paths.length === 0) || disabled) return
 
     // App commands are answered here and never become a turn, so `/model`
     // still lands while a send is in flight.
@@ -888,12 +926,19 @@ export function Composer({
       return
     }
 
-    if (pending || running) return
-    onSend(text)
+    if (pending || (running && !canQueue) || files.uploading) return
+    const prompt = promptWithAttachments(text, files.paths)
+    if (now && onSendNow) onSendNow(prompt)
+    else onSend(prompt)
     setValue('')
+    files.clear()
   }
 
-  const canSend = !disabled && !pending && !running && value.trim().length > 0
+  const canSend =
+    !blocked &&
+    !pending &&
+    !files.uploading &&
+    (value.trim().length > 0 || files.paths.length > 0)
 
   return (
     <div className={`relative ${className ?? 'mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2'}`}>
@@ -913,20 +958,56 @@ export function Composer({
           onPick={pickPlugin}
         />
       ) : null}
-      <div className="chat-composer-shell rounded-[22px] p-px">
+      <div
+        className="chat-composer-shell rounded-[22px] p-px"
+        onDragEnter={(e) => {
+          if (!canAttach || !e.dataTransfer.types.includes('Files')) return
+          dragDepth.current += 1
+          setDragging(true)
+        }}
+        onDragOver={(e) => {
+          if (!canAttach || !e.dataTransfer.types.includes('Files')) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={() => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (dragDepth.current === 0) setDragging(false)
+        }}
+        onDrop={(e) => {
+          if (!canAttach) return
+          e.preventDefault()
+          dragDepth.current = 0
+          setDragging(false)
+          files.addFiles(imageFilesFrom(e.dataTransfer))
+        }}
+      >
         <div
           className={`chat-composer-glass rounded-[20px] border transition-[background-color,border-color] duration-200 focus-within:border-ring/45 ${
             disabled ? 'border-border opacity-75' : 'border-border'
           }`}
         >
           <div aria-hidden="true" className="chat-glass-fill" />
+          {dragging ? (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[20px] border-2 border-dashed border-ring/60 bg-background/80 text-ui-sm text-foreground">
+              Drop images to attach
+            </div>
+          ) : null}
           <div className="relative px-3 pb-2 pt-3 sm:px-3.5 sm:pt-3.5">
+            <AttachmentStrip attachments={files.attachments} onRemove={files.remove} />
             <textarea
               ref={ref}
               rows={1}
               value={value}
-              disabled={disabled || running}
+              disabled={blocked}
               onChange={(e) => setText(e.target.value)}
+              onPaste={(e) => {
+                if (!canAttach) return
+                const images = imageFilesFrom(e.clipboardData)
+                if (images.length === 0) return
+                e.preventDefault()
+                files.addFiles(images)
+              }}
               onKeyDown={(e) => {
                 if (pluginMenuOpen && pluginMatches.length > 0) {
                   if (e.key === 'ArrowDown') {
@@ -981,31 +1062,41 @@ export function Composer({
                 }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  submit()
+                  // ⌘/Ctrl + ↵ while the agent works: interrupt it rather than
+                  // waiting in line behind the turn.
+                  submit(running && (e.metaKey || e.ctrlKey))
                 }
               }}
               placeholder={
-                running
-                  ? (runningLabel ?? 'Agent is working…')
-                  : disabled
-                    ? (disabledReason ?? 'Follow-up unavailable')
-                    : (placeholder ?? 'Ask for follow-up changes…')
+                running && canQueue
+                  ? 'Queue a follow-up…'
+                  : running
+                    ? (runningLabel ?? 'Agent is working…')
+                    : disabled
+                      ? (disabledReason ?? 'Follow-up unavailable')
+                      : (placeholder ?? 'Ask for follow-up changes…')
               }
               className="block max-h-[200px] min-h-[3.25rem] w-full resize-none overflow-y-auto bg-transparent text-[16px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed sm:text-[14px]"
             />
-            {commandError ? (
-              <div className="pt-1 text-ui-xs text-danger">{commandError}</div>
+            {commandError || files.refusal ? (
+              <div className="pt-1 text-ui-xs text-danger">{commandError || files.refusal}</div>
             ) : null}
           </div>
 
           <div className="relative flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
             {leading}
+            {uploadAttachment ? (
+              <AttachmentButton
+                disabled={!canAttach || files.full}
+                onFiles={(picked) => files.addFiles(picked)}
+              />
+            ) : null}
             <ComposerModelControls
               models={models}
               model={model}
               effort={effort}
               runtimeMode={runtimeMode}
-              disabled={pending || running}
+              disabled={pending || blocked}
               supportsSupervised={supportsSupervised}
               onModelChange={onModelChange}
               onEffortChange={onEffortChange}
@@ -1200,6 +1291,7 @@ export function Chat({
   const [pendingRuntimeId, setPendingRuntimeId] = useState<string | null>(null)
   const [dismissSwitchNote, setDismissSwitchNote] = useState(false)
 
+  const uploadAttachment = useMemo(() => attachmentUploader(workspaceId), [workspaceId])
   const queuedMessages = queued ?? []
 
   const runtimeCatalog = useMemo(() => runtimes ?? [], [runtimes])
@@ -1486,7 +1578,7 @@ export function Chat({
                   {message.content}
                 </p>
               ) : message.role === 'user' ? (
-                <UserMessage key={message.id} message={message} />
+                <UserMessage key={message.id} message={message} runId={runId} />
               ) : (
                 <AssistantMessage
                   key={message.id}
@@ -1623,6 +1715,7 @@ export function Chat({
               plugins={pluginListing?.plugins ?? []}
               {...(pluginListing?.note ? { pluginNote: pluginListing.note } : {})}
               onAppCommand={handleAppCommand}
+              {...(uploadAttachment ? { uploadAttachment } : {})}
             />
           </div>
           <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />

@@ -353,6 +353,11 @@ export const restoreWorkspaceFile = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; path: string; content: string }) => d)
   .handler(async ({ data }) => (await core()).restoreWorkspaceFile(data))
 
+/** Upload a composer image; `data` is raw base64 without the data-URL prefix. */
+export const saveAttachment = createServerFn({ method: 'POST' })
+  .validator((d: { workspaceId: string; name: string; mimeType: string; data: string }) => d)
+  .handler(async ({ data }) => (await core()).saveWorkspaceAttachment(data))
+
 export const commitChanges = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; message: string; paths?: string[] }) => d)
   .handler(async ({ data }) => (await core()).commitChanges(data))

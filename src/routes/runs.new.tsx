@@ -28,6 +28,7 @@ import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import { nativeResumeKindFor } from '../lib/nativeSessions'
 import {
+  attachmentUploader,
   useNativeSessions,
   useCreateWorkspace,
   useProjectBranches,
@@ -174,6 +175,8 @@ function NewRun() {
   }, [models, runtimeId])
 
   const workspace = workspaces.find((w) => w.id === workspaceId)
+  const readyWorkspaceId = workspace && isWorkspaceReady(workspace.status) ? workspace.id : undefined
+  const uploadAttachment = useMemo(() => attachmentUploader(readyWorkspaceId), [readyWorkspaceId])
   const blockedReason = !projects?.length
     ? 'Add a project before starting a run.'
     : !workspace
@@ -427,6 +430,7 @@ function NewRun() {
                 remember({ runtimeMode: mode })
               }}
               onSend={send}
+              {...(uploadAttachment ? { uploadAttachment } : {})}
               commands={commands?.commands ?? []}
               {...(commands?.note ? { commandNote: commands.note } : {})}
               plugins={pluginListing?.plugins ?? []}
