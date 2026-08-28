@@ -273,7 +273,9 @@ function AppLayout() {
 function RootDocument({ children }: { children: ReactNode }) {
   const queryClient = useRouter().options.context.queryClient ?? getQueryClient()
   return (
-    <html lang="en" data-theme="dark" className="dark">
+    // The boot scripts below stamp data-chat-theme / data-term-palette on this
+    // element before hydration, so its attributes never match the SSR markup.
+    <html lang="en" data-theme="dark" className="dark" suppressHydrationWarning>
       <head>
         <HeadContent />
         {/* Sets data-chat-theme / data-term-palette before paint so the transcript never flashes. */}
