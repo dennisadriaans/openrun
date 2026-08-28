@@ -6,8 +6,8 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-import { allowRemoteRequest } from './src/lib/loopback'
-import { lanAllowedHosts } from './src/server/mobile/lan'
+import { allowRemoteRequest } from './src/lib/loopback.ts'
+import { lanAllowedHosts } from './src/server/mobile/lan.ts'
 
 /**
  * Open Run assumes one local user on loopback: there is no authentication on
