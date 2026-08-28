@@ -169,6 +169,7 @@ export {
   getProject,
   getWorkspace,
   listLocalDirectories,
+  listLocalPlaces,
   listProjectBranches,
   listProjects,
   listWorkspaces,
@@ -181,6 +182,7 @@ export type { ProjectRow, WorkspaceRow } from './db'
 export type {
   LocalDirEntry,
   LocalDirListing,
+  LocalPlace,
   ProjectWithMeta,
   WorkspaceWithMeta,
 } from './workspaces'

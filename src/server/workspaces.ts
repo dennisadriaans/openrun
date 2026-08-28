@@ -124,8 +124,36 @@ export type LocalDirListing = {
   entries: LocalDirEntry[]
 }
 
+export type LocalPlace = {
+  name: string
+  path: string
+}
+
+/** Common starting points for the folder picker sidebar; missing ones are dropped. */
+export function listLocalPlaces(): LocalPlace[] {
+  const home = os.homedir()
+  const candidates: LocalPlace[] = [
+    { name: 'Home', path: home },
+    { name: 'Desktop', path: path.join(home, 'Desktop') },
+    { name: 'Documents', path: path.join(home, 'Documents') },
+    { name: 'Downloads', path: path.join(home, 'Downloads') },
+    { name: 'Developer', path: path.join(home, 'Developer') },
+    { name: 'Dev', path: path.join(home, 'Dev') },
+    { name: 'Projects', path: path.join(home, 'Projects') },
+    { name: 'Code', path: path.join(home, 'code') },
+    { name: 'src', path: path.join(home, 'src') },
+  ]
+  return candidates.filter((place) => {
+    try {
+      return statSync(place.path).isDirectory()
+    } catch {
+      return false
+    }
+  })
+}
+
 /** Shallow directory listing for the Add Project folder picker. */
-export function listLocalDirectories(dir?: string): LocalDirListing {
+export function listLocalDirectories(dir?: string, showHidden = false): LocalDirListing {
   const home = os.homedir()
   const raw = (dir ?? home).trim() || home
   const expanded =
@@ -139,7 +167,7 @@ export function listLocalDirectories(dir?: string): LocalDirListing {
   const parent = path.dirname(resolved)
   const entries: LocalDirEntry[] = []
   for (const name of readdirSync(resolved)) {
-    if (name.startsWith('.')) continue
+    if (!showHidden && name.startsWith('.')) continue
     const child = path.join(resolved, name)
     try {
       if (!statSync(child).isDirectory()) continue

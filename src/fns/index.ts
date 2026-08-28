@@ -23,6 +23,7 @@ export type { PlanProposal } from '../lib/planProposals'
 
 export type {
   LocalDirEntry,
+  LocalPlace,
   ProjectRow,
   WorkspaceRow,
   ProjectWithMeta,
@@ -381,8 +382,12 @@ export const listProjects = createServerFn({ method: 'GET' }).handler(async () =
 )
 
 export const listLocalDirectories = createServerFn({ method: 'GET' })
-  .validator((d: { dir?: string }) => d)
-  .handler(async ({ data }) => (await core()).listLocalDirectories(data.dir))
+  .validator((d: { dir?: string; showHidden?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).listLocalDirectories(data.dir, data.showHidden))
+
+export const listLocalPlaces = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listLocalPlaces(),
+)
 
 export const createLocalFolder = createServerFn({ method: 'POST' })
   .validator((d: { parent?: string; name: string }) => d)
