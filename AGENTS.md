@@ -148,6 +148,7 @@ Neither hook may open an `EventSource` of its own.
 | --- | --- |
 | Run/turn lifecycle, spawning a CLI, streaming stdout | `server/executor.ts` |
 | Per-CLI differences: headless invocation, session id, resume, model/effort flags | `server/resume.ts`, `lib/models.ts` |
+| Adopting a chat started in the CLI itself | `lib/nativeSessions.ts` + `server/nativeSessions.ts` (find them), `lib/nativeTranscript.ts` + `server/nativeTranscript.ts` (read one in full), `server/nativeImport.ts` (write it into a run), `executor.adoptNativeChat` (adopt without prompting); picker in `components/NativeSessionMenu.tsx` |
 | Continuing a chat on another runtime (Claude ⇄ Codex handoff) | `lib/runtimeSwitch.ts` (the rules), `lib/handoffPrompt.ts` (what the new agent is told), `executor.sendFollowUp` (the switch); picker + one-time note in `components/Chat.tsx` |
 | Which models a picker offers | `server/modelCatalog.ts` (cache + refresh), `lib/modelDiscovery.ts` (per-CLI parsers); `lib/models.ts` is only the fallback seed |
 | Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `lib/models.ts`; stored as `hiddenModels` in `lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |

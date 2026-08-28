@@ -169,7 +169,7 @@ function numberField(obj: Record<string, unknown>, key: string): number | undefi
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
-function parseIsoMs(value: string): number | undefined {
+export function parseIsoMs(value: string): number | undefined {
   if (!value.trim()) return undefined
   const ms = Date.parse(value)
   if (Number.isFinite(ms)) return ms
@@ -217,7 +217,8 @@ export function parseClaudeSessionsIndex(json: unknown): NativeSession[] {
   return out.sort((a, b) => b.modifiedAt - a.modifiedAt)
 }
 
-function userTextFromContent(content: unknown): string {
+/** Plain text out of an Anthropic user message (string or content blocks). */
+export function userTextFromContent(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
@@ -229,7 +230,8 @@ function userTextFromContent(content: unknown): string {
   return parts.join('\n')
 }
 
-function isSkippableUserText(text: string): boolean {
+/** Slash-command echoes and IDE chatter that the CLI stores but never showed. */
+export function isSkippableUserText(text: string): boolean {
   const trimmed = text.trim()
   if (!trimmed) return true
   if (trimmed.startsWith('<command-name>') || trimmed.startsWith('<local-command')) return true

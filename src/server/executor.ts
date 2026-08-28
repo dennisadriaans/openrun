@@ -68,11 +68,11 @@ import { describeEffectiveTurnSettings } from '../lib/runSettingsDebug.ts'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { nativeSessionExists } from './nativeSessions'
+import { importNativeTranscript } from './nativeImport'
 import {
   missingNativeSessionMessage,
   nativeResumeKindFor,
   nativeResumeNotSupportedMessage,
-  resumedNativeChatStub,
 } from '../lib/nativeSessions.ts'
 import { checksForWorkspace, clearCheckPass, runCheckPass } from './checks'
 import {
@@ -404,17 +404,17 @@ export function startRun(input: StartRunInput): string {
     )
   }
 
+  // Adopting a chat brings its history with it where we can read the CLI's
+  // session file; where we cannot, this is still just the provenance note.
   if (resumeSessionId) {
-    db.prepare(
-      `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
-       VALUES (?, ?, 'system', ?, '', '', 'success', NULL, '', ?, ?)`,
-    ).run(
-      randomId('msg'),
+    importNativeTranscript({
       runId,
-      resumedNativeChatStub(resumeKind ?? 'claude', input.resumeSessionLabel ?? ''),
-      now - 1,
-      now - 1,
-    )
+      cwd,
+      kind: resumeKind ?? 'claude',
+      sessionId: resumeSessionId,
+      label: input.resumeSessionLabel ?? '',
+      before: now,
+    })
   }
 
   publishActivityLive({ type: 'run_changed', runId, status: 'running' })
@@ -430,6 +430,84 @@ export function startRun(input: StartRunInput): string {
     unattended: true,
     ...(input.source ? { source: input.source } : {}),
   })
+  return runId
+}
+
+/**
+ * Adopt a saved CLI chat as a run without prompting anything.
+ *
+ * The point is to read: the transcript lands in a finished run so the whole
+ * conversation is browsable in Open Run, and the composer's next message is the
+ * first turn Open Run actually executes (resumed on the same CLI, or handed off
+ * to another one). Runtimes with no transcript reader still get a run — with
+ * the provenance note alone — because resuming them works regardless.
+ */
+export function adoptNativeChat(input: {
+  runtime: RuntimeRow
+  taskName: string
+  workspaceId: string
+  cwd: string
+  sessionId: string
+  sessionLabel: string
+  model?: string
+  effort?: string
+  runtimeMode?: RuntimeMode | string
+}): string {
+  const db = getDb()
+  const runId = randomId('run')
+  const now = Date.now()
+
+  // No child process runs here, so the workspace is read, not locked.
+  const cwd =
+    input.workspaceId.trim().length > 0
+      ? resolveWorkspacePath(input.workspaceId)
+      : input.cwd && input.cwd.trim().length > 0
+        ? input.cwd
+        : process.cwd()
+
+  const sessionId = input.sessionId.trim()
+  const kind = nativeResumeKindFor(input.runtime)
+  if (!sessionId) throw new Error('Pick a saved chat to open')
+  if (!kind) throw new Error(nativeResumeNotSupportedMessage())
+  if (!nativeSessionExists(cwd, kind, sessionId)) {
+    throw new Error(missingNativeSessionMessage(kind))
+  }
+
+  const runtimeMode = parseRuntimeMode(input.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+  db.prepare(
+    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
+     VALUES (@id, NULL, @taskName, @runtimeId, 'chat', 'success', @command, @cwd, @workspaceId, NULL, 0, '', '', @startedAt, @finishedAt, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
+  ).run({
+    id: runId,
+    taskName: input.taskName,
+    runtimeId: input.runtime.id,
+    // Nothing was executed here; the first real command line lands on the
+    // follow-up turn, and the log drawer hides an empty one.
+    command: '',
+    cwd,
+    workspaceId: input.workspaceId ?? '',
+    startedAt: now,
+    finishedAt: now,
+    sessionId,
+    baseBranch: currentBranch(cwd),
+    // The diff a follow-up shows starts here, not at whatever the CLI did.
+    baseSnapshot: captureBaseSnapshot(cwd),
+    model: input.model?.trim() ?? '',
+    effort: input.effort?.trim() ?? '',
+    runtimeMode,
+  })
+
+  const imported = importNativeTranscript({
+    runId,
+    cwd,
+    kind,
+    sessionId,
+    label: input.sessionLabel,
+    before: now,
+  })
+  db.prepare('UPDATE runs SET startedAt = ? WHERE id = ?').run(imported.startedAt, runId)
+
+  publishActivityLive({ type: 'run_changed', runId, status: 'success' })
   return runId
 }
 
