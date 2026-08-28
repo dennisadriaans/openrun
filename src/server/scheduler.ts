@@ -6,7 +6,6 @@
  * Vite HMR reloads during dev and is shared across all server-function calls.
  */
 import cron from 'node-cron'
-import { isValidCron } from '../lib/cron'
 import { nativeResumeKindFor } from '../lib/nativeSessions.ts'
 import { hasTaskPrompt } from '../lib/taskPrompt'
 import { hasWorkspaceId } from '../lib/workspaceRef'
@@ -18,6 +17,7 @@ import { isShuttingDown } from './processControl'
 import { drainAllQueues, enqueueRun } from './runQueue'
 import { checkRuntimeInstalled } from './runtimePath'
 import { getWorkspace } from './workspaces'
+import { isSchedulableCron } from './cronValidation.ts'
 
 type Scheduled = { stop: () => void }
 
@@ -50,7 +50,7 @@ function scheduleTask(task: TaskRow) {
   if (!task.enabled || !task.cron.trim()) return
   // Same rules as upsertTask / TaskForm — never arm an expression we would
   // reject on save (node-cron.validate alone used to diverge silently).
-  if (!isValidCron(task.cron)) return
+  if (!isSchedulableCron(task.cron)) return
   // Same for workspace — a blank workspaceId would spawn in process.cwd().
   if (!hasWorkspaceId(task.workspaceId)) return
   // And never arm against a creating/error/archived worktree (chat already
@@ -134,7 +134,15 @@ export function bootScheduler() {
   const tasks = db
     .prepare("SELECT * FROM tasks WHERE enabled = 1 AND cron != ''")
     .all() as TaskRow[]
-  for (const t of tasks) scheduleTask(t)
+  for (const t of tasks) {
+    try {
+      scheduleTask(t)
+    } catch (err) {
+      // One legacy/broken row must not prevent every later automation from
+      // arming. The task stays visible as unhealthy through TaskWithMeta.
+      console.error(`[scheduler] failed to arm task ${t.id}:`, err)
+    }
+  }
   // A queue left behind by a crash or a restart would otherwise sit untouched
   // until the next cron tick happened to finish a run in that workspace.
   try {

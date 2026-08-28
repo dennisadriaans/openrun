@@ -53,6 +53,19 @@ function remoteAccessGuard(): Plugin {
   }
 }
 
+/** Boot unattended work in dev without waiting for the first browser request. */
+function automationBootstrap(): Plugin {
+  return {
+    name: 'openrun:automation-bootstrap',
+    configureServer(server) {
+      if (DEMO_FLAG.trim()) return
+      void server.ssrLoadModule('/src/server/core.ts').catch((error: unknown) => {
+        server.config.logger.error(`[scheduler] development bootstrap failed: ${String(error)}`)
+      })
+    },
+  }
+}
+
 const config = defineConfig({
   define: {
     'process.env.OPENRUN_DEMO': JSON.stringify(DEMO_FLAG),
@@ -70,6 +83,7 @@ const config = defineConfig({
     : undefined,
   plugins: [
     remoteAccessGuard(),
+    automationBootstrap(),
     devtools(),
     tailwindcss(),
     tanstackStart(),

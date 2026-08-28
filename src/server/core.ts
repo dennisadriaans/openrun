@@ -9,7 +9,7 @@
 import parser from 'cron-parser'
 import { assertArgsTemplate } from '../lib/argsTemplate'
 import { parseChecks } from '../lib/checks'
-import { assertValidCron, isValidCron, normalizeCron } from '../lib/cron'
+import { isValidCron, normalizeCron } from '../lib/cron'
 import { assertRunTimeoutMinutes, resolveRunTimeoutMs } from '../lib/runBudget'
 import { assertTaskPrompt, hasTaskPrompt } from '../lib/taskPrompt'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
@@ -122,6 +122,7 @@ import { collectUsage } from './usage'
 import { parseUsageRange, rangeCutoff, type UsageReport } from '../lib/usage.ts'
 import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
+import { assertSchedulableCron } from './cronValidation.ts'
 
 // Reap any CLI left behind by a previous process *before* arming cron or
 // draining the queue — otherwise a phantom `running` row locks the workspace
@@ -767,7 +768,7 @@ export type TaskInput = {
 
 export function upsertTask(input: TaskInput): TaskWithMeta {
   const cron = normalizeCron(input.cron)
-  assertValidCron(cron)
+  assertSchedulableCron(cron)
   // Automations must target a real worktree — empty workspaceId used to fall
   // through to process.cwd() (the Open Run app) on run.
   const workspaceId = assertWorkspaceId(input.workspaceId)
@@ -936,7 +937,7 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
   // fire — refuse enable so the developer fixes the expression first.
   // Same for a missing CLI: Run now already refuses; enable must too.
   if (enabled) {
-    assertValidCron(task.cron)
+    assertSchedulableCron(task.cron)
     assertWorkspaceId(task.workspaceId)
     const workspace = getWorkspace(task.workspaceId)
     assertWorkspaceReady(workspace?.status)
