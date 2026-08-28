@@ -175,7 +175,8 @@ function NewRun() {
   }, [models, runtimeId])
 
   const workspace = workspaces.find((w) => w.id === workspaceId)
-  const readyWorkspaceId = workspace && isWorkspaceReady(workspace.status) ? workspace.id : undefined
+  const readyWorkspaceId =
+    workspace && isWorkspaceReady(workspace.status) ? workspace.id : undefined
   const uploadAttachment = useMemo(() => attachmentUploader(readyWorkspaceId), [readyWorkspaceId])
   const blockedReason = !projects?.length
     ? 'Add a project before starting a run.'

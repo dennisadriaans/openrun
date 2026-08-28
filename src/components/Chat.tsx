@@ -89,7 +89,11 @@ import {
   usePendingAttachments,
   type AttachmentUploader,
 } from './chat/index'
-import { attachmentPathsIn, promptWithAttachments, promptWithoutAttachments } from '../lib/attachments'
+import {
+  attachmentPathsIn,
+  promptWithAttachments,
+  promptWithoutAttachments,
+} from '../lib/attachments'
 import { activitySteps, latestActivity } from '../lib/turnActivity'
 import { verificationPhase } from '../lib/runPhase'
 import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
@@ -935,10 +939,7 @@ export function Composer({
   }
 
   const canSend =
-    !blocked &&
-    !pending &&
-    !files.uploading &&
-    (value.trim().length > 0 || files.paths.length > 0)
+    !blocked && !pending && !files.uploading && (value.trim().length > 0 || files.paths.length > 0)
 
   return (
     <div className={`relative ${className ?? 'mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2'}`}>
@@ -1119,14 +1120,8 @@ export function Composer({
                 type="button"
                 disabled={!canSend}
                 onClick={() => submit()}
-                aria-label={
-                  pending ? 'Sending' : running ? 'Queue message' : 'Send message'
-                }
-                title={
-                  running
-                    ? 'Queue this message (↵) · ⌘↵ interrupts and sends now'
-                    : undefined
-                }
+                aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
+                title={running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
               >
                 {pending ? (

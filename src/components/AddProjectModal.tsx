@@ -29,8 +29,7 @@ export type AddedProject = {
 type Crumb = { name: string; path: string; home?: boolean }
 
 function crumbsFor(dir: string, home: string): Crumb[] {
-  const rest =
-    dir === home ? '' : dir.startsWith(`${home}/`) ? dir.slice(home.length + 1) : null
+  const rest = dir === home ? '' : dir.startsWith(`${home}/`) ? dir.slice(home.length + 1) : null
   const out: Crumb[] =
     rest === null ? [{ name: '/', path: '/' }] : [{ name: 'Home', path: home, home: true }]
   let acc = rest === null ? '' : home
@@ -182,29 +181,25 @@ export function AddProjectModal({
             />
           ) : (
             <div className="scroll-thin flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-md border border-border bg-[var(--bg-chrome)] px-1.5 py-1">
-              {current
-                ? crumbsFor(current.path, current.home).map((crumb, index) => (
-                    <span key={crumb.path} className="flex shrink-0 items-center">
-                      {index > 0 ? (
-                        <ChevronRight className="h-3 w-3 text-tier-quaternary" />
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => navigate(crumb.path)}
-                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[13px] transition-colors hover:bg-hover ${
-                          crumb.path === current.path
-                            ? 'text-foreground'
-                            : 'text-tier-secondary'
-                        }`}
-                      >
-                        {crumb.home ? <House className="h-3 w-3" /> : null}
-                        <span className="mono">{crumb.name}</span>
-                      </button>
-                    </span>
-                  ))
-                : (
-                    <span className="px-1 text-[13px] text-tier-quaternary">Loading…</span>
-                  )}
+              {current ? (
+                crumbsFor(current.path, current.home).map((crumb, index) => (
+                  <span key={crumb.path} className="flex shrink-0 items-center">
+                    {index > 0 ? <ChevronRight className="h-3 w-3 text-tier-quaternary" /> : null}
+                    <button
+                      type="button"
+                      onClick={() => navigate(crumb.path)}
+                      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[13px] transition-colors hover:bg-hover ${
+                        crumb.path === current.path ? 'text-foreground' : 'text-tier-secondary'
+                      }`}
+                    >
+                      {crumb.home ? <House className="h-3 w-3" /> : null}
+                      <span className="mono">{crumb.name}</span>
+                    </button>
+                  </span>
+                ))
+              ) : (
+                <span className="px-1 text-[13px] text-tier-quaternary">Loading…</span>
+              )}
             </div>
           )}
 
@@ -410,7 +405,6 @@ export function AddProjectModal({
         {[listing.error, createFolder.error, add.error].map((error, index) =>
           error ? (
             <p
-              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length error slots
               key={index}
               className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary"
             >
