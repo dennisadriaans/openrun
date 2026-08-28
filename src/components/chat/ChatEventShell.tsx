@@ -28,6 +28,7 @@ export function ChatEventShell({
   title,
   eyebrow,
   icon: Icon,
+  lead,
   status,
   open,
   onToggle,
@@ -39,6 +40,8 @@ export function ChatEventShell({
   /** Small label above / beside the title (e.g. "MCP", "Skill"). */
   eyebrow?: string
   icon: LucideIcon
+  /** Replaces the lucide icon (live thinking orb, etc.). */
+  lead?: ReactNode
   status?: ToolCallStatus
   open: boolean
   onToggle: () => void
@@ -67,7 +70,7 @@ export function ChatEventShell({
             open ? 'rotate-90' : ''
           }`}
         />
-        <Icon className="chat-event__icon size-3.5 shrink-0 opacity-70" />
+        {lead ?? <Icon className="chat-event__icon size-3.5 shrink-0 opacity-70" />}
         {eyebrow ? <span className="chat-event__eyebrow">{eyebrow}</span> : null}
         <span
           className={`chat-event__title min-w-0 flex-1 truncate ${

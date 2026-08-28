@@ -118,6 +118,7 @@ function workspaceBlocked(ws: WorkspaceBranchSeed): string | null {
   if (ws.status === 'creating') return 'setting up'
   if (ws.status === 'error') return 'setup failed'
   if (ws.status === 'archived') return 'archived'
+  if (ws.activeRunId) return 'run active'
   return null
 }
 

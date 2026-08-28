@@ -9,6 +9,21 @@ export { iconForCallRole, iconForToolKind, eyebrowForCallRole } from './chatEven
 export { ChatMarkdown, type ChatMarkdownProps } from './ChatMarkdown'
 export { EditDiff } from './EditDiff'
 export { SubagentCall } from './SubagentCall'
+export { TerminalOutput } from './TerminalOutput'
 export { WorkingIndicator } from './WorkingIndicator'
+export { ActivityOrb } from './ActivityOrb'
 export { TurnFold } from './TurnFold'
 export { WorkGroup } from './WorkGroup'
+export { ChatThemeProvider, useChatTheme, useChatThemeBehaviour } from './ChatThemeProvider'
+export { ChatDebugMenuItem } from './ChatDebugToggle'
+export { ContextMeter } from './ContextMeter'
+export { QueuedMessages } from './QueuedMessages'
+export { TerminalPaletteMenuItems } from './TerminalPalettePicker'
+export {
+  AttachmentButton,
+  AttachmentStrip,
+  imageFilesFrom,
+  usePendingAttachments,
+  type AttachmentUploader,
+  type PendingAttachment,
+} from './ComposerAttachments'

@@ -7,7 +7,7 @@
  * Expand a row for command output, the edit hunk, or the result.
  */
 import { useState, type ReactNode } from 'react'
-import { Check, ChevronDown, type LucideIcon } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import {
   isSettledToolStatus,
   type ToolCallLocation,
@@ -17,8 +17,11 @@ import {
 import { resolveCallRole, toolCallRoleTitle, type ToolCallRole } from '../../lib/toolCallRole'
 import {
   displayPath,
+  formatToolResult,
+  toolCallFields,
   toolCallView,
   type DisplayPath,
+  type ToolCallField,
   type ToolCallTarget,
   type ToolCallView,
 } from '../../lib/toolCallView'
@@ -26,7 +29,11 @@ import { FileTypeIcon } from '../FileTypeIcon'
 import { ChatEventSection } from './ChatEventShell'
 import { EditDiff } from './EditDiff'
 import { SubagentCall } from './SubagentCall'
+import { TerminalOutput } from './TerminalOutput'
 import { eyebrowForCallRole, iconForCallRole, iconForToolKind } from './chatEventIcons'
+import { ActivityOrb } from './ActivityOrb'
+import { useChatThemeBehaviour } from './ChatThemeProvider'
+import { orbStateForTool } from '../../lib/orbState'
 
 function clip(text: string, maxLines = 16, maxChars = 4000): string {
   const sliced = text.length > maxChars ? `${text.slice(0, maxChars)}\n…` : text
@@ -35,35 +42,48 @@ function clip(text: string, maxLines = 16, maxChars = 4000): string {
   return `${lines.slice(0, maxLines).join('\n')}\n…`
 }
 
-function formatToolInput(input: unknown): string {
-  if (input == null) return ''
-  if (typeof input === 'string') return input
-  try {
-    return JSON.stringify(input, null, 2)
-  } catch {
-    return String(input)
-  }
-}
-
 function isGenericEditResult(result: string): boolean {
   return /has been updated successfully/i.test(result)
 }
 
+/**
+ * Arguments worth showing under the header.
+ *
+ * A tool we have a layout for (a command, a file, a pattern) already says
+ * everything in its header row; a custom or MCP tool has arguments nobody has
+ * seen before, and those are what this renders.
+ */
+function inputFields(view: ToolCallView, input: unknown): ToolCallField[] {
+  if (input == null || view.hunks.length > 0) return []
+  return toolCallFields(input, view.target)
+}
+
 function shouldShowRawInput(view: ToolCallView, input: unknown): boolean {
-  if (input == null) return false
-  if (view.hunks.length > 0) return false
-  if (
-    view.target.type === 'command' ||
-    view.target.type === 'path' ||
-    view.target.type === 'pattern' ||
-    view.target.type === 'url'
-  ) {
-    return false
-  }
-  if (typeof input === 'object' && !Array.isArray(input) && Object.keys(input).length === 0) {
-    return false
-  }
-  return true
+  return inputFields(view, input).length > 0
+}
+
+function FieldRows({ fields }: { fields: ToolCallField[] }) {
+  return (
+    <dl className="grid gap-1">
+      {fields.map((field) =>
+        field.block ? (
+          <div key={field.key} className="min-w-0">
+            <dt className="text-ui-xs text-tier-quaternary">{field.label}</dt>
+            <dd className="mt-0.5">
+              <ResultPre>{field.value}</ResultPre>
+            </dd>
+          </div>
+        ) : (
+          <div key={field.key} className="flex min-w-0 gap-2">
+            <dt className="shrink-0 text-ui-xs text-tier-quaternary">{field.label}</dt>
+            <dd className="min-w-0 flex-1 truncate mono text-[11px] text-tier-secondary">
+              {field.value}
+            </dd>
+          </div>
+        ),
+      )}
+    </dl>
+  )
 }
 
 function PathLabel({ path }: { path: DisplayPath }) {
@@ -115,15 +135,16 @@ function ToolCallGlyph({ role, view }: { role: ToolCallRole; view: ToolCallView 
   if (view.kind !== 'execute' && view.target.type === 'path') {
     return <FileTypeIcon path={view.target.path.path} className="chat-tool__icon size-3.5" />
   }
-  const Icon: LucideIcon = iconForToolKind(view.kind)
+  const Icon = iconForToolKind(view.kind)
   return <Icon className="chat-tool__icon size-3.5 shrink-0" />
 }
 
 function ResultPre({ children }: { children: string }) {
   return (
-    <pre className="chat-tool__pre scroll-thin max-h-48 overflow-auto rounded-lg border border-border bg-chrome/80 p-2.5 mono text-[11px] leading-relaxed text-muted-foreground">
-      {clip(children, 40, 8000)}
-    </pre>
+    <TerminalOutput
+      text={clip(children, 40, 8000)}
+      className="chat-tool__pre scroll-thin max-h-48 overflow-auto rounded-lg border border-border bg-chrome/80 p-2.5 mono text-[11px] leading-relaxed text-muted-foreground"
+    />
   )
 }
 
@@ -166,6 +187,15 @@ function ToolCallBody({
   result,
   status,
   onSelectFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
 }: {
   view: ToolCallView
   role: ToolCallRole
@@ -174,11 +204,19 @@ function ToolCallBody({
   result: string
   status?: ToolCallStatus
   onSelectFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
 }) {
   const running = status !== undefined && !isSettledToolStatus(status)
   const showResult = Boolean(result) && !(view.hunks.length > 0 && isGenericEditResult(result))
-  const showRaw = shouldShowRawInput(view, input)
-  const rawText = showRaw ? formatToolInput(input) : ''
+  const fields = inputFields(view, input)
   const pathTarget = view.target.type === 'path' ? view.target.path.path : undefined
   const extraLocations = pathTarget
     ? view.locations.filter((loc) => loc.path !== pathTarget)
@@ -201,9 +239,10 @@ function ToolCallBody({
           {view.target.command}
         </div>
         {showResult ? (
-          <pre className="scroll-thin max-h-48 overflow-auto p-2.5 mono text-[11px] leading-relaxed text-muted-foreground">
-            {clip(result, 40, 8000)}
-          </pre>
+          <TerminalOutput
+            text={clip(result, 40, 8000)}
+            className="scroll-thin max-h-48 overflow-auto p-2.5 mono text-[11px] leading-relaxed text-muted-foreground"
+          />
         ) : running ? (
           <div className="px-2.5 py-1.5 text-ui-xs text-tier-quaternary">Waiting for result…</div>
         ) : null}
@@ -216,27 +255,36 @@ function ToolCallBody({
         hunks={view.hunks}
         {...(view.target.type === 'path' ? { path: view.target.path.path } : {})}
         {...(onSelectFile ? { onSelectFile } : {})}
+        {...(onUndoFile ? { onUndoFile } : {})}
+        {...(onRedoFile ? { onRedoFile } : {})}
+        {...(undoDisabled ? { undoDisabled } : {})}
+        {...(undoDisabledReason ? { undoDisabledReason } : {})}
+        {...(undoBusyPath ? { undoBusyPath } : {})}
+        {...(redoBusyPath ? { redoBusyPath } : {})}
+        {...(changedPaths ? { changedPaths } : {})}
+        {...(undonePaths ? { undonePaths } : {})}
+        {...(redoablePaths ? { redoablePaths } : {})}
       />,
     )
     if (showResult) {
       sections.push(
         <ChatEventSection key="result" label="Result">
-          <ResultPre>{result}</ResultPre>
+          <ResultPre>{formatToolResult(result)}</ResultPre>
         </ChatEventSection>,
       )
     }
   } else {
-    if (rawText) {
+    if (fields.length > 0) {
       sections.push(
-        <ChatEventSection key="input" label="Input">
-          <ResultPre>{rawText}</ResultPre>
+        <ChatEventSection key="input" label="Arguments">
+          <FieldRows fields={fields} />
         </ChatEventSection>,
       )
     }
     if (showResult) {
       sections.push(
         <ChatEventSection key="result" label={view.kind === 'read' ? 'Contents' : 'Result'}>
-          <ResultPre>{result}</ResultPre>
+          <ResultPre>{formatToolResult(result)}</ResultPre>
         </ChatEventSection>,
       )
     } else if (running) {
@@ -277,6 +325,16 @@ export function ToolCall({
   result,
   locations,
   onSelectFile,
+  onReviewFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
 }: {
   name?: string
   title?: string
@@ -288,8 +346,19 @@ export function ToolCall({
   result: string
   locations?: ToolCallLocation[]
   onSelectFile?: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
 }) {
-  const [open, setOpen] = useState(false)
+  const [picked, setOpen] = useState<boolean | null>(null)
+  const { expandToolKinds } = useChatThemeBehaviour()
   const role = resolveCallRole({ callRole, name, toolInput: input, mcpServer })
   if (role === 'subagent') {
     return (
@@ -311,6 +380,25 @@ export function ToolCall({
     toolInput: input,
     locations,
   })
+  if (role === 'tool' && view.hunks.length > 0) {
+    const openFile = onReviewFile ?? onSelectFile
+    return (
+      <EditDiff
+        hunks={view.hunks}
+        {...(view.target.type === 'path' ? { path: view.target.path.path } : {})}
+        {...(openFile ? { onSelectFile: openFile } : {})}
+        {...(onUndoFile ? { onUndoFile } : {})}
+        {...(onRedoFile ? { onRedoFile } : {})}
+        {...(undoDisabled ? { undoDisabled } : {})}
+        {...(undoDisabledReason ? { undoDisabledReason } : {})}
+        {...(undoBusyPath ? { undoBusyPath } : {})}
+        {...(redoBusyPath ? { redoBusyPath } : {})}
+        {...(changedPaths ? { changedPaths } : {})}
+        {...(undonePaths ? { undonePaths } : {})}
+        {...(redoablePaths ? { redoablePaths } : {})}
+      />
+    )
+  }
   const eyebrow = eyebrowForCallRole(role)
   const settled = status === undefined ? true : isSettledToolStatus(status)
   const failed = status === 'failed'
@@ -327,6 +415,9 @@ export function ToolCall({
     Boolean(mcpServer) ||
     running ||
     (locations && locations.length > 0)
+  // Until the reader clicks, the theme decides: a CLI theme prints shell output
+  // under the row the way `claude` does, but never unrolls a file read.
+  const open = picked ?? expandToolKinds.includes(view.kind)
 
   const pathTarget = view.target.type === 'path' ? view.target.path : undefined
   const headerTarget = roleTitle ? (
@@ -386,9 +477,10 @@ export function ToolCall({
           />
         ) : null}
         {running ? (
-          <span
-            className="live-dot h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
-            aria-label={status === 'pending' ? 'pending' : 'running'}
+          <ActivityOrb
+            state={orbStateForTool({ toolKind: view.kind, callRole: role })}
+            live
+            label={status === 'pending' ? 'pending' : 'running'}
           />
         ) : failed ? (
           <span className="shrink-0 text-ui-xs text-danger">failed</span>
@@ -405,6 +497,15 @@ export function ToolCall({
           result={result}
           status={status}
           onSelectFile={onSelectFile}
+          onUndoFile={onUndoFile}
+          onRedoFile={onRedoFile}
+          undoDisabled={undoDisabled}
+          undoDisabledReason={undoDisabledReason}
+          undoBusyPath={undoBusyPath}
+          redoBusyPath={redoBusyPath}
+          changedPaths={changedPaths}
+          undonePaths={undonePaths}
+          redoablePaths={redoablePaths}
         />
       ) : null}
     </div>

@@ -1,27 +1,39 @@
 /**
- * Start instance — global request middleware.
- *
- * This is the single choke point in front of *every* server function and API
- * route. Open Run spawns coding-agent CLIs with the user's own credentials, so
- * "who may call this" is one decision for the whole surface, not seventy-one
- * individual ones: a new server function in `fns/index.ts` is covered the
- * moment it is written, with nothing to remember.
- *
- * The rules live in `lib/serverAccess.ts` (browser-safe, tested); the values
- * and the enforcement live in `server/accessToken.ts`. That module is imported
- * **lazily inside `.server()`** for the same reason `fns/index.ts` does it —
- * a static import would drag `better-sqlite3` and `node:fs` into the client
- * bundle and break the build.
+ * Start instance: the single choke point in front of every server function and API route.
+ * Rules in `lib/serverAccess.ts`; values and enforcement in `server/accessToken.ts`, imported
+ * lazily inside `.server()` so `better-sqlite3` and `node:fs` stay out of the client bundle.
  */
 import { createCsrfMiddleware, createMiddleware, createStart } from '@tanstack/react-start'
 
-/**
- * Server functions are same-origin RPC, so a cross-site page must not be able
- * to drive them with the browser's ambient credentials. API routes are exempt
- * because the signed webhook / mobile surfaces authenticate themselves
- * (see `pathAuthenticatesItself()` and the mobile bearer token).
- */
+// Server functions are same-origin RPC, so a cross-site page must not drive them with ambient
+// credentials. API routes are exempt: the mobile surface carries its own bearer token.
 const csrfGuard = createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === 'serverFn' })
+
+const ABORT_CODES = new Set(['ECONNRESET', 'ECONNABORTED', 'ERR_STREAM_PREMATURE_CLOSE'])
+
+function isClientAbort(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 5; depth++) {
+    if (e instanceof Error) {
+      if (e.name === 'AbortError') return true
+      const code = (e as NodeJS.ErrnoException).code
+      if (code && ABORT_CODES.has(code)) return true
+      e = e.cause
+    } else break
+  }
+  return false
+}
+
+// Reloading a page or closing an SSE tab tears the socket down mid-response.
+// Nothing is left to write to, but h3 still treats the abort as an unhandled
+// 500 and logs a stack, so swallow it here instead.
+const abortGuard = createMiddleware({ type: 'request' }).server(async ({ next }) => {
+  try {
+    return await next()
+  } catch (error) {
+    if (!isClientAbort(error)) throw error
+    return new Response(null, { status: 499 })
+  }
+})
 
 const accessGuard = createMiddleware({ type: 'request' }).server(async ({ request, next }) => {
   const { accessDecision, withAccessCookie } = await import('./server/accessToken.ts')
@@ -38,5 +50,5 @@ const accessGuard = createMiddleware({ type: 'request' }).server(async ({ reques
 })
 
 export const startInstance = createStart(() => ({
-  requestMiddleware: [csrfGuard, accessGuard],
+  requestMiddleware: [abortGuard, csrfGuard, accessGuard],
 }))

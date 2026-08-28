@@ -72,15 +72,15 @@ to. There is no bug bounty.
 - Escaping the workspace path boundary in `src/server/files.ts` — reading or
   writing outside the run's working directory via traversal, absolute paths or
   symlinks.
-- Forging a webhook so that an unauthenticated request starts a run
-  (`src/server/integrations/`, HMAC verification in `crypto.ts`).
+- Getting a forged event onto the cloud relay so that it starts a run
+  (`src/server/cloud/relay.ts`, `src/server/integrations/dispatcher.ts`).
 - Bypassing a supervised-mode approval (`src/lib/approvals.ts`,
   `src/lib/supervisedPolicy.ts`) so a tool call executes without the decision it
   required.
 - Argument injection into a spawned CLI via a runtime args template, prompt, or
   workspace name that escapes the intended argv.
-- Leaking stored secrets (webhook secrets) to the client bundle,
-  to logs, or to a notification payload.
+- Leaking stored secrets (cloud session tokens, device tokens) to the client
+  bundle, to logs, or to a notification payload.
 - Any path that lets a *remote, unauthenticated* request cause code execution.
 
 ## Out of scope
@@ -94,10 +94,12 @@ with a pointer here.
 - **`--dangerously-skip-permissions` being available.** It is opt-in per runtime,
   surfaced in the command preview, and requires acknowledgement before a schedule
   is armed. Its existence is a documented product decision.
-- **Secrets at rest in the local database.** Webhook secrets are stored
-  unencrypted in `~/.openrun` / `data/openrun.db`, protected by file
-  permissions (`0600`) and nothing else. Disk encryption is your operating
-  system's job. Encryption-at-rest is on the roadmap; see
+- **Secrets at rest in the local database.** Device pairing tokens and
+  machine bearers are stored as SHA-256. MCP OAuth tokens, notification
+  webhook URLs, and APNs tokens are AES-GCM sealed under `~/.openrun/data-key`,
+  which is not in the database file. A copy of `openrun.db` alone is not a
+  working credential. Anyone with your OS user can still read the key file;
+  disk encryption is the operating system's job. See
   [the known-gaps list](https://openrun.sh/docs/security#known-gaps).
 - **Anyone with a local shell account can control Open Run.** The trust boundary
   is the machine, not the user account.
@@ -105,7 +107,7 @@ with a pointer here.
   reachable. Setting `OPENRUN_HOST` to a non-loopback address is an explicit,
   warned-about choice.
 - Vulnerabilities in the agent CLIs themselves (`claude`, `codex`, `grok`,
-  `gemini`) — report those to their vendors.
+  `gemini`, `fx`) — report those to their vendors.
 - Denial of service by running a very large number of automations locally.
 - Missing security headers on a loopback-only development server.
 

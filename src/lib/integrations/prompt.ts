@@ -4,10 +4,51 @@
  * Templates may use {{dot.path}} placeholders. When the saved prompt has no
  * placeholders, a structured context block is appended so the agent still sees
  * the issue natively.
+ *
+ * The ticket URL is the one field that never reaches the agent. A bare link in
+ * the prompt reads as "go open this", so agents stall on fetching it instead of
+ * using the body two lines below. `webhookSourceLink` hands it to the UI
+ * instead, where it renders as a badge on the message a human can click.
  */
-import type { CanonicalWebhookEvent } from './types.ts'
+import type { CanonicalWebhookEvent, IntegrationProviderId } from './types.ts'
 
 const PLACEHOLDER_RE = /\{\{\s*([\w.]+)\s*\}\}/g
+
+export type WebhookSourceLink = {
+  provider: IntegrationProviderId
+  url: string
+  /** What the badge says next to the mark — the issue key when there is one. */
+  label: string
+}
+
+/** The clickable origin of this event, or null when the provider sent no URL. */
+export function webhookSourceLink(event: CanonicalWebhookEvent): WebhookSourceLink | null {
+  if (!event.issue.url) return null
+  return {
+    provider: event.provider,
+    url: event.issue.url,
+    label: event.issue.key || event.issue.title,
+  }
+}
+
+/**
+ * Drop the ticket URL from a rendered prompt. A line that held nothing but the
+ * link goes with it, so the template's blank-line rhythm survives.
+ */
+function stripSourceUrl(text: string, url: string): string {
+  if (!url || !text.includes(url)) return text
+  const kept: string[] = []
+  for (const line of text.split('\n')) {
+    if (!line.includes(url)) {
+      kept.push(line)
+      continue
+    }
+    const without = line.replaceAll(url, '').replace(/[ \t]{2,}/g, ' ')
+    if (without.trim() === '') continue
+    kept.push(without.trimEnd())
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n')
+}
 
 function lookup(event: CanonicalWebhookEvent, path: string): string {
   const parts = path.split('.')
@@ -51,11 +92,12 @@ export function promptHasPlaceholders(prompt: string): boolean {
 }
 
 export function renderWebhookPrompt(prompt: string, event: CanonicalWebhookEvent): string {
-  const base = prompt.replace(PLACEHOLDER_RE, (_m, path: string) => lookup(event, path))
-  if (promptHasPlaceholders(prompt)) return base.trimEnd()
+  const rendered = prompt.replace(PLACEHOLDER_RE, (_m, path: string) => lookup(event, path))
+  const base = stripSourceUrl(rendered, event.issue.url).trimEnd()
+  if (promptHasPlaceholders(prompt)) return base
 
   const lines = [
-    base.trimEnd(),
+    base,
     '',
     '---',
     'Incoming webhook context',
@@ -63,7 +105,6 @@ export function renderWebhookPrompt(prompt: string, event: CanonicalWebhookEvent
     `Event: ${event.eventType}`,
     event.issue.key ? `Issue: ${event.issue.key}` : null,
     event.issue.title ? `Title: ${event.issue.title}` : null,
-    event.issue.url ? `URL: ${event.issue.url}` : null,
     event.issue.status ? `Status: ${event.issue.status}` : null,
     event.issue.previousStatus ? `Previous status: ${event.issue.previousStatus}` : null,
     event.issue.labels.length ? `Labels: ${event.issue.labels.join(', ')}` : null,

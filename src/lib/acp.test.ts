@@ -5,6 +5,8 @@ import {
   isToolCallStatus,
   isToolKind,
   toolCallTitle,
+  resolveToolKind,
+  isWebToolInput,
   toolKindFromName,
 } from './acp.ts'
 
@@ -28,6 +30,27 @@ describe('toolKindFromName', () => {
     assert.equal(toolKindFromName('Glob'), 'search')
     assert.equal(toolKindFromName('WebFetch'), 'fetch')
     assert.equal(toolKindFromName('web_search'), 'fetch')
+    assert.equal(toolKindFromName('web_fetch'), 'fetch')
+  })
+
+  it('resolveToolKind prefers web fetch over a search kind from the agent', () => {
+    assert.equal(resolveToolKind('web_search', 'search'), 'fetch')
+    assert.equal(resolveToolKind('WebFetch', 'search'), 'fetch')
+    assert.equal(resolveToolKind('Search', 'search', { query: 'openrun' }), 'fetch')
+    assert.equal(resolveToolKind('Search', 'search', undefined, 'Search the web'), 'fetch')
+    assert.equal(resolveToolKind('Grep', 'search'), 'search')
+    assert.equal(resolveToolKind('bash', 'execute'), 'execute')
+  })
+
+  it('isWebToolInput distinguishes web query from repo search', () => {
+    assert.equal(isWebToolInput('Search', { query: 'openrun' }), true)
+    assert.equal(isWebToolInput('Grep', { pattern: 'foo' }), false)
+    assert.equal(isWebToolInput('Grep', { query: 'foo' }), false)
+    assert.equal(isWebToolInput('list_dir', { target_directory: '.' }), false)
+    assert.equal(
+      isWebToolInput('codebase_search', { query: 'auth', target_directories: ['src'] }),
+      false,
+    )
   })
 
   it('maps Skill / Task / Agent to think', () => {

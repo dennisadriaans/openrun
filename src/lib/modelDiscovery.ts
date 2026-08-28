@@ -32,6 +32,7 @@ const EFFORT_LABELS: Record<string, string> = {
   high: 'High',
   xhigh: 'Extra High',
   max: 'Max',
+  ultra: 'Ultra',
 }
 
 /** Prompt-injected pseudo-effort we add on top of whatever the CLI reports. */
@@ -60,6 +61,8 @@ function shortNames(names: string[]): string[] {
 
 function effortOptions(m: DiscoveredModel, kind: RuntimeModelKind): EffortOption[] {
   if (m.efforts.length === 0) {
+    // The CLI rejects --effort here, so Ultrathink is the only knob — and it
+    // rewrites the prompt, so it must be opt-in rather than the default.
     return kind === 'claude' ? [ULTRATHINK] : []
   }
   const out: EffortOption[] = m.efforts.map((value) => ({
@@ -233,4 +236,105 @@ export function parseGrokModelsOutput(text: string): DiscoveredModel[] {
 
 function grokDisplayName(slug: string): string {
   return slug.replace(/^grok-/, 'Grok ')
+}
+
+// --- fx (`fx models --json`) -----------------------------------------------
+
+/**
+ * `fx models --json` prints one object:
+ * `{ "kind":"models", "ids":["zai/glm-5.2-fast", ...] }`.
+ * Failures are `{ "kind":"models", "error":"..." }` with no `ids`.
+ */
+export function parseFxModelsOutput(text: string): DiscoveredModel[] {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) return []
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const ids = obj.ids
+  if (!Array.isArray(ids)) return []
+  const out: DiscoveredModel[] = []
+  for (let i = 0; i < ids.length; i++) {
+    const slug = typeof ids[i] === 'string' ? ids[i].trim() : ''
+    if (!slug || slug.includes(' ')) continue
+    out.push({
+      slug,
+      name: fxDisplayName(slug),
+      efforts: [],
+      defaultEffort: '',
+      rank: ids.length - i,
+    })
+  }
+  return out
+}
+
+function fxDisplayName(slug: string): string {
+  const local = slug.split('/').pop() ?? slug
+  return local
+    .replace(/glm/gi, 'GLM')
+    .replace(/gpt/gi, 'GPT')
+    .split('-')
+    .map((part) => {
+      if (!part) return part
+      if (/^[A-Z0-9.]+$/.test(part)) return part
+      return part.charAt(0).toUpperCase() + part.slice(1)
+    })
+    .join(' ')
+}
+
+// --- Codex (`~/.codex/models_cache.json`) ----------------------------------
+
+/**
+ * Codex has no `models` subcommand, but the CLI refreshes the account's model
+ * list into `models_cache.json` under `CODEX_HOME`, so we read that file:
+ * `{ "models": [{ "slug", "display_name", "visibility", "priority",
+ * "default_reasoning_level", "supported_reasoning_levels": [{ "effort" }] }] }`.
+ *
+ * `visibility: "hide"` entries are internal (auto-review, reserve capacity) and
+ * are not selectable, so they stay out of the picker. `priority` counts up from
+ * the best model, the opposite of our rank.
+ */
+export function parseCodexModelsCache(text: string): DiscoveredModel[] {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) return []
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  const models = obj.models
+  if (!Array.isArray(models)) return []
+  const out: DiscoveredModel[] = []
+  for (const raw of models) {
+    if (!raw || typeof raw !== 'object') continue
+    const m = raw as Record<string, unknown>
+    const slug = typeof m.slug === 'string' ? m.slug.trim() : ''
+    if (!slug || slug.includes(' ')) continue
+    if (typeof m.visibility === 'string' && m.visibility !== 'list') continue
+    const levels = Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : []
+    const efforts: string[] = []
+    for (const level of levels) {
+      const value =
+        typeof level === 'string'
+          ? level
+          : level && typeof level === 'object'
+            ? ((level as Record<string, unknown>).effort as string | undefined)
+            : undefined
+      if (typeof value === 'string' && value.trim()) efforts.push(value.trim())
+    }
+    const priority = typeof m.priority === 'number' ? m.priority : 0
+    out.push({
+      slug,
+      name: typeof m.display_name === 'string' && m.display_name.trim() ? m.display_name : slug,
+      efforts,
+      defaultEffort:
+        typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : 'medium',
+      rank: -priority,
+    })
+  }
+  return out
 }

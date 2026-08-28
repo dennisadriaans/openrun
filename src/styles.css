@@ -236,6 +236,17 @@
   }
 }
 
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-150%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 html,
 body,
 #app {
@@ -301,31 +312,48 @@ body {
   }
 }
 
-.chat-composer-glass {
-  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
+.chat-composer-shell {
   box-shadow:
     0 18px 48px -20px rgb(0 0 0 / 60%),
     0 4px 14px -7px rgb(0 0 0 / 40%);
 }
 
+.chat-composer-glass {
+  position: relative;
+  isolation: isolate;
+}
+
+.chat-files-glass {
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.chat-files-glass,
+.chat-glass-fill {
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--bg-elevated) 52%, transparent);
+}
+
+.chat-glass-fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .chat-composer-lower-chrome {
   margin-top: -1px;
   padding-top: 1px;
-  background: color-mix(in srgb, var(--bg-chrome) 45%, transparent);
-}
-
-.chat-composer-shared-blur {
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: var(--bg-chrome);
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .chat-composer-glass {
+  .chat-files-glass,
+  .chat-glass-fill {
     background: var(--bg-elevated);
-  }
-
-  .chat-composer-lower-chrome {
-    background: var(--bg-chrome);
   }
 }
 
@@ -335,6 +363,10 @@ body {
  * Fine-tune every detail here — components under `components/chat/` only set
  * `data-chat-event` + these class names. Change accents, gaps, radii, or
  * header chrome per role without touching React.
+ *
+ * These are also the theme surface: `[data-chat-theme='…']` further down
+ * redefines them, and `lib/chatTheme.ts` owns the ids. Anything a theme should
+ * be able to change belongs here as a token, not as a class in a component.
  */
 :root {
   --chat-event-gap-y: 0.375rem;
@@ -354,6 +386,10 @@ body {
   --chat-event-approval-accent: #ebcb8b;
   --chat-event-error-accent: var(--dashboard-text-error-prominent, #e06c75);
 
+  --chat-eyebrow-bg: color-mix(in oklab, var(--chat-event-accent) 18%, transparent);
+  --chat-eyebrow-pad: 0.05rem 0.35rem;
+  --chat-eyebrow-radius: 0.25rem;
+
   --chat-tool-gap-y: 0.125rem;
   --chat-tool-header-pad-x: 0.375rem;
   --chat-tool-header-pad-y: 0.125rem;
@@ -361,8 +397,37 @@ body {
   --chat-tool-execute: var(--cyan);
   --chat-tool-edit: var(--modified);
   --chat-tool-search: var(--purple);
-  --chat-tool-fetch: var(--blue);
   --chat-tool-delete: var(--removed);
+
+  /* Row markers. A CLI prints `● Bash(…)` / `⎿ output`; the default theme uses
+     lucide icons instead, so both are token-gated rather than conditional JSX. */
+  --chat-tool-icon-display: inline-block;
+  --chat-tool-marker: '';
+  --chat-tool-marker-display: none;
+  --chat-tool-body-marker: '';
+  --chat-tool-body-marker-display: none;
+  --chat-tool-body-guide: 1px solid var(--border-secondary);
+  --chat-tool-body-indent: 0.75rem;
+  --chat-tool-body-offset: 0.9375rem;
+
+  /* Assistant prose font — `inherit` keeps the app's sans stack. */
+  --chat-prose-font-family: inherit;
+
+  /* The user's own message: a bubble by default, a prompt line in a CLI theme. */
+  --chat-user-align: flex-end;
+  --chat-user-width: 80%;
+  --chat-user-radius: 0.625rem;
+  --chat-user-border: 1px solid var(--border-tertiary);
+  --chat-user-bg: var(--bg-luminous-quaternary);
+  --chat-user-pad: 0.5rem 0.75rem;
+  --chat-user-color: var(--text-primary);
+  --chat-user-font-family: inherit;
+  --chat-user-font-size: 0.875rem;
+  --chat-user-leading: 1.625;
+  --chat-user-prefix: '';
+  --chat-user-prefix-display: none;
+  --chat-user-prefix-color: var(--text-quaternary);
+  --chat-user-meta-justify: flex-end;
 }
 
 .chat-event {
@@ -420,14 +485,14 @@ body {
 
 .chat-event__eyebrow {
   flex-shrink: 0;
-  border-radius: 0.25rem;
-  padding: 0.05rem 0.35rem;
+  border-radius: var(--chat-eyebrow-radius);
+  padding: var(--chat-eyebrow-pad);
   font-size: var(--chat-event-eyebrow-size);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--chat-event-accent);
-  background: color-mix(in oklab, var(--chat-event-accent) 18%, transparent);
+  background: var(--chat-eyebrow-bg);
 }
 
 .chat-event__icon {
@@ -459,6 +524,23 @@ body {
 
 .chat-tool {
   margin-block: var(--chat-tool-gap-y);
+}
+
+.chat-tool__header::before {
+  content: var(--chat-tool-marker);
+  display: var(--chat-tool-marker-display);
+  flex-shrink: 0;
+  line-height: 1.2;
+  color: var(--chat-event-accent);
+}
+
+.chat-tool[data-status='pending'] .chat-tool__header::before,
+.chat-tool[data-status='in_progress'] .chat-tool__header::before {
+  color: var(--warn);
+}
+
+.chat-tool[data-status='failed'] .chat-tool__header::before {
+  color: var(--chat-event-error-accent);
 }
 
 .chat-tool__header {
@@ -499,6 +581,10 @@ body {
   color: var(--chat-event-error-accent);
 }
 
+.chat-tool__icon {
+  display: var(--chat-tool-icon-display);
+}
+
 .chat-tool[data-tool-kind='execute'] .chat-tool__icon {
   color: var(--chat-tool-execute);
 }
@@ -508,21 +594,72 @@ body {
 .chat-tool[data-tool-kind='search'] .chat-tool__icon {
   color: var(--chat-tool-search);
 }
-.chat-tool[data-tool-kind='fetch'] .chat-tool__icon {
-  color: var(--chat-tool-fetch);
-}
 .chat-tool[data-tool-kind='delete'] .chat-tool__icon {
   color: var(--chat-tool-delete);
 }
 
 .chat-tool__body {
+  position: relative;
   margin-top: 0.25rem;
-  margin-left: 0.9375rem;
-  padding-left: 0.75rem;
-  border-left: 1px solid var(--border-secondary);
+  margin-left: var(--chat-tool-body-offset);
+  padding-left: var(--chat-tool-body-indent);
+  border-left: var(--chat-tool-body-guide);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.chat-tool__body::before {
+  content: var(--chat-tool-body-marker);
+  display: var(--chat-tool-body-marker-display);
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--text-quaternary);
+}
+
+/*
+ * The user's own turn. Shape lives entirely in tokens: the default theme draws
+ * a right-aligned bubble, a CLI theme flattens it to a full-width prompt line.
+ */
+.chat-user {
+  display: flex;
+  flex-direction: column;
+  align-items: var(--chat-user-align);
+  gap: 0.25rem;
+}
+
+.chat-user__bubble {
+  position: relative;
+  max-width: var(--chat-user-width);
+  border: var(--chat-user-border);
+  border-radius: var(--chat-user-radius);
+  background: var(--chat-user-bg);
+  padding: var(--chat-user-pad);
+}
+
+.chat-user__text {
+  white-space: pre-wrap;
+  font-family: var(--chat-user-font-family);
+  font-size: var(--chat-user-font-size);
+  line-height: var(--chat-user-leading);
+  color: var(--chat-user-color);
+}
+
+.chat-user__text::before {
+  content: var(--chat-user-prefix);
+  display: var(--chat-user-prefix-display);
+  color: var(--chat-user-prefix-color);
+}
+
+.chat-user__meta {
+  display: flex;
+  width: 100%;
+  max-width: var(--chat-user-width);
+  align-items: center;
+  justify-content: var(--chat-user-meta-justify);
+  gap: 0.375rem;
+  padding-inline-end: 0.25rem;
 }
 
 .chat-subagent__header {
@@ -568,6 +705,7 @@ body {
 }
 
 .chat-markdown {
+  font-family: var(--chat-prose-font-family);
   font-size: var(--chat-markdown-size);
   line-height: var(--chat-markdown-leading);
   color: var(--text-primary);
@@ -671,12 +809,10 @@ body {
 }
 
 .chat-markdown :not(pre) > code {
-  border-radius: 0.25rem;
-  background: var(--bg-luminous-quaternary);
-  padding: 0.1em 0.3em;
+  padding: 0;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.9em;
-  color: var(--text-primary);
+  color: color-mix(in oklab, var(--syntax-string) 48%, var(--text-primary));
 }
 
 .chat-markdown strong {
@@ -764,8 +900,429 @@ body {
   word-break: break-word;
 }
 
+/*
+ * Terminal output palette — the 16 ANSI slots, tuned for the dark chrome the
+ * transcript sits on rather than lifted from a terminal emulator preset.
+ *
+ * Every regular slot is one OKLCH lightness (0.745) at low chroma, so no hue
+ * reads louder than its neighbours, and each clears 7:1 against `--chrome` —
+ * AAA for body text. Bright slots keep the hue and step to L 0.855 with the
+ * chroma eased back: they are a highlight of the same color, not a second
+ * palette. `black` is the one slot that cannot meet that bar and is never used
+ * for prose — `bright-black` (4.7:1) is what dim chrome paints with.
+ *
+ * Distinguishability, not just contrast, sets the hues: cyan sits at 196° so
+ * it does not collapse into blue at this chroma.
+ */
+:root {
+  --term-ansi-black: #4e5359;
+  --term-ansi-red: #e7918e;
+  --term-ansi-green: #86bd87;
+  --term-ansi-yellow: #c9a85f;
+  --term-ansi-blue: #7db0ea;
+  --term-ansi-magenta: #cf97c9;
+  --term-ansi-cyan: #59bfc0;
+  --term-ansi-white: #ccd0d5;
+
+  --term-ansi-bright-black: #7d8289;
+  --term-ansi-bright-red: #fdbdb9;
+  --term-ansi-bright-green: #afdeaf;
+  --term-ansi-bright-yellow: #e9cc8f;
+  --term-ansi-bright-blue: #afd3fd;
+  --term-ansi-bright-magenta: #eebde9;
+  --term-ansi-bright-cyan: #8de0e1;
+  --term-ansi-bright-white: #eef0f3;
+}
+
+/*
+ * Terminal — the transcript the way `claude` and `codex exec` print it, for
+ * people arriving from those CLIs: mono throughout, no bubble, `●` and `⎿`
+ * markers instead of icons and cards, and work shown inline rather than folded.
+ *
+ * Ids and the non-CSS half (what starts expanded) live in `lib/chatTheme.ts`.
+ * Everything below is a token override — no rule here selects a component.
+ */
+[data-chat-theme='terminal'] {
+  --chat-prose-font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+  --chat-markdown-size: 0.75rem;
+  --chat-markdown-leading: 1.55;
+  --chat-markdown-block-gap: 0.5rem;
+
+  --chat-user-align: stretch;
+  --chat-user-width: 100%;
+  --chat-user-radius: 0;
+  --chat-user-border: none;
+  --chat-user-bg: transparent;
+  --chat-user-pad: 0.125rem 0;
+  --chat-user-color: var(--text-secondary);
+  --chat-user-font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+  --chat-user-font-size: 0.75rem;
+  --chat-user-leading: 1.55;
+  --chat-user-prefix: '> ';
+  --chat-user-prefix-display: inline;
+  --chat-user-prefix-color: var(--accent);
+  --chat-user-meta-justify: flex-start;
+
+  --chat-event-radius: 0.25rem;
+  --chat-event-gap-y: 0;
+  --chat-event-header-pad-x: 0;
+  --chat-event-body-pad-left: 1.25rem;
+  --chat-event-font-size: 0.75rem;
+
+  --chat-eyebrow-bg: transparent;
+  --chat-eyebrow-pad: 0;
+
+  --chat-tool-gap-y: 0;
+  --chat-tool-header-pad-x: 0;
+  --chat-tool-icon-display: none;
+  --chat-tool-marker: '●';
+  --chat-tool-marker-display: inline-block;
+  --chat-tool-body-marker: '⎿';
+  --chat-tool-body-marker-display: block;
+  --chat-tool-body-guide: none;
+  --chat-tool-body-indent: 1.25rem;
+  --chat-tool-body-offset: 0;
+
+  /* ANSI-ish accents rather than the app's nord-leaning role colors. */
+  --chat-event-mcp-accent: var(--cyan);
+  --chat-event-skill-accent: var(--magenta);
+  --chat-event-subagent-accent: var(--green);
+  --chat-event-approval-accent: var(--yellow);
+
+  /*
+   * Command output prints in color, the way it would in a real terminal: the
+   * ANSI slots map straight through, and the heuristic roles borrow from the
+   * same 16 so a guessed error and a program-declared one are the same red.
+   */
+  --term-black: var(--term-ansi-black);
+  --term-red: var(--term-ansi-red);
+  --term-green: var(--term-ansi-green);
+  --term-yellow: var(--term-ansi-yellow);
+  --term-blue: var(--term-ansi-blue);
+  --term-magenta: var(--term-ansi-magenta);
+  --term-cyan: var(--term-ansi-cyan);
+  --term-white: var(--term-ansi-white);
+
+  --term-bright-black: var(--term-ansi-bright-black);
+  --term-bright-red: var(--term-ansi-bright-red);
+  --term-bright-green: var(--term-ansi-bright-green);
+  --term-bright-yellow: var(--term-ansi-bright-yellow);
+  --term-bright-blue: var(--term-ansi-bright-blue);
+  --term-bright-magenta: var(--term-ansi-bright-magenta);
+  --term-bright-cyan: var(--term-ansi-bright-cyan);
+  --term-bright-white: var(--term-ansi-bright-white);
+
+  --term-error: var(--term-ansi-red);
+  --term-warn: var(--term-ansi-yellow);
+  --term-ok: var(--term-ansi-green);
+  --term-add: var(--term-ansi-green);
+  --term-del: var(--term-ansi-red);
+  --term-meta: var(--term-ansi-bright-black);
+  --term-link: var(--term-ansi-blue);
+  --term-path: var(--term-ansi-cyan);
+  --term-str: var(--term-ansi-green);
+  --term-num: var(--term-ansi-magenta);
+  --term-const: var(--term-ansi-yellow);
+  --term-flag: var(--term-ansi-cyan);
+  --term-key: var(--term-ansi-blue);
+}
+
 .animate-status-pulse {
   animation: var(--animate-status-pulse);
+}
+
+
+/*
+ * Paint is opt-in: each class falls back to `currentColor`, so a theme that
+ * has not mapped the slots prints output exactly as it did before. Emphasis is
+ * the program's own and applies everywhere — it is what a reader with a color
+ * vision deficiency has left when the hue does not land.
+ */
+
+/*
+ * Terminal palettes. Each is the scheme's own 16 slots verbatim, plus the
+ * background and foreground it was drawn against — output is painted on the
+ * scheme's own ground, which is the only way its contrast comes out as its
+ * author intended. Values from the iTerm2-Color-Schemes corpus.
+ *
+ * Scoped to the debug transcript on purpose: a palette must not repaint the
+ * ordinary chat UI, and the extra attribute is what outranks the theme block
+ * above.
+ */
+[data-chat-theme='terminal'][data-term-palette='nord'] {
+  /* Nord */
+  --term-bg: #2e3440;
+  --term-fg: #d8dee9;
+
+  --term-ansi-black: #3b4252;
+  --term-ansi-red: #bf616a;
+  --term-ansi-green: #a3be8c;
+  --term-ansi-yellow: #ebcb8b;
+  --term-ansi-blue: #81a1c1;
+  --term-ansi-magenta: #b48ead;
+  --term-ansi-cyan: #88c0d0;
+  --term-ansi-white: #e5e9f0;
+  --term-ansi-bright-black: #596377;
+  --term-ansi-bright-red: #bf616a;
+  --term-ansi-bright-green: #a3be8c;
+  --term-ansi-bright-yellow: #ebcb8b;
+  --term-ansi-bright-blue: #81a1c1;
+  --term-ansi-bright-magenta: #b48ead;
+  --term-ansi-bright-cyan: #8fbcbb;
+  --term-ansi-bright-white: #eceff4;
+}
+
+[data-chat-theme='terminal'][data-term-palette='dracula'] {
+  /* Dracula */
+  --term-bg: #282a36;
+  --term-fg: #f8f8f2;
+
+  --term-ansi-black: #21222c;
+  --term-ansi-red: #ff5555;
+  --term-ansi-green: #50fa7b;
+  --term-ansi-yellow: #f1fa8c;
+  --term-ansi-blue: #bd93f9;
+  --term-ansi-magenta: #ff79c6;
+  --term-ansi-cyan: #8be9fd;
+  --term-ansi-white: #f8f8f2;
+  --term-ansi-bright-black: #6272a4;
+  --term-ansi-bright-red: #ff6e6e;
+  --term-ansi-bright-green: #69ff94;
+  --term-ansi-bright-yellow: #ffffa5;
+  --term-ansi-bright-blue: #d6acff;
+  --term-ansi-bright-magenta: #ff92df;
+  --term-ansi-bright-cyan: #a4ffff;
+  --term-ansi-bright-white: #ffffff;
+}
+
+[data-chat-theme='terminal'][data-term-palette='catppuccin-mocha'] {
+  /* Catppuccin Mocha */
+  --term-bg: #1e1e2e;
+  --term-fg: #cdd6f4;
+
+  --term-ansi-black: #45475a;
+  --term-ansi-red: #f38ba8;
+  --term-ansi-green: #a6e3a1;
+  --term-ansi-yellow: #f9e2af;
+  --term-ansi-blue: #89b4fa;
+  --term-ansi-magenta: #f5c2e7;
+  --term-ansi-cyan: #94e2d5;
+  --term-ansi-white: #bac2de;
+  --term-ansi-bright-black: #585b70;
+  --term-ansi-bright-red: #f7aec2;
+  --term-ansi-bright-green: #c2ecbf;
+  --term-ansi-bright-yellow: #fcd682;
+  --term-ansi-bright-blue: #aeccfc;
+  --term-ansi-bright-magenta: #f398da;
+  --term-ansi-bright-cyan: #b1eae1;
+  --term-ansi-bright-white: #a6adc8;
+}
+
+[data-chat-theme='terminal'][data-term-palette='gruvbox-dark'] {
+  /* Gruvbox Dark */
+  --term-bg: #282828;
+  --term-fg: #ebdbb2;
+
+  --term-ansi-black: #282828;
+  --term-ansi-red: #cc241d;
+  --term-ansi-green: #98971a;
+  --term-ansi-yellow: #d79921;
+  --term-ansi-blue: #458588;
+  --term-ansi-magenta: #b16286;
+  --term-ansi-cyan: #689d6a;
+  --term-ansi-white: #a89984;
+  --term-ansi-bright-black: #928374;
+  --term-ansi-bright-red: #fb4934;
+  --term-ansi-bright-green: #b8bb26;
+  --term-ansi-bright-yellow: #fabd2f;
+  --term-ansi-bright-blue: #83a598;
+  --term-ansi-bright-magenta: #d3869b;
+  --term-ansi-bright-cyan: #8ec07c;
+  --term-ansi-bright-white: #ebdbb2;
+}
+
+[data-chat-theme='terminal'][data-term-palette='one-dark'] {
+  /* One Dark */
+  --term-bg: #21252b;
+  --term-fg: #abb2bf;
+
+  --term-ansi-black: #21252b;
+  --term-ansi-red: #e06c75;
+  --term-ansi-green: #98c379;
+  --term-ansi-yellow: #e5c07b;
+  --term-ansi-blue: #61afef;
+  --term-ansi-magenta: #c678dd;
+  --term-ansi-cyan: #56b6c2;
+  --term-ansi-white: #abb2bf;
+  --term-ansi-bright-black: #767676;
+  --term-ansi-bright-red: #e06c75;
+  --term-ansi-bright-green: #98c379;
+  --term-ansi-bright-yellow: #e5c07b;
+  --term-ansi-bright-blue: #61afef;
+  --term-ansi-bright-magenta: #c678dd;
+  --term-ansi-bright-cyan: #56b6c2;
+  --term-ansi-bright-white: #abb2bf;
+}
+
+[data-chat-theme='terminal'][data-term-palette='tokyo-night'] {
+  /* Tokyo Night */
+  --term-bg: #1a1b26;
+  --term-fg: #c0caf5;
+
+  --term-ansi-black: #15161e;
+  --term-ansi-red: #f7768e;
+  --term-ansi-green: #9ece6a;
+  --term-ansi-yellow: #e0af68;
+  --term-ansi-blue: #7aa2f7;
+  --term-ansi-magenta: #bb9af7;
+  --term-ansi-cyan: #7dcfff;
+  --term-ansi-white: #a9b1d6;
+  --term-ansi-bright-black: #414868;
+  --term-ansi-bright-red: #f7768e;
+  --term-ansi-bright-green: #9ece6a;
+  --term-ansi-bright-yellow: #e0af68;
+  --term-ansi-bright-blue: #7aa2f7;
+  --term-ansi-bright-magenta: #bb9af7;
+  --term-ansi-bright-cyan: #7dcfff;
+  --term-ansi-bright-white: #c0caf5;
+}
+
+[data-chat-theme='terminal'][data-term-palette='solarized-dark'] {
+  /* Solarized Dark */
+  --term-bg: #002b36;
+  --term-fg: #839496;
+
+  --term-ansi-black: #073642;
+  --term-ansi-red: #dc322f;
+  --term-ansi-green: #859900;
+  --term-ansi-yellow: #b58900;
+  --term-ansi-blue: #268bd2;
+  --term-ansi-magenta: #d33682;
+  --term-ansi-cyan: #2aa198;
+  --term-ansi-white: #eee8d5;
+  --term-ansi-bright-black: #335e69;
+  --term-ansi-bright-red: #cb4b16;
+  --term-ansi-bright-green: #586e75;
+  --term-ansi-bright-yellow: #657b83;
+  --term-ansi-bright-blue: #839496;
+  --term-ansi-bright-magenta: #6c71c4;
+  --term-ansi-bright-cyan: #93a1a1;
+  --term-ansi-bright-white: #fdf6e3;
+}
+
+/*
+ * The output surface. A scheme brings its own ground; without one the block
+ * keeps the app's chrome and the muted foreground it has always had. Scoped to
+ * the debug transcript so the ordinary chat UI is untouched.
+ */
+[data-chat-theme='terminal'] .term-surface {
+  background: var(--term-bg, transparent);
+  color: var(--term-fg, var(--text-secondary));
+}
+
+.term-black {
+  color: var(--term-black, currentColor);
+}
+.term-red {
+  color: var(--term-red, currentColor);
+}
+.term-green {
+  color: var(--term-green, currentColor);
+}
+.term-yellow {
+  color: var(--term-yellow, currentColor);
+}
+.term-blue {
+  color: var(--term-blue, currentColor);
+}
+.term-magenta {
+  color: var(--term-magenta, currentColor);
+}
+.term-cyan {
+  color: var(--term-cyan, currentColor);
+}
+.term-white {
+  color: var(--term-white, currentColor);
+}
+.term-bright-black {
+  color: var(--term-bright-black, currentColor);
+}
+.term-bright-red {
+  color: var(--term-bright-red, currentColor);
+}
+.term-bright-green {
+  color: var(--term-bright-green, currentColor);
+}
+.term-bright-yellow {
+  color: var(--term-bright-yellow, currentColor);
+}
+.term-bright-blue {
+  color: var(--term-bright-blue, currentColor);
+}
+.term-bright-magenta {
+  color: var(--term-bright-magenta, currentColor);
+}
+.term-bright-cyan {
+  color: var(--term-bright-cyan, currentColor);
+}
+.term-bright-white {
+  color: var(--term-bright-white, currentColor);
+}
+.term-error {
+  color: var(--term-error, currentColor);
+}
+.term-warn {
+  color: var(--term-warn, currentColor);
+}
+.term-ok {
+  color: var(--term-ok, currentColor);
+}
+.term-add {
+  color: var(--term-add, currentColor);
+}
+.term-del {
+  color: var(--term-del, currentColor);
+}
+.term-meta {
+  color: var(--term-meta, currentColor);
+}
+.term-path {
+  color: var(--term-path, currentColor);
+}
+.term-str {
+  color: var(--term-str, currentColor);
+}
+.term-num {
+  color: var(--term-num, currentColor);
+}
+.term-const {
+  color: var(--term-const, currentColor);
+}
+.term-flag {
+  color: var(--term-flag, currentColor);
+}
+.term-key {
+  color: var(--term-key, currentColor);
+}
+.term-link {
+  color: var(--term-link, currentColor);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.term-bold {
+  font-weight: 600;
+}
+.term-dim {
+  opacity: 0.65;
+}
+.term-italic {
+  font-style: italic;
+}
+.term-underline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .hl-keyword {
@@ -845,4 +1402,21 @@ body {
   box-shadow:
     0 1px 2px var(--shadow-primary),
     0 0 1px var(--shadow-secondary);
+}
+
+::view-transition-old(run-chat) {
+  animation: none;
+}
+
+::view-transition-new(run-chat) {
+  animation: or-run-chat-in 120ms ease-out;
+}
+
+@keyframes or-run-chat-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }

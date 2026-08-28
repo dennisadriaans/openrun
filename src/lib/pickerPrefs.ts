@@ -32,6 +32,17 @@ export type PickerPrefs = {
    * hidden model keeps working, and the server never reads this.
    */
   hiddenModels?: string[]
+  /**
+   * Runtime ids the user has hidden from every picker. Display-only — a run
+   * or automation already on a hidden runtime keeps working, and the server
+   * never reads this.
+   */
+  hiddenRuntimes?: string[]
+  /**
+   * The user ticked "Don't show this again" on the runtime-handoff warning, so
+   * switching a chat's runtime stops asking. Display-only, like the lists above.
+   */
+  runtimeSwitchNoteDismissed?: boolean
 }
 
 /** Patch applied via {@link usePickerPrefs}'s `remember`. */
@@ -43,6 +54,8 @@ export type PickerPrefsPatch = {
   model?: string
   effort?: string
   hiddenModels?: string[]
+  hiddenRuntimes?: string[]
+  runtimeSwitchNoteDismissed?: boolean
 }
 
 function sanitize(raw: unknown): PickerPrefs {
@@ -65,6 +78,12 @@ function sanitize(raw: unknown): PickerPrefs {
   }
   if (Array.isArray(obj.hiddenModels)) {
     out.hiddenModels = obj.hiddenModels.filter((s): s is string => typeof s === 'string')
+  }
+  if (Array.isArray(obj.hiddenRuntimes)) {
+    out.hiddenRuntimes = obj.hiddenRuntimes.filter((s): s is string => typeof s === 'string')
+  }
+  if (typeof obj.runtimeSwitchNoteDismissed === 'boolean') {
+    out.runtimeSwitchNoteDismissed = obj.runtimeSwitchNoteDismissed
   }
   return out
 }
@@ -92,6 +111,10 @@ export function applyPatch(prev: PickerPrefs, patch: PickerPrefsPatch): PickerPr
   if (patch.runtimeId !== undefined) next.runtimeId = patch.runtimeId
   if (patch.runtimeMode !== undefined) next.runtimeMode = patch.runtimeMode
   if (patch.hiddenModels !== undefined) next.hiddenModels = patch.hiddenModels
+  if (patch.hiddenRuntimes !== undefined) next.hiddenRuntimes = patch.hiddenRuntimes
+  if (patch.runtimeSwitchNoteDismissed !== undefined) {
+    next.runtimeSwitchNoteDismissed = patch.runtimeSwitchNoteDismissed
+  }
 
   const scope = patch.forRuntimeId ?? patch.runtimeId ?? prev.runtimeId
   if (scope && (patch.model !== undefined || patch.effort !== undefined)) {

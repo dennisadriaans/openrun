@@ -10,6 +10,7 @@ import {
 } from '../lib/nativeSessions'
 import { loadNativeSessionPage } from '../lib/queries'
 import { ProviderIcon } from './ProviderIcons'
+import { Tooltip } from './ui'
 
 function useClickOutside(
   open: boolean,
@@ -45,6 +46,7 @@ export function NativeSessionMenu({
   error,
   selectedId,
   selectedLabel,
+  onOpen,
   disabled,
   disabledReason: disabledReasonProp,
   onSelectNew,
@@ -56,6 +58,7 @@ export function NativeSessionMenu({
   error?: string
   selectedId: string
   selectedLabel: string
+  onOpen?: () => unknown
   disabled?: boolean
   disabledReason?: string
   onSelectNew: () => void
@@ -215,17 +218,19 @@ export function NativeSessionMenu({
       ? (disabledReasonProp ?? 'Select a branch first')
       : undefined
 
-  return (
+  const trigger = (
     <div ref={triggerRef} className="relative min-w-0">
       <button
         ref={buttonRef}
         type="button"
         disabled={Boolean(disabledReason)}
-        title={disabledReason}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Start from existing chat"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) void onOpen?.()
+          setOpen((v) => !v)
+        }}
         className="inline-flex h-8 max-w-64 min-w-0 items-center gap-2 truncate rounded-lg px-2.5 text-ui-base text-tier-tertiary transition-colors hover:bg-hover hover:text-tier-secondary disabled:pointer-events-none disabled:opacity-40"
       >
         {selected && triggerKind ? (
@@ -399,5 +404,11 @@ export function NativeSessionMenu({
           )
         : null}
     </div>
+  )
+
+  return (
+    <Tooltip content={disabledReason ?? 'New chat or resume a CLI session'} disabled={open}>
+      {trigger}
+    </Tooltip>
   )
 }

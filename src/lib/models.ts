@@ -5,7 +5,7 @@
  * scoped to the CLIs Open Run actually drives. Values map to CLI flags in
  * `server/resume.ts` (`claude --model/--effort`, `codex -m` +
  * `model_reasoning_effort`, `grok -m` + `--reasoning-effort`,
- * `agy --model/--effort`).
+ * `agy --model/--effort`, `fx acp --model` / `FX_MODEL`).
  *
  * **These lists are a fallback, not the source of truth.** At runtime
  * `server/modelCatalog.ts` reads the models the *installed* CLI actually knows
@@ -15,7 +15,14 @@
  * roughly current, but do not treat it as authoritative.
  */
 
-export type RuntimeModelKind = 'claude' | 'codex' | 'grok' | 'gemini' | 'antigravity' | 'generic'
+export type RuntimeModelKind =
+  | 'claude'
+  | 'codex'
+  | 'grok'
+  | 'gemini'
+  | 'antigravity'
+  | 'fx'
+  | 'generic'
 
 export type EffortOption = {
   value: string
@@ -60,6 +67,12 @@ const CODEX_EFFORTS: EffortOption[] = [
   { value: 'xhigh', label: 'Extra High' },
 ]
 
+const CODEX_EFFORTS_5_6: EffortOption[] = [
+  ...CODEX_EFFORTS,
+  { value: 'max', label: 'Max' },
+  { value: 'ultra', label: 'Ultra' },
+]
+
 const GROK_EFFORTS: EffortOption[] = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium', isDefault: true },
@@ -97,16 +110,41 @@ export const CLAUDE_MODELS: ModelOption[] = [
   },
   {
     // No `effort` capability — passing `--effort` to Haiku is rejected, so the
-    // only knob it gets is our prompt-injected one.
+    // only knob it gets is our prompt-injected one, and it must be opt-in.
     slug: 'claude-haiku-4-5',
     name: 'Claude Haiku 4.5',
     shortName: 'Haiku 4.5',
-    efforts: [{ value: 'ultrathink', label: 'Ultrathink', promptInjected: true }],
+    efforts: [
+      { value: '', label: 'Default', isDefault: true },
+      { value: 'ultrathink', label: 'Ultrathink', promptInjected: true },
+    ],
     provider: 'claude',
   },
 ]
 
 export const CODEX_MODELS: ModelOption[] = [
+  {
+    slug: 'gpt-5.6-sol',
+    name: 'GPT-5.6-Sol',
+    shortName: 'Sol',
+    efforts: CODEX_EFFORTS_5_6,
+    provider: 'codex',
+  },
+  {
+    slug: 'gpt-5.6-terra',
+    name: 'GPT-5.6-Terra',
+    shortName: 'Terra',
+    efforts: CODEX_EFFORTS_5_6,
+    provider: 'codex',
+  },
+  {
+    slug: 'gpt-5.6-luna',
+    name: 'GPT-5.6-Luna',
+    shortName: 'Luna',
+    // Luna tops out below Sol/Terra — no `ultra`.
+    efforts: [...CODEX_EFFORTS, { value: 'max', label: 'Max' }],
+    provider: 'codex',
+  },
   {
     slug: 'gpt-5.5',
     name: 'GPT-5.5',
@@ -185,6 +223,27 @@ const ANTIGRAVITY_EFFORTS: EffortOption[] = [
 ]
 
 /**
+ * fx is model-agnostic via Vercel AI Gateway. The compiled default is
+ * `zai/glm-5.2-fast`; discovery via `fx models --json` replaces this seed.
+ */
+export const FX_MODELS: ModelOption[] = [
+  {
+    slug: 'zai/glm-5.2-fast',
+    name: 'GLM 5.2 Fast',
+    shortName: 'GLM 5.2 Fast',
+    efforts: [],
+    provider: 'fx',
+  },
+  {
+    slug: 'zai/glm-5.2',
+    name: 'GLM 5.2',
+    shortName: 'GLM 5.2',
+    efforts: [],
+    provider: 'fx',
+  },
+]
+
+/**
  * Antigravity ships a long, account-dependent list and prints the real one via
  * `agy models`, so this seed is deliberately minimal — it only has to keep the
  * picker non-empty until the first discovery lands.
@@ -217,6 +276,7 @@ export function modelKindForBin(bin: string): RuntimeModelKind {
   // Antigravity's binary is `agy`; match the product name too for users who
   // pointed the runtime at an explicit path.
   if (name === 'agy' || name.includes('antigravity')) return 'antigravity'
+  if (name === 'fx' || name === 'fx.exe') return 'fx'
   return 'generic'
 }
 
@@ -226,6 +286,7 @@ export function modelsForKind(kind: RuntimeModelKind): ModelOption[] {
   if (kind === 'grok') return GROK_MODELS
   if (kind === 'gemini') return GEMINI_MODELS
   if (kind === 'antigravity') return ANTIGRAVITY_MODELS
+  if (kind === 'fx') return FX_MODELS
   return []
 }
 
@@ -299,7 +360,10 @@ export function defaultModel(models: ModelOption[]): ModelOption | undefined {
 export function defaultEffort(model: ModelOption | undefined): string {
   if (!model) return ''
   const def = model.efforts.find((e) => e.isDefault) ?? model.efforts[0]
-  return def?.value ?? ''
+  // Never default into a prompt-injected level — rewriting the prompt is
+  // always an explicit choice, never what a model falls back to.
+  if (!def || def.promptInjected) return ''
+  return def.value
 }
 
 export function effortLabel(model: ModelOption | undefined, effort: string): string {

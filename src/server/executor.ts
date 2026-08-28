@@ -1,7 +1,7 @@
 /**
  * Process executor.
  *
- * Spawns a runtime's CLI (claude / codex / grok / gemini) as a local child
+ * Spawns a runtime's CLI (claude / codex / grok / gemini / fx) as a local child
  * process, streaming stdout/stderr incrementally into the DB so the UI can tail
  * it live. Everything runs locally against the user's own CLI logins — no API
  * tokens, no cloud.
@@ -28,9 +28,11 @@ import {
 } from './resume'
 import { publishActivityLive } from './activityLive'
 import { publishRunLive } from './runLive'
+import { createTurnUsageSink } from './turnUsage'
 import { pushApprovalRequest, pushApprovalSettled } from './mobile/apns'
 import {
   AssistantDeltaCoalescer,
+  ClaudeStdoutIngest,
   LineBuffer,
   assistantTextFromEvents,
   hasEventAdapter,
@@ -40,6 +42,7 @@ import {
   type TurnEventRow,
 } from './turnEvents'
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
+import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
 import { assertWorkspaceId } from '../lib/workspaceRef'
@@ -52,9 +55,13 @@ import { buildControlResponse, type ApprovalDecision } from '../lib/claudeContro
 import { resolveApprovalAnswer } from '../lib/approvals'
 import type { PermissionOption, ToolKind } from '../lib/acp'
 import { isAcpTransport } from '../lib/acpTransport'
-import { parseArgsTemplate } from '../lib/argsTemplate'
 import { startAcpTurn } from './acpTurn'
+import { protocolMcpServers } from './mcp.ts'
+import { OPENRUN_APP_DIR_ENV, OPENRUN_RUN_ID_ENV } from '../lib/openrunTools.ts'
 import { withPrCapability } from '../lib/prCapability'
+import { buildHandoffPrompt, handoffSystemNote, type HandoffMessage } from '../lib/handoffPrompt.ts'
+import { isRuntimeSwitch, resolveSwitchMode, resolveSwitchModel } from '../lib/runtimeSwitch.ts'
+import { cachedModelsForBin } from './modelCatalog.ts'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { nativeSessionExists } from './nativeSessions'
@@ -65,7 +72,17 @@ import {
   resumedNativeChatStub,
 } from '../lib/nativeSessions.ts'
 import { checksForWorkspace, clearCheckPass, runCheckPass } from './checks'
-import { RUN_KILL_GRACE_MS, resolveRunTimeoutMs, runTimedOutMessage } from '../lib/runBudget'
+import {
+  RUN_KILL_GRACE_MS,
+  RUN_STALL_AFTER_MS,
+  RUN_STALL_CHECK_MS,
+  TURN_DONE_LINGER_MS,
+  resolveRunTimeoutMs,
+  runStalledMessage,
+  runTimedOutMessage,
+} from '../lib/runBudget'
+import { isUsageLimitMessage, usageLimitStopMessage } from '../lib/agentLimits.ts'
+import { meaningfulStderr } from '../lib/stderrNoise.ts'
 import {
   buildRepairPrompt,
   deriveVerdict,
@@ -77,10 +94,12 @@ import {
 import {
   agentSpawnOptions,
   isPidAlive,
+  isShuttingDown,
   killChildTree,
   killPidTree,
   setShuttingDown,
 } from './processControl'
+import { peekQueuedMessage, removeQueuedMessage } from './messageQueue'
 
 /**
  * Live process handles must survive Vite HMR. The scheduler already parks its
@@ -104,16 +123,28 @@ type ApprovalController = {
 
 type LiveChild = ReturnType<typeof spawn>
 
+type LiveHandle = {
+  child: LiveChild
+  /** Cooperative stop (ACP `session/cancel`); CLI turns omit this. */
+  requestStop?: () => void
+}
+
 const g = globalThis as unknown as {
-  __agentopsLive?: Map<string, LiveChild>
+  __agentopsLive?: Map<string, LiveHandle>
   __agentopsApprovals?: Map<string, ApprovalController>
   __agentopsVerifying?: Map<string, AbortController>
   __agentopsShutdownHooks?: boolean
+  __agentopsDrainOnExit?: Set<string>
 }
 
-function liveMap(): Map<string, LiveChild> {
+function liveMap(): Map<string, LiveHandle> {
   if (!g.__agentopsLive) g.__agentopsLive = new Map()
   return g.__agentopsLive
+}
+
+function childOf(live: LiveHandle | undefined): LiveChild | undefined {
+  if (!live) return undefined
+  return live.child ?? (live as unknown as LiveChild)
 }
 
 function approvalsMap(): Map<string, ApprovalController> {
@@ -124,6 +155,17 @@ function approvalsMap(): Map<string, ApprovalController> {
 function verifyingMap(): Map<string, AbortController> {
   if (!g.__agentopsVerifying) g.__agentopsVerifying = new Map()
   return g.__agentopsVerifying
+}
+
+/**
+ * Runs cancelled *in order to* deliver a queued message ("send now"), rather
+ * than to stop working. The queue drains once the agent process is actually
+ * gone — resuming a session while the old child is still writing to it is how
+ * you corrupt one.
+ */
+function drainOnExitSet(): Set<string> {
+  if (!g.__agentopsDrainOnExit) g.__agentopsDrainOnExit = new Set()
+  return g.__agentopsDrainOnExit
 }
 
 /**
@@ -153,6 +195,28 @@ export function answerApproval(input: {
 
 function randomId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
+
+function runtimeSupportsLastResume(bin: string) {
+  return (bin.split(/[\\/]/).pop() ?? bin).includes('codex')
+}
+
+function publishRunStatus(runId: string, status: string, exitCode: number | null) {
+  const db = getDb()
+  const run = db.prepare('SELECT sessionId, runtimeId FROM runs WHERE id = ?').get(runId) as
+    | { sessionId: string; runtimeId: string }
+    | undefined
+  const runtime = run
+    ? (db.prepare('SELECT bin, transport FROM runtimes WHERE id = ?').get(run.runtimeId) as
+        | { bin: string; transport: string }
+        | undefined)
+    : undefined
+  const canFollowUp =
+    status !== 'running' &&
+    !!runtime &&
+    supportsResume(runtime.bin, runtime.transport) &&
+    ((run?.sessionId.length ?? 0) > 0 || runtimeSupportsLastResume(runtime.bin))
+  publishRunLive(runId, { type: 'status', status, exitCode, canFollowUp })
 }
 
 export type StartRunInput = {
@@ -187,7 +251,15 @@ export type StartRunInput = {
   resumeSessionId?: string
   /** Picker title for the system stub on an adopted native chat. */
   resumeSessionLabel?: string
+  /**
+   * The ticket a webhook fired for. Stored on the opening user message so the
+   * UI can link back to it — deliberately not in `prompt`, because a bare URL
+   * makes agents try to open it instead of reading the body they already have.
+   */
+  source?: MessageSource
 }
+
+export type MessageSource = { provider: string; url: string; label: string }
 
 /**
  * Create a run row and spawn the first turn. Returns the run id immediately;
@@ -327,6 +399,7 @@ export function startRun(input: StartRunInput): string {
     // The opening turn is never someone typing into a conversation. Whether it
     // actually verifies still depends on the automation's settings.
     unattended: true,
+    ...(input.source ? { source: input.source } : {}),
   })
   return runId
 }
@@ -339,10 +412,18 @@ export function startRun(input: StartRunInput): string {
 export function sendFollowUp(input: {
   runId: string
   prompt: string
+  /**
+   * Continue the conversation on a different runtime. Sessions are per-CLI and
+   * opaque, so this is a handoff: a new session on the new binary, seeded with
+   * a summary of the transcript (see `lib/handoffPrompt.ts`).
+   */
+  runtimeId?: string
   model?: string
   effort?: string
   runtimeMode?: RuntimeMode | string
   timeoutMs?: number
+  userMessageId?: string
+  assistantMessageId?: string
   /**
    * Internal repair turns resume a run the executor is still holding: the run
    * row is legitimately `running` and this very run owns the workspace lock,
@@ -363,6 +444,7 @@ export function sendFollowUp(input: {
         model: string
         effort: string
         runtimeMode: string
+        baseSnapshot: string
       }
     | undefined
   if (!run) throw new Error('Run not found')
@@ -376,33 +458,77 @@ export function sendFollowUp(input: {
     assertWorkspaceFree(run.workspaceId)
   }
 
-  const runtime = db.prepare('SELECT * FROM runtimes WHERE id = ?').get(run.runtimeId) as
+  const switching = isRuntimeSwitch(run.runtimeId, input.runtimeId)
+  const readRuntime = db.prepare('SELECT * FROM runtimes WHERE id = ?')
+  const runtime = readRuntime.get(switching ? input.runtimeId!.trim() : run.runtimeId) as
     | RuntimeRow
     | undefined
   if (!runtime) throw new Error('Runtime not found for this run')
+  const previous = switching ? (readRuntime.get(run.runtimeId) as RuntimeRow | undefined) : runtime
 
   // Same preflight as startRun — don't flip the run back to running if the
   // binary disappeared between turns.
   assertRuntimeOnPath(runtime.bin)
 
-  const model = input.model?.trim() ?? run.model ?? ''
-  const effort = input.effort?.trim() ?? run.effort ?? ''
-  const runtimeMode = parseRuntimeMode(input.runtimeMode ?? run.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+  let model = input.model?.trim() ?? run.model ?? ''
+  let effort = input.effort?.trim() ?? run.effort ?? ''
+  let runtimeMode = parseRuntimeMode(input.runtimeMode ?? run.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+  if (switching) {
+    // A slug and an access mode from the old CLI mean nothing to the new one.
+    const picked = resolveSwitchModel(cachedModelsForBin(runtime.bin), model)
+    if (picked.model !== model) {
+      model = picked.model
+      effort = picked.effort
+    }
+    runtimeMode = resolveSwitchMode(runtimeMode, runtime)
+  }
 
   assertSupervisedSupported({ bin: runtime.bin, transport: runtime.transport, mode: runtimeMode })
 
+  // The stored user message stays the user's own text; only the CLI sees the
+  // handoff summary in front of it.
+  const cliPrompt = switching
+    ? buildHandoffPrompt({
+        fromLabel: previous?.label ?? 'another runtime',
+        toLabel: runtime.label,
+        messages: handoffTranscript(input.runId),
+        files: handoffChangedFiles(run.cwd, run.baseSnapshot),
+        prompt: input.prompt,
+      })
+    : input.prompt
+
   const turn = buildTurnCommand({
     runtime,
-    prompt: input.prompt,
+    prompt: cliPrompt,
     cwd: run.cwd,
-    sessionId: run.sessionId,
-    isFollowUp: true,
+    // A handoff cannot resume anything — the new CLI has never seen this chat.
+    sessionId: switching ? '' : run.sessionId,
+    isFollowUp: !switching,
     model,
     effort,
     runtimeMode,
   })
-  if (!turn.canResume) {
+  if (!switching && !turn.canResume) {
     throw new Error(`The "${runtime.label}" runtime does not support resuming a conversation`)
+  }
+
+  if (switching) {
+    db.prepare("UPDATE runs SET runtimeId = ?, sessionId = '', command = ? WHERE id = ?").run(
+      runtime.id,
+      turn.display,
+      input.runId,
+    )
+    const at = Date.now() - 1
+    db.prepare(
+      `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
+       VALUES (?, ?, 'system', ?, '', '', 'success', NULL, '', ?, ?)`,
+    ).run(
+      randomId('msg'),
+      input.runId,
+      handoffSystemNote(previous?.label ?? 'another runtime', runtime.label),
+      at,
+      at,
+    )
   }
 
   // A new turn re-opens the question of whether the run's work is good, so the
@@ -421,7 +547,52 @@ export function sendFollowUp(input: {
     turn,
     timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
     unattended: input.internal === true,
+    userMessageId: input.userMessageId,
+    assistantMessageId: input.assistantMessageId,
   })
+}
+
+/** Transcript replayed to a runtime taking over the conversation. */
+function handoffTranscript(runId: string): HandoffMessage[] {
+  const rows = getDb()
+    .prepare('SELECT id, role, content FROM messages WHERE runId = ? ORDER BY createdAt ASC')
+    .all(runId) as Array<{ id: string; role: string; content: string }>
+
+  return rows.flatMap((row) => {
+    if (row.role !== 'user' && row.role !== 'assistant') return []
+    // Assistant text lives in turn events whenever the runtime had an adapter;
+    // `content` is only populated for plain-CLI runs.
+    const content =
+      row.role === 'assistant' && !row.content.trim()
+        ? assistantTextFromEvents(listTurnEventsForMessage(row.id))
+        : row.content
+    if (!content.trim()) return []
+    return [{ role: row.role, content }]
+  })
+}
+
+/** Paths the run has already touched, so the new agent reads before editing. */
+function handoffChangedFiles(cwd: string, baseSnapshot: string): string[] {
+  try {
+    return changedFiles(cwd, baseSnapshot || undefined).map((file) => file.path)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Env every agent process gets on top of the runtime's own.
+ *
+ * `OPENRUN_RUN_ID` is what makes Open Run's MCP server (`scripts/mcp-server.ts`)
+ * answer for *this* run: the CLI inherits it and passes it down to any MCP
+ * server it spawns, so the tools need no handshake of their own.
+ */
+function turnEnv(runId: string, extraEnv?: Record<string, string>): Record<string, string> {
+  return {
+    ...(extraEnv ?? {}),
+    [OPENRUN_RUN_ID_ENV]: runId,
+    [OPENRUN_APP_DIR_ENV]: process.cwd(),
+  }
 }
 
 type TurnCommand = ReturnType<typeof buildTurnCommand>
@@ -443,17 +614,23 @@ function spawnTurn(input: {
    * see `concludeTurn`.
    */
   unattended: boolean
+  /** Origin badge for the user message; only webhook turns carry one. */
+  source?: MessageSource
+  userMessageId?: string
+  assistantMessageId?: string
 }): { userMessageId: string; assistantMessageId: string } {
-  const { runId, runtime, cwd, prompt, turn, timeoutMs, unattended } = input
+  const { runId, runtime, cwd, prompt, turn, timeoutMs, unattended, source } = input
   const db = getDb()
   const now = Date.now()
 
-  const userMsgId = randomId('msg')
-  const assistantMsgId = randomId('msg')
+  const userMsgId = isMessageId(input.userMessageId ?? '') ? input.userMessageId! : randomId('msg')
+  const assistantMsgId = isMessageId(input.assistantMessageId ?? '')
+    ? input.assistantMessageId!
+    : randomId('msg')
 
   const insertMessage = db.prepare(
-    `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
-     VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', @createdAt, @finishedAt)`,
+    `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
+     VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', @sourceProvider, @sourceUrl, @sourceLabel, @createdAt, @finishedAt)`,
   )
   insertMessage.run({
     id: userMsgId,
@@ -461,6 +638,9 @@ function spawnTurn(input: {
     role: 'user',
     content: prompt,
     status: 'success',
+    sourceProvider: source?.provider ?? '',
+    sourceUrl: source?.url ?? '',
+    sourceLabel: source?.label ?? '',
     createdAt: now,
     finishedAt: now,
   })
@@ -470,6 +650,9 @@ function spawnTurn(input: {
     role: 'assistant',
     content: '',
     status: 'running',
+    sourceProvider: '',
+    sourceUrl: '',
+    sourceLabel: '',
     createdAt: now + 1,
     finishedAt: null,
   })
@@ -484,6 +667,8 @@ function spawnTurn(input: {
         cwd,
         prompt: turn.acpPrompt ?? prompt,
         sessionId: turn.acpSessionId ?? '',
+        args: turn.args,
+        extraEnv: turn.extraEnv,
         assistantMsgId,
         timeoutMs,
         unattended,
@@ -532,7 +717,7 @@ function spawnTurn(input: {
         .run(displayCommand, runId, '%{promptFile}%')
     }
 
-    child = spawn(runtime.bin, spawnArgs, agentSpawnOptions(cwd))
+    child = spawn(runtime.bin, spawnArgs, agentSpawnOptions(cwd, turnEnv(runId, turn.extraEnv)))
   } catch (err) {
     if (promptFileDir) {
       try {
@@ -554,7 +739,7 @@ function spawnTurn(input: {
     return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
   }
 
-  liveMap().set(runId, child)
+  liveMap().set(runId, { child })
   db.prepare('UPDATE runs SET pid = ? WHERE id = ?').run(child.pid ?? null, runId)
 
   const appendRunStdout = db.prepare('UPDATE runs SET stdout = stdout || ? WHERE id = ?')
@@ -567,6 +752,10 @@ function spawnTurn(input: {
   // workspace is then refused, and only restarting the app clears it.
   let budgetTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
     budgetTimer = null
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     const note = `\n[executor] ${runTimedOutMessage(timeoutMs)}\n`
     appendRunStderr.run(note, runId)
     appendMsgStderr.run(note, assistantMsgId)
@@ -579,15 +768,44 @@ function spawnTurn(input: {
     // Recorded before the kill so the close handler can tell an over-budget
     // stop apart from an ordinary non-zero exit.
     db.prepare('UPDATE runs SET timedOut = 1 WHERE id = ?').run(runId)
-    killChildTree(child, {
-      graceMs: RUN_KILL_GRACE_MS,
-      stillLive: () => liveMap().has(runId),
-    })
+    killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
   }, timeoutMs)
+
+  const noteTurn = (text: string) => {
+    appendRunStderr.run(text, runId)
+    appendMsgStderr.run(text, assistantMsgId)
+    publishRunLive(runId, {
+      type: 'log',
+      stream: 'stderr',
+      chunk: text,
+      messageId: assistantMsgId,
+    })
+  }
+
+  // Silence watchdog. The budget above only fires at the very end, so a CLI
+  // that goes quiet — Codex waiting out a usage limit does exactly that —
+  // otherwise spins the transcript with no explanation until it elapses.
+  let lastOutputAt = Date.now()
+  let stallNotes = 0
+  let stallTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+    const silentMs = Date.now() - lastOutputAt
+    const due = Math.floor(silentMs / RUN_STALL_AFTER_MS)
+    if (due <= stallNotes) return
+    stallNotes = due
+    noteTurn(`\n[executor] ${runStalledMessage(silentMs)}\n`)
+  }, RUN_STALL_CHECK_MS)
+
+  // A turn that ended on an error can leave the CLI lingering with nothing
+  // left to say; without this the run stays `running` until its budget.
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null
 
   const clearBudget = () => {
     if (budgetTimer) clearTimeout(budgetTimer)
     budgetTimer = null
+    if (stallTimer) clearInterval(stallTimer)
+    stallTimer = null
+    if (lingerTimer) clearTimeout(lingerTimer)
+    lingerTimer = null
   }
 
   const kind = eventKindFor(runtimeKind(runtime.bin))
@@ -598,6 +816,7 @@ function spawnTurn(input: {
   // Grok streams token-sized `text` deltas; coalesce so chat gets prose, not
   // one event per word. Claude/Codex already emit whole messages.
   const grokCoalescer = structuredEvents && kind === 'grok' ? new AssistantDeltaCoalescer() : null
+  const claudeIngest = structuredEvents && kind === 'claude' ? new ClaudeStdoutIngest() : null
   let eventSeq = 0
   const insertEvent = db.prepare(
     `INSERT INTO turn_events (id, messageId, runId, seq, kind, payload, createdAt)
@@ -619,8 +838,19 @@ function spawnTurn(input: {
     }
   >()
 
+  const recordUsage = createTurnUsageSink(db, runId, assistantMsgId)
+
   const persistEvents = (events: ParsedTurnEvent[]) => {
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     for (const ev of events) {
+      // A gauge, not a transcript row: fold it onto the message and move on.
+      if (ev.kind === 'usage') {
+        recordUsage(ev.payload.usage)
+        continue
+      }
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
           name: ev.payload.name,
@@ -680,6 +910,23 @@ function spawnTurn(input: {
             // stdin already closed — nothing to do.
           }
         }
+      }
+
+      // A usage limit is terminal for this turn: the CLI has nothing left to
+      // report and may simply idle until its window resets, so stop it now
+      // with the reason in the log instead of a silent hour of `running`.
+      if (ev.kind === 'error' && isUsageLimitMessage(ev.payload.message ?? '')) {
+        noteTurn(`\n[executor] ${usageLimitStopMessage(ev.payload.message ?? '')}\n`)
+        killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
+      }
+
+      if (ev.kind === 'turn_done' && !lingerTimer) {
+        lingerTimer = setTimeout(() => {
+          lingerTimer = null
+          if (!isPidAlive(child.pid ?? 0)) return
+          noteTurn('\n[executor] The agent reported the turn done but did not exit; stopping it.\n')
+          killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
+        }, TURN_DONE_LINGER_MS)
       }
     }
   }
@@ -785,6 +1032,11 @@ function spawnTurn(input: {
   }
 
   const ingestStdoutChunk = (text: string) => {
+    lastOutputAt = Date.now()
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     appendRunStdout.run(text, runId)
     appendMsgStdout.run(text, assistantMsgId)
     publishRunLive(runId, {
@@ -797,7 +1049,7 @@ function spawnTurn(input: {
     if (!structuredEvents) return
     const parsed: ParsedTurnEvent[] = []
     for (const line of lineBuffer.push(text)) {
-      parsed.push(...parseTurnEventLine(line, kind))
+      parsed.push(...(claudeIngest ? claudeIngest.pushLine(line) : parseTurnEventLine(line, kind)))
     }
     persistEvents(grokCoalescer ? grokCoalescer.push(parsed) : parsed)
   }
@@ -806,6 +1058,7 @@ function spawnTurn(input: {
     ingestStdoutChunk(d.toString())
   })
   child.stderr?.on('data', (d: Buffer) => {
+    lastOutputAt = Date.now()
     const text = d.toString()
     appendRunStderr.run(text, runId)
     appendMsgStderr.run(text, assistantMsgId)
@@ -854,10 +1107,17 @@ function spawnTurn(input: {
     if (structuredEvents) {
       const rest = lineBuffer.flush()
       const parsed: ParsedTurnEvent[] = []
-      if (rest.trim()) parsed.push(...parseTurnEventLine(rest, kind))
+      if (rest.trim()) {
+        parsed.push(
+          ...(claudeIngest ? claudeIngest.pushLine(rest) : parseTurnEventLine(rest, kind)),
+        )
+      }
       if (grokCoalescer) {
         persistEvents(grokCoalescer.push(parsed))
         persistEvents(grokCoalescer.flush())
+      } else if (claudeIngest) {
+        persistEvents(parsed)
+        persistEvents(claudeIngest.flush())
       } else if (parsed.length > 0) {
         persistEvents(parsed)
       }
@@ -867,8 +1127,11 @@ function spawnTurn(input: {
       | undefined
     if (current?.status === 'cancelled') {
       finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
-      publishRunLive(runId, { type: 'status', status: 'cancelled', exitCode: code })
+      publishRunStatus(runId, 'cancelled', code)
       publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
+      // The agent is gone for good now, so a "send now" interrupt can hand the
+      // queued message to a fresh turn.
+      if (drainOnExitSet().delete(runId)) drainMessageQueue(runId)
       return
     }
     if (signal) {
@@ -981,6 +1244,8 @@ function spawnAcpTurn(input: {
   cwd: string
   prompt: string
   sessionId: string
+  args: string[]
+  extraEnv?: Record<string, string>
   assistantMsgId: string
   timeoutMs: number
   unattended: boolean
@@ -1017,7 +1282,19 @@ function spawnAcpTurn(input: {
   // one paragraph per stretch instead of a row per token.
   const coalescer = new AssistantDeltaCoalescer()
 
+  // Same three guards as the CLI path: an agent that goes silent says so in the
+  // log, a usage limit ends the turn, and a finished agent may not linger.
+  let lastOutputAt = Date.now()
+  let stallNotes = 0
+  let stallTimer: ReturnType<typeof setInterval> | null = null
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null
+
   const appendLog = (stream: 'stdout' | 'stderr', chunk: string) => {
+    lastOutputAt = Date.now()
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     if (stream === 'stderr') {
       appendRunStderr.run(chunk, runId)
       appendMsgStderr.run(chunk, assistantMsgId)
@@ -1028,8 +1305,19 @@ function spawnAcpTurn(input: {
     publishRunLive(runId, { type: 'log', stream, chunk, messageId: assistantMsgId })
   }
 
+  const recordUsage = createTurnUsageSink(db, runId, assistantMsgId)
+
   const persistEvents = (events: ParsedTurnEvent[]) => {
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     for (const ev of events) {
+      // A gauge, not a transcript row: fold it onto the message and move on.
+      if (ev.kind === 'usage') {
+        recordUsage(ev.payload.usage)
+        continue
+      }
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
           name: ev.payload.name,
@@ -1074,7 +1362,30 @@ function spawnAcpTurn(input: {
         payload: ev.payload as TurnEventPayload,
         createdAt,
       })
+
+      if (ev.kind === 'error' && isUsageLimitMessage(ev.payload.message ?? '')) {
+        appendLog('stderr', `\n[executor] ${usageLimitStopMessage(ev.payload.message ?? '')}\n`)
+        stopAgent()
+      }
+
+      if (ev.kind === 'turn_done' && !lingerTimer) {
+        lingerTimer = setTimeout(() => {
+          lingerTimer = null
+          if (settled || !isPidAlive(handle.child.pid ?? 0)) return
+          appendLog(
+            'stderr',
+            '\n[executor] The agent reported the turn done but did not exit; stopping it.\n',
+          )
+          stopAgent()
+        }, TURN_DONE_LINGER_MS)
+      }
     }
+  }
+
+  /** End the agent now, whatever it is waiting for. */
+  function stopAgent() {
+    handle.cancelTurn()
+    killChildTree(handle.child, { graceMs: RUN_KILL_GRACE_MS })
   }
 
   function scheduleApprovalTimeout(requestId: string, toolName: string) {
@@ -1151,10 +1462,14 @@ function spawnAcpTurn(input: {
   const handle = startAcpTurn(
     {
       bin: runtime.bin,
-      args: parseArgsTemplateSafe(runtime.argsTemplate),
+      args: input.args,
       cwd,
       prompt: input.prompt,
       sessionId: input.sessionId,
+      // Only the protocol-scoped list: whatever the agent reads from its own
+      // config file it has already loaded by the time the session opens.
+      mcpServers: protocolMcpServers({ bin: runtime.bin, transport: runtime.transport, cwd }),
+      extraEnv: turnEnv(runId, input.extraEnv),
     },
     {
       onEvents: (events) => persistEvents(coalescer.push(events)),
@@ -1166,6 +1481,11 @@ function spawnAcpTurn(input: {
         if (settled) return
         settled = true
         if (budgetTimer) clearTimeout(budgetTimer)
+        budgetTimer = null
+        if (stallTimer) clearInterval(stallTimer)
+        stallTimer = null
+        if (lingerTimer) clearTimeout(lingerTimer)
+        lingerTimer = null
         persistEvents(coalescer.flush())
         for (const timer of approvalTimers.values()) clearTimeout(timer)
         approvalTimers.clear()
@@ -1178,8 +1498,9 @@ function spawnAcpTurn(input: {
           | undefined
         if (current?.status === 'cancelled') {
           finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
-          publishRunLive(runId, { type: 'status', status: 'cancelled', exitCode: code })
+          publishRunStatus(runId, 'cancelled', code)
           publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
+          if (drainOnExitSet().delete(runId)) drainMessageQueue(runId)
           return
         }
 
@@ -1197,32 +1518,35 @@ function spawnAcpTurn(input: {
     },
   )
 
-  liveMap().set(runId, handle.child)
+  liveMap().set(runId, { child: handle.child, requestStop: () => handle.cancelTurn() })
   db.prepare('UPDATE runs SET pid = ? WHERE id = ?').run(handle.child.pid ?? null, runId)
   approvalsMap().set(runId, {
     answer: (rid, answer) => resolveApproval(rid, answer),
     hasPending: () => approvalTimers.size > 0,
   })
 
+  stallTimer = setInterval(() => {
+    const silentMs = Date.now() - lastOutputAt
+    const due = Math.floor(silentMs / RUN_STALL_AFTER_MS)
+    if (due <= stallNotes) return
+    stallNotes = due
+    const quietSince = lastOutputAt
+    appendLog('stderr', `\n[executor] ${runStalledMessage(silentMs)}\n`)
+    // Our own note is not the agent speaking, so it must not restart the clock.
+    lastOutputAt = quietSince
+  }, RUN_STALL_CHECK_MS)
+
   budgetTimer = setTimeout(() => {
     budgetTimer = null
+    const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+      | { status: string }
+      | undefined
+    if (current?.status === 'cancelled') return
     appendLog('stderr', `\n[executor] ${runTimedOutMessage(timeoutMs)}\n`)
     db.prepare('UPDATE runs SET timedOut = 1 WHERE id = ?').run(runId)
-    handle.cancelPending()
-    killChildTree(handle.child, {
-      graceMs: RUN_KILL_GRACE_MS,
-      stillLive: () => liveMap().has(runId),
-    })
+    handle.cancelTurn()
+    killChildTree(handle.child, { graceMs: RUN_KILL_GRACE_MS })
   }, timeoutMs)
-}
-
-/** Args template for an ACP launch command; a broken one just means no args. */
-function parseArgsTemplateSafe(template: string): string[] {
-  try {
-    return parseArgsTemplate(template)
-  } catch {
-    return []
-  }
 }
 
 /**
@@ -1243,7 +1567,8 @@ function finalizeMessage(
 
   const events = listTurnEventsForMessage(messageId)
   const fromEvents = assistantTextFromEvents(events)
-  const content = fromEvents || parseAssistantText(row?.stdout ?? '') || (row?.stderr ?? '').trim()
+  const content =
+    fromEvents || parseAssistantText(row?.stdout ?? '') || meaningfulStderr(row?.stderr).trim()
 
   const run = row?.runId
     ? (db.prepare('SELECT baseSnapshot FROM runs WHERE id = ?').get(row.runId) as
@@ -1252,16 +1577,32 @@ function finalizeMessage(
     : undefined
   const since = run?.baseSnapshot || undefined
 
-  let diffSummary = '[]'
+  let diff: ReturnType<typeof changedFiles> = []
   try {
-    diffSummary = JSON.stringify(changedFiles(cwd, since))
+    diff = changedFiles(cwd, since)
   } catch {
     // A missing or non-git cwd just means no diff panel for this turn.
   }
 
+  const finishedAt = Date.now()
   db.prepare(
     'UPDATE messages SET status = ?, exitCode = ?, content = ?, diffSummary = ?, finishedAt = ? WHERE id = ?',
-  ).run(status, exitCode, content, diffSummary, Date.now(), messageId)
+  ).run(status, exitCode, content, JSON.stringify(diff), finishedAt, messageId)
+
+  // The run stays `running` through verification and any repair turn, so the
+  // transcript would keep spinning on an answer that is already final if it
+  // had to wait for the run-level `status` frame.
+  if (row?.runId) {
+    publishRunLive(row.runId, {
+      type: 'turn_finished',
+      messageId,
+      status,
+      exitCode,
+      content,
+      diffSummary: diff,
+      finishedAt,
+    })
+  }
 }
 
 function finalizeRun(
@@ -1273,9 +1614,49 @@ function finalizeRun(
   getDb()
     .prepare('UPDATE runs SET status = ?, exitCode = ?, verdict = ?, finishedAt = ? WHERE id = ?')
     .run(status, code, verdict, Date.now(), runId)
-  publishRunLive(runId, { type: 'status', status, exitCode: code })
+  publishRunStatus(runId, status, code)
   publishActivityLive({ type: 'run_changed', runId, status, verdict })
+  // A queued follow-up means the conversation is not over: it takes the
+  // workspace straight back, so neither the "run finished" notification nor
+  // the workspace queue should treat this as the end.
+  if (drainMessageQueue(runId)) return
   onRunFinalized(runId)
+}
+
+/**
+ * Start the oldest follow-up parked for this run, if the run is free. Returns
+ * true when a turn was started.
+ *
+ * The entry is only removed once the turn is under way — a refusal (workspace
+ * taken, binary gone, session no longer resumable) leaves the message queued
+ * so the user can retry or discard it rather than watching it vanish.
+ */
+export function drainMessageQueue(runId: string): boolean {
+  // SIGINT/SIGTERM: a cancelled run must not spawn a replacement agent while
+  // the process is exiting.
+  if (isShuttingDown()) return false
+  const entry = peekQueuedMessage(runId)
+  if (!entry) return false
+  const run = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+    | { status: string }
+    | undefined
+  if (!run || run.status === 'running') return false
+
+  try {
+    sendFollowUp({
+      runId,
+      prompt: entry.prompt,
+      ...(entry.runtimeId ? { runtimeId: entry.runtimeId } : {}),
+      ...(entry.model ? { model: entry.model } : {}),
+      ...(entry.effort ? { effort: entry.effort } : {}),
+      ...(entry.runtimeMode ? { runtimeMode: entry.runtimeMode } : {}),
+    })
+  } catch (err) {
+    console.error(`[messages] could not start queued follow-up for run ${runId}:`, err)
+    return false
+  }
+  removeQueuedMessage(entry.id)
+  return true
 }
 
 /**
@@ -1603,9 +1984,15 @@ export function listTurnEventsForRun(runId: string): TurnEventRow[] {
  * pid when the in-memory handle is missing (server restart / HMR), so Cancel
  * never becomes a DB-only flip that leaves a token-burning orphan.
  */
-export function cancelRun(runId: string): boolean {
-  const child = liveMap().get(runId)
+export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boolean {
+  const live = liveMap().get(runId)
   const db = getDb()
+  // "Send now": the turn is being interrupted so a queued message can take
+  // over, which is the opposite of a Stop — no finished notification, and the
+  // workspace stays reserved for this conversation.
+  const drainQueue = opts?.drainQueue === true
+  if (drainQueue) drainOnExitSet().add(runId)
+  else drainOnExitSet().delete(runId)
   const row = db.prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
     | { pid: number | null }
     | undefined
@@ -1618,9 +2005,9 @@ export function cancelRun(runId: string): boolean {
     "UPDATE messages SET status = 'cancelled', finishedAt = ? WHERE runId = ? AND status = 'running'",
   ).run(Date.now(), runId)
 
-  publishRunLive(runId, { type: 'status', status: 'cancelled', exitCode: null })
+  publishRunStatus(runId, 'cancelled', null)
   publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
-  onRunFinalized(runId)
+  if (!drainQueue) onRunFinalized(runId)
 
   // A run in verification has no live agent child but is very much still
   // occupying the worktree — cancel has to reach the checks too.
@@ -1630,18 +2017,25 @@ export function cancelRun(runId: string): boolean {
     verifyingMap().delete(runId)
   }
 
+  live?.requestStop?.()
+
   let killed = false
+  const child = childOf(live)
   if (child) {
-    killChildTree(child, {
-      graceMs: RUN_KILL_GRACE_MS,
-      stillLive: () => liveMap().has(runId),
-    })
-    liveMap().delete(runId)
+    // Leave the handle in liveMap until the close handler removes it. Dropping
+    // it here used to make killChildTree's stillLive() skip SIGKILL while the
+    // CLI ignored SIGTERM and kept spending tokens.
+    killChildTree(child, { graceMs: RUN_KILL_GRACE_MS })
     killed = true
   } else if (row?.pid != null && isPidAlive(row.pid)) {
     // No handle (restart/HMR) but the OS process is still there — kill by pid.
     killed = killPidTree(row.pid)
   }
+
+  // With a live child, the queue drains from its close handler. Without one
+  // there is no close handler to wait for — a run cancelled during
+  // verification, or after a restart — so deliver here.
+  if (!child && drainOnExitSet().delete(runId)) drainMessageQueue(runId)
 
   return killed || Boolean(verification)
 }
@@ -1692,7 +2086,7 @@ export function reconcileOrphanRuns(): { marked: number; killed: number } {
     db.prepare(
       "UPDATE messages SET status = 'error', finishedAt = ? WHERE runId = ? AND status = 'running'",
     ).run(now, row.id)
-    publishRunLive(row.id, { type: 'status', status: 'error', exitCode: null })
+    publishRunStatus(row.id, 'error', null)
     publishActivityLive({ type: 'run_changed', runId: row.id, status: 'error' })
     onRunFinalized(row.id)
   }
@@ -1747,6 +2141,7 @@ export function runTask(
   runtime: RuntimeRow,
   trigger: 'manual' | 'schedule' | 'webhook',
   promptOverride?: string,
+  source?: MessageSource,
 ) {
   // Task-backed runs must never hit the process.cwd() fallback — that path is
   // reserved for planner (intentional) and other non-task callers.
@@ -1766,5 +2161,6 @@ export function runTask(
     timeoutMs: task.timeoutMs,
     resumeSessionId: task.resumeSessionId,
     resumeSessionLabel: task.resumeSessionLabel,
+    ...(source ? { source } : {}),
   })
 }

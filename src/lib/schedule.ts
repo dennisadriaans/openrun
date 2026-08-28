@@ -118,6 +118,20 @@ export function formatNextRunLabel(cron: string, from = new Date()): string | nu
   return `Next run ${formatted} ${formatTimezoneOffset(date)}`
 }
 
+/** Absolute one-shot label; unlike cron it never rolls forward to tomorrow. */
+export function formatScheduledRunLabel(scheduledAt: number): string | null {
+  if (!Number.isFinite(scheduledAt) || scheduledAt <= 0) return null
+  const date = new Date(scheduledAt)
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+  return `Scheduled ${formatted} ${formatTimezoneOffset(date)}`
+}
+
 export const HOUR_TIMES: Array<{ hour: number; minute: number; label: string }> = Array.from(
   { length: 24 },
   (_, hour) => ({ hour, minute: 0, label: formatTime(hour, 0) }),

@@ -7,19 +7,26 @@ import { Switch } from './ui'
 function SimpleMark({
   title,
   path,
-  hex,
+  fill,
   className,
 }: {
   title: string
   path: string
-  hex: string
+  fill: string
   className?: string
 }) {
   return (
-    <svg role="img" aria-label={title} viewBox="0 0 24 24" className={className} fill={`#${hex}`}>
+    <svg role="img" aria-label={title} viewBox="0 0 24 24" className={className} fill={fill}>
       <path d={path} />
     </svg>
   )
+}
+
+/** Near-black marks (GitHub) vanish on the dark chrome, so they inherit text colour instead. */
+function tooDarkForDarkUi(hex: string): boolean {
+  const n = Number.parseInt(hex, 16)
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! < 60
 }
 
 /** simple-icons dropped the Azure DevOps mark, so that one falls through. */
@@ -34,15 +41,19 @@ const BRAND_MARKS: Partial<Record<IntegrationProviderId, typeof siGithub>> = {
 export function IntegrationBrandIcon({
   id,
   className = 'size-5',
+  onDark = false,
 }: {
   id: IntegrationProviderId
   className?: string
+  /** Set when the icon sits on the app chrome rather than a white tile. */
+  onDark?: boolean
 }) {
   const mark = BRAND_MARKS[id]
   if (!mark) {
     return <InfinityIcon className={className} style={{ color: '#0078D4' }} aria-label={id} />
   }
-  return <SimpleMark title={mark.title} path={mark.path} hex={mark.hex} className={className} />
+  const fill = onDark && tooDarkForDarkUi(mark.hex) ? 'currentColor' : `#${mark.hex}`
+  return <SimpleMark title={mark.title} path={mark.path} fill={fill} className={className} />
 }
 
 const BADGE_TONE: Record<'blue' | 'purple', string> = {

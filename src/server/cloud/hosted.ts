@@ -22,8 +22,9 @@ import {
   getIntegrationPublic,
   type IntegrationPublic,
 } from '../integrations/connections.ts'
-import { cloudConnectionIdFromConfig } from '../../lib/integrations/install.ts'
+import { cloudConnectionIdFromConfig } from '../../lib/integrations/automation.ts'
 import { ingestCanonicalEvent } from '../integrations/dispatcher.ts'
+import { hostedDisconnectDecision } from '../../lib/cloud/hostedDisconnect.ts'
 import { configuredCloudUrl, currentAccessToken } from './login.ts'
 import { clearConnectPending, readConnectPending, readCloudSession } from './session.ts'
 
@@ -137,9 +138,10 @@ export async function listHostedConnections(): Promise<HostedConnectionSummary[]
 }
 
 /**
- * Remove a hosted connection. The control plane deletes the vendor-side webhook
- * first: dropping only the local row would leave the vendor posting events at
- * the Worker forever with nothing to deliver them to.
+ * Remove a hosted connection. The control plane revokes first so deliveries
+ * stop even if Atlassian refuses the delete; this process then drops the local
+ * row on 200/404. A 401 or a network error keeps the row so a later attempt
+ * can still reach the vendor hook.
  */
 export async function disconnectHostedIntegration(integrationId: string): Promise<{
   ok: boolean
@@ -154,23 +156,27 @@ export async function disconnectHostedIntegration(integrationId: string): Promis
     return { ok: true }
   }
 
-  let remoteError: string | undefined
   try {
     const res = await cloudRequest(integrationConnectionPath(cloudConnectionId), {
       method: 'DELETE',
     })
-    // 404 means the control plane already forgot it; nothing left to revoke.
-    if (!res.ok && res.status !== 404) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string }
-      remoteError = body.error || `The control plane refused to disconnect (${res.status}).`
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string
+      remoteError?: string
+      remoteRemoved?: boolean
     }
+    const decision = hostedDisconnectDecision(res.status, body)
+    if (!decision.dropLocal) {
+      return { ok: false, remoteError: decision.error }
+    }
+    deleteIntegration(integrationId)
+    return { ok: true, remoteError: decision.warning }
   } catch (err) {
-    remoteError = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      remoteError: err instanceof Error ? err.message : String(err),
+    }
   }
-
-  if (remoteError) return { ok: false, remoteError }
-  deleteIntegration(integrationId)
-  return { ok: true }
 }
 
 /** Event id each provider fires first, so a test event matches a real binding. */

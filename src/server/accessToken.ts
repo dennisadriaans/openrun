@@ -1,12 +1,6 @@
 /**
- * Resolves the bind address and access token, and enforces them.
- *
- * The rules live in `lib/serverAccess.ts` so the same logic can be reasoned
- * about (and tested) without `node:` imports. This module supplies the values
- * from the environment and disk, and is the only place that reads or writes the
- * token file.
- *
- * Server-only. Never import from a route component.
+ * Resolves the bind address and access token, and enforces them. Rules live in
+ * `lib/serverAccess.ts`; this is the only place that reads or writes the token file. Server-only.
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -24,7 +18,6 @@ import {
   insecureHostWarning,
   isDocumentRequest,
   parseAllowedHosts,
-  pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
@@ -48,24 +41,13 @@ function allowInsecureHost(): boolean {
   return raw === '1' || raw === 'true' || raw === 'yes'
 }
 
-/**
- * Memoized token, so the guard does not stat and read a file on every request.
- *
- * Rotating the token therefore needs a restart. That is the right trade: the
- * check runs on every server function call, and a credential that changes
- * under a live process is harder to reason about than one that does not.
- */
+// Memoized so the guard does not read a file per request; rotating the token needs a restart.
 let cachedToken: { value: string | null } | null = null
 
 /**
- * The configured access token, or `null` when there is none.
- *
- * `OPENRUN_ACCESS_TOKEN` wins. Otherwise we look for a token previously
- * written to `~/.openrun/access-token` — but we never *generate* one here.
- * Auto-generating on a loopback-only install would hand every user a secret
- * they have to manage in order to use a tool the operating system already
- * protects, and it would break `curl localhost:3000` for no gain.
- * {@link ensureAccessToken} generates on demand instead.
+ * The configured access token, or `null`. `OPENRUN_ACCESS_TOKEN` wins, else a token previously
+ * written to `~/.openrun/access-token` — never generated here, so a loopback-only install gets
+ * no secret it must manage. {@link ensureAccessToken} generates on demand instead.
  */
 export function resolveAccessToken(): string | null {
   if (cachedToken) return cachedToken.value
@@ -93,10 +75,8 @@ export function accessTokenPath(): string {
 }
 
 /**
- * Return the access token, creating and persisting one if none exists.
- *
- * Called by operators (via `pnpm token:print`) rather than on the boot path, so a
- * default loopback install never grows a credential it did not ask for.
+ * Return the access token, creating and persisting one if none exists. Called by operators via
+ * `pnpm token:print`, not on boot, so a loopback install never grows a credential it did not ask for.
  */
 export function ensureAccessToken(): string {
   const existing = resolveAccessToken()
@@ -127,26 +107,19 @@ export function serverAccessConfig(): ServerAccessConfig {
 }
 
 /**
- * Short, non-reversible fingerprint of the active token.
- *
- * Printed at boot so an operator can confirm which token is live without the
- * value ever reaching a log file or a screen share.
+ * Short, non-reversible fingerprint of the active token, printed at boot so an operator can
+ * confirm which token is live without the value reaching a log file or a screen share.
  */
 export function accessTokenFingerprint(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 8)
 }
 
-/**
- * Warnings are printed once; the refusal itself is recomputed every time.
- *
- * Guarding the *refusal* on a flag would be a hole: the first caller would
- * throw, set the flag, and every caller after it would sail through.
- */
+// Warnings print once; the refusal is recomputed every time — flagging it would let every
+// caller after the first sail through.
 const announced = globalThis as unknown as { __agentopsAccessAnnounced?: boolean }
 
 /**
  * Why the server must not serve traffic with this configuration, or `null`.
- *
  * Prints the boot banner the first time it is consulted.
  */
 export function serverAccessRefusal(): string | null {
@@ -176,9 +149,7 @@ export function serverAccessRefusal(): string | null {
 }
 
 /**
- * Refuse to start when the configuration would publish command execution to
- * the network.
- *
+ * Refuse to start when the configuration would publish command execution to the network.
  * @throws when the bind address is non-loopback and nothing protects it.
  */
 export function assertServerAccess(): void {
@@ -277,18 +248,6 @@ export function accessDecision(request: Request): AccessDecision {
   if (bindRefusal) return refuse(bindRefusal, 503)
 
   const config = serverAccessConfig()
-
-  let pathname = '/'
-  try {
-    pathname = new URL(request.url).pathname
-  } catch {
-    // Unparseable URL: fall through and require the token.
-  }
-
-  // Signed webhook endpoints authenticate their callers themselves.
-  // They are also the endpoints a third party addresses by a tunnel hostname,
-  // so they sit ahead of the Host check as well as the token check.
-  if (pathAuthenticatesItself(pathname)) return PROCEED
 
   // Runs before the token check: a rebound page is refused whether or not a
   // token is configured, and the default install has none.

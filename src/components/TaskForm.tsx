@@ -10,6 +10,7 @@ import {
   Settings,
   Timer,
   Trash2,
+  Users,
   Webhook,
   Zap,
 } from 'lucide-react'
@@ -23,6 +24,7 @@ import {
   type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { toast } from './toast'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
 import { NATIVE_RESUME_DEFAULT_PROMPT, nativeResumeKindFor } from '../lib/nativeSessions'
 import { DEFAULT_RUN_TIMEOUT_MS } from '../lib/runBudget'
@@ -39,14 +41,32 @@ import {
   useProjects,
   useRuntimes,
   useSaveTask,
+  useSaveTaskWebhook,
   useWorkspaces,
   useIntegrations,
   useIntegrationProviders,
   useNativeSessions,
   useProjectBranches,
   useCreateWorkspace,
+  usePlugins,
+  useSlashCommands,
 } from '../lib/queries'
 import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
+import {
+  applyPluginMention,
+  matchPlugins,
+  pluginMenuQuery,
+  unknownMentions,
+  type AgentPlugin,
+} from '../lib/plugins'
+import { PluginMentionMenu } from './PluginMentionMenu'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import {
+  applySlashCommand,
+  matchSlashCommands,
+  slashMenuQuery,
+  type SlashCommand,
+} from '../lib/slashCommands'
 import {
   HOURLY_MINUTES,
   HOUR_TIMES,
@@ -54,14 +74,16 @@ import {
   buildCron,
   defaultOnceAtCron,
   formatNextRunLabel,
+  formatScheduledRunLabel,
   formatTime,
   formatTimezoneOffset,
+  nextRunAt,
   parseSchedule,
   scheduleLeadIn,
   type ParsedSchedule,
 } from '../lib/schedule'
-import { pickDefaultRuntime } from '../lib/pickRuntime'
-import { pickDefaultWorkspace } from '../lib/pickWorkspace'
+import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
+import { isMainCheckout, pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
 import { workspaceBlockedReason } from '../lib/runPrereqGate'
@@ -69,8 +91,11 @@ import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { missingRuntimeBinaryMessage } from '../lib/runtimeBinary'
 import { AddProjectModal } from './AddProjectModal'
+import { IntegrationBrandIcon } from './IntegrationCard'
 import {
   EffortPicker,
+  FooterMenu,
+  MenuItem,
   ModelPicker,
   ProjectPicker,
   RuntimePicker,
@@ -224,17 +249,23 @@ function ChipSelect({
 function ScheduleTriggerRow({
   cron,
   fireOnce,
+  scheduledAt,
   onChange,
   onRemove,
 }: {
   cron: string
   fireOnce?: boolean
+  scheduledAt?: number
   onChange: (cron: string) => void
   onRemove: () => void
 }) {
   const schedule = useMemo(() => parseSchedule(cron), [cron])
   const tz = useMemo(() => formatTimezoneOffset(), [])
-  const nextRun = useMemo(() => formatNextRunLabel(cron), [cron])
+  const nextRun = useMemo(
+    () =>
+      fireOnce && scheduledAt ? formatScheduledRunLabel(scheduledAt) : formatNextRunLabel(cron),
+    [cron, fireOnce, scheduledAt],
+  )
   const onceAt = Boolean(fireOnce && schedule.kind === 'daily')
 
   const setSchedule = (next: ParsedSchedule) => onChange(buildCron(next))
@@ -653,6 +684,7 @@ export type TaskFormValues = {
   resumeSessionId?: string
   resumeSessionLabel?: string
   fireOnce?: number
+  scheduledAt?: number
 }
 
 const empty: TaskFormValues = {
@@ -673,9 +705,11 @@ const empty: TaskFormValues = {
   resumeSessionId: '',
   resumeSessionLabel: '',
   fireOnce: 0,
+  scheduledAt: 0,
 }
 
 function WebhookTriggerRow({
+  taskId,
   integrationId,
   events,
   filters,
@@ -684,6 +718,7 @@ function WebhookTriggerRow({
   onFiltersChange,
   onRemove,
 }: {
+  taskId?: string
   integrationId: string
   events: string[]
   filters: TaskFormValues['webhookFilters']
@@ -694,122 +729,187 @@ function WebhookTriggerRow({
 }) {
   const { data: integrations } = useIntegrations()
   const { data: providers } = useIntegrationProviders()
+  const saveWebhook = useSaveTaskWebhook()
+  const [savedAt, setSavedAt] = useState(0)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const selected = integrations?.find((i) => i.id === integrationId)
   const catalog = providers?.find((p) => p.id === selected?.provider)
   const enabledIntegrations = (integrations ?? []).filter((i) => i.enabled)
+  const assignees = filters?.assignees ?? []
+
+  const eventsLabel =
+    events.length === 0
+      ? 'Any event'
+      : events.length === 1
+        ? (catalog?.events.find((e) => e.id === events[0])?.label ?? events[0]!)
+        : `${events.length} events`
+
+  const toggleEvent = (id: string) => {
+    onEventsChange(events.includes(id) ? events.filter((e) => e !== id) : [...events, id])
+    setSavedAt(0)
+  }
+
+  const save = () => {
+    if (!taskId) return
+    setSaveError(null)
+    saveWebhook.mutate(
+      {
+        taskId,
+        webhookIntegrationId: integrationId,
+        webhookEvents: events,
+        webhookFilters: filters ?? {},
+      },
+      {
+        onSuccess: () => setSavedAt(Date.now()),
+        onError: (e: unknown) => setSaveError(e instanceof Error ? e.message : 'Save failed'),
+      },
+    )
+  }
 
   return (
-    <div className="space-y-2 rounded-xl border border-border bg-elevated px-3.5 py-2.5">
-      <div className="flex items-start gap-2">
-        <Webhook className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tier-secondary" />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <div className="text-ui-base text-foreground">Webhook</div>
-            <div className="text-ui-sm text-tier-quaternary">
-              Fires when a connected provider delivers a matching event.
-            </div>
-          </div>
-          {enabledIntegrations.length === 0 ? (
-            <p className="text-[12px] text-amber-200/90">
-              No connections yet.{' '}
-              <a href="/integrations" className="underline-offset-2 hover:underline">
-                Connect an issue tracker
-              </a>{' '}
-              first.
-            </p>
-          ) : (
-            <select
-              className={inputClass}
-              value={integrationId}
-              onChange={(e) => onIntegrationChange(e.target.value)}
-              aria-label="Webhook connection"
-            >
-              <option value="">Select connection…</option>
-              {enabledIntegrations.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name} ({i.providerLabel})
-                </option>
-              ))}
-            </select>
-          )}
-          {catalog ? (
-            <div className="flex flex-wrap gap-1.5">
-              {catalog.events.map((ev) => {
-                const on = events.length === 0 || events.includes(ev.id)
-                const explicit = events.includes(ev.id)
-                return (
-                  <button
-                    key={ev.id}
-                    type="button"
-                    title={ev.description ?? ev.id}
-                    onClick={() => {
-                      if (events.length === 0) {
-                        // Leaving [] means "all". First click narrows to everything
-                        // except this one, or to only this one — prefer toggle-on list.
-                        onEventsChange([ev.id])
-                        return
-                      }
-                      if (explicit) {
-                        const next = events.filter((id) => id !== ev.id)
-                        onEventsChange(next)
-                      } else {
-                        onEventsChange([...events, ev.id])
-                      }
-                    }}
-                    className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
-                      on && (events.length === 0 || explicit)
-                        ? 'bg-[var(--bg-primary)] text-foreground'
-                        : 'text-tier-quaternary hover:bg-hover hover:text-tier-secondary'
-                    }`}
-                  >
-                    {ev.label}
-                  </button>
-                )
-              })}
-              {events.length > 0 ? (
-                <button
-                  type="button"
-                  className="rounded-md px-2 py-1 text-[11px] text-tier-tertiary hover:bg-hover"
-                  onClick={() => onEventsChange([])}
-                >
-                  All events
-                </button>
-              ) : (
-                <span className="px-2 py-1 text-[11px] text-tier-quaternary">All events</span>
-              )}
-            </div>
-          ) : null}
-          <label className="block space-y-1">
-            <span className="text-[11px] text-tier-quaternary">Assignees (optional)</span>
-            <input
-              className={inputClass}
-              value={(filters?.assignees ?? []).join(', ')}
-              onChange={(e) => {
-                const assignees = e.target.value
-                  .split(',')
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-                onFiltersChange({ ...filters, assignees: assignees.length ? assignees : undefined })
-              }}
-              placeholder="Ada, Bob — empty means anyone"
-            />
-          </label>
-          <p className="text-[11px] leading-relaxed text-tier-quaternary">
-            Prompt placeholders: {'{{issue.title}}'}, {'{{issue.body}}'}, {'{{issue.key}}'},{' '}
-            {'{{issue.status}}'}, {'{{issue.previousStatus}}'}, {'{{event.type}}'}. Without
-            placeholders, issue context is appended automatically.
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Remove webhook trigger"
-          onClick={onRemove}
-          className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
+    <div className="rounded-xl border border-border bg-elevated px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-ui-base">
+        <FooterMenu
+          label={selected ? selected.name : 'Select connection'}
+          title={selected ? `${selected.name} (${selected.providerLabel})` : 'Webhook connection'}
+          invalid={!selected}
+          leading={
+            selected ? (
+              <IntegrationBrandIcon
+                id={selected.provider}
+                className="h-3.5 w-3.5 shrink-0"
+                onDark
+              />
+            ) : (
+              <Webhook className="h-3.5 w-3.5 shrink-0" />
+            )
+          }
         >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+          {(close) =>
+            enabledIntegrations.length === 0 ? (
+              <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">
+                No connections yet — connect an issue tracker first
+              </div>
+            ) : (
+              enabledIntegrations.map((i) => (
+                <MenuItem
+                  key={i.id}
+                  active={i.id === integrationId}
+                  label={i.name}
+                  hint={i.providerLabel}
+                  leading={
+                    <IntegrationBrandIcon id={i.provider} className="h-3.5 w-3.5 shrink-0" onDark />
+                  }
+                  onSelect={() => {
+                    onIntegrationChange(i.id)
+                    setSavedAt(0)
+                    close()
+                  }}
+                />
+              ))
+            )
+          }
+        </FooterMenu>
+
+        <Divider />
+
+        <FooterMenu
+          label={eventsLabel}
+          title="Events that fire this automation"
+          disabled={!catalog}
+          leading={<Zap className="h-3.5 w-3.5 shrink-0" />}
+        >
+          {() => (
+            <>
+              <MenuItem
+                active={events.length === 0}
+                label="Any event"
+                onSelect={() => {
+                  onEventsChange([])
+                  setSavedAt(0)
+                }}
+              />
+              {(catalog?.events ?? []).map((ev) => (
+                <MenuItem
+                  key={ev.id}
+                  active={events.includes(ev.id)}
+                  label={ev.label}
+                  hint={ev.description ?? ev.id}
+                  onSelect={() => toggleEvent(ev.id)}
+                />
+              ))}
+            </>
+          )}
+        </FooterMenu>
+
+        <Divider />
+
+        <FooterMenu
+          label={assignees.length === 0 ? 'Anyone' : assignees.join(', ')}
+          title="Only fire for these assignees"
+          disabled={!catalog}
+          leading={<Users className="h-3.5 w-3.5 shrink-0" />}
+        >
+          {() => (
+            <div className="p-1">
+              <input
+                className={inputClass}
+                aria-label="Assignees"
+                value={assignees.join(', ')}
+                onChange={(e) => {
+                  const next = e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                  onFiltersChange({ ...filters, assignees: next.length ? next : undefined })
+                  setSavedAt(0)
+                }}
+                placeholder="Anyone"
+              />
+              <p className="px-1 pt-1.5 text-ui-sm text-tier-quaternary">
+                Comma separated. Empty means anyone.
+              </p>
+            </div>
+          )}
+        </FooterMenu>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {savedAt > 0 && !saveWebhook.isPending ? (
+            <span className="flex items-center gap-1 text-ui-sm text-tier-quaternary">
+              <Check className="h-3 w-3" /> Saved
+            </span>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={!taskId || saveWebhook.isPending}
+            title={taskId ? undefined : 'Create the automation first'}
+            onClick={save}
+          >
+            {saveWebhook.isPending ? 'Saving…' : 'Save webhook'}
+          </Button>
+          <button
+            type="button"
+            aria-label="Remove webhook trigger"
+            onClick={onRemove}
+            className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
+
+      {saveError ? <p className="px-1 pb-1 text-ui-sm text-rose-300">{saveError}</p> : null}
     </div>
+  )
+}
+
+function Divider() {
+  return (
+    <span aria-hidden className="text-tier-quaternary">
+      |
+    </span>
   )
 }
 
@@ -846,7 +946,9 @@ export function TaskForm({
   const triggerSeed = invalidTriggerEditorSeed(initial?.cron)
   const [v, setV] = useState<TaskFormValues>(() => ({
     ...empty,
-    ...(isNew && prefs.runtimeId ? { runtimeId: prefs.runtimeId } : {}),
+    ...(isNew && prefs.runtimeId && !prefs.hiddenRuntimes?.includes(prefs.runtimeId)
+      ? { runtimeId: prefs.runtimeId }
+      : {}),
     ...initial,
     cron: triggerSeed.cron,
   }))
@@ -883,6 +985,10 @@ export function TaskForm({
   const [showAddProject, setShowAddProject] = useState(false)
   const [showVerificationSettings, setShowVerificationSettings] = useState(false)
   const [nativeError, setNativeError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [slashDismissed, setSlashDismissed] = useState(false)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
 
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
@@ -900,12 +1006,48 @@ export function TaskForm({
     // Keep a still-valid selection (user pick, prefs, or saved task).
     if (v.runtimeId && runtimes.some((r) => r.id === v.runtimeId)) return
     // Missing / deleted / not-yet-seeded: last-used → installed → first.
-    const next = pickDefaultRuntime(runtimes, isNew ? prefs.runtimeId : undefined)
+    const next = pickDefaultRuntime(
+      isNew ? visibleRuntimes(runtimes, prefs.hiddenRuntimes) : runtimes,
+      isNew ? prefs.runtimeId : undefined,
+    )
     if (next) setV((prev) => ({ ...prev, runtimeId: next.id }))
-  }, [runtimes, v.runtimeId, isNew, prefs.runtimeId])
+  }, [runtimes, v.runtimeId, isNew, prefs.runtimeId, prefs.hiddenRuntimes])
 
   const runtime = runtimes?.find((r) => r.id === v.runtimeId) ?? runtimes?.[0]
   const models = useMemo(() => (runtime ? modelsForRuntime(runtime) : []), [runtime])
+
+  // The prompt field offers the CLI's own command files. App commands
+  // (`/clear`, `/model`) are chat-only — an unattended run has no chat to act
+  // on and no human to answer.
+  const { data: slashCommands } = useSlashCommands(
+    { runtimeId: runtime?.id ?? '', ...(v.workspaceId ? { workspaceId: v.workspaceId } : {}) },
+    { enabled: Boolean(runtime?.id) },
+  )
+  const slashQuery = slashMenuQuery(v.prompt)
+  const slashMatches = useMemo(
+    () =>
+      slashQuery === null ? [] : matchSlashCommands(slashCommands?.commands ?? [], slashQuery),
+    [slashQuery, slashCommands],
+  )
+  const slashMenuOpen = !slashDismissed && slashMatches.length > 0
+
+  // Plugin mentions: the same menu the CLI's own TUI opens on `$`, offered
+  // here because an automation's prompt is the only place an unattended run
+  // can name one.
+  const { data: pluginListing } = usePlugins(
+    { runtimeId: runtime?.id ?? '', ...(v.workspaceId ? { workspaceId: v.workspaceId } : {}) },
+    { enabled: Boolean(runtime?.id) },
+  )
+  const mentionQuery = slashMenuOpen ? null : pluginMenuQuery(v.prompt)
+  const pluginMatches = useMemo(
+    () => (mentionQuery === null ? [] : matchPlugins(pluginListing?.plugins ?? [], mentionQuery)),
+    [mentionQuery, pluginListing],
+  )
+  const pluginMenuOpen = !slashDismissed && pluginMatches.length > 0
+  const missingMentions = useMemo(
+    () => unknownMentions(v.prompt, pluginListing?.plugins ?? []),
+    [v.prompt, pluginListing],
+  )
   const nativeQuery = useNativeSessions(
     { workspaceId: v.workspaceId },
     { enabled: hasWorkspaceId(v.workspaceId) },
@@ -923,6 +1065,9 @@ export function TaskForm({
   // the last-used choice for that runtime before falling back to the default.
   const seededRuntimeRef = useRef<string | null>(null)
   useEffect(() => {
+    // Runtimes still loading: clearing here would wipe the saved model/effort
+    // and latch the seed, so the catalog arriving later can't restore them.
+    if (!runtimes) return
     if (models.length === 0) {
       setModel('')
       setEffort('')
@@ -953,10 +1098,11 @@ export function TaskForm({
     seededRuntimeRef.current = v.runtimeId
     // Prefs are read once per runtime switch; excluding them keeps the seed stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, model, effort, v.runtimeId])
+  }, [models, model, effort, v.runtimeId, runtimes])
 
   const changeRuntimeId = (id: string) => {
     seededRuntimeRef.current = null
+    setDirty(true)
     setV((prev) => {
       const nextRuntime = runtimes?.find((r) => r.id === id)
       const prevKind = nativeResumeKindFor(runtimes?.find((r) => r.id === prev.runtimeId) ?? {})
@@ -972,18 +1118,36 @@ export function TaskForm({
     remember({ runtimeId: id })
   }
   const changeModel = (slug: string) => {
+    setDirty(true)
     setModel(slug)
     const nextEffort = defaultEffort(findModel(models, slug))
     setEffort(nextEffort)
     remember({ forRuntimeId: v.runtimeId, model: slug, effort: nextEffort })
   }
   const changeEffort = (value: string) => {
+    setDirty(true)
     setEffort(value)
     remember({ forRuntimeId: v.runtimeId, effort: value })
   }
 
-  const set = <K extends keyof TaskFormValues>(k: K, val: TaskFormValues[K]) =>
+  const set = <K extends keyof TaskFormValues>(k: K, val: TaskFormValues[K]) => {
+    setDirty(true)
     setV((prev) => ({ ...prev, [k]: val }))
+  }
+
+  const pickSlashCommand = (command: SlashCommand) => {
+    set('prompt', applySlashCommand(command))
+    setSlashIndex(0)
+    setSlashDismissed(false)
+    promptRef.current?.focus()
+  }
+
+  const pickPlugin = (plugin: AgentPlugin) => {
+    set('prompt', applyPluginMention(v.prompt, plugin))
+    setSlashIndex(0)
+    setSlashDismissed(false)
+    promptRef.current?.focus()
+  }
 
   const selectProject = (pid: string) => {
     setProjectId(pid)
@@ -1036,7 +1200,9 @@ export function TaskForm({
   useEffect(() => {
     if (!projectId || v.workspaceId) return
     const picked = pickDefaultWorkspace(projectWorkspaces ?? [])
-    if (picked) set('workspaceId', picked.id)
+    if (picked) {
+      setV((prev) => ({ ...prev, workspaceId: picked.id }))
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, projectWorkspaces])
 
@@ -1105,6 +1271,7 @@ export function TaskForm({
       resumeSessionId: v.resumeSessionId ?? '',
       resumeSessionLabel: v.resumeSessionLabel ?? '',
       fireOnce: Boolean(v.fireOnce) && Boolean(cron),
+      scheduledAt: v.fireOnce && cron ? v.scheduledAt || nextRunAt(cron) || 0 : 0,
     })
     return { id: saved.id, name }
   }
@@ -1123,18 +1290,27 @@ export function TaskForm({
       workspaceReady: Boolean(selectedWorkspace && isWorkspaceReady(selectedWorkspace.status)),
       workspaceStatus: selectedWorkspace?.status ?? null,
     }) ?? undefined
+  const pristine = Boolean(v.id) && !dirty
   const saveBlockReason = save.isPending
     ? 'Saving…'
     : workspaceBlockReason
       ? workspaceBlockReason
       : !promptUsable
         ? emptyTaskPromptMessage()
-        : undefined
+        : pristine
+          ? 'No changes to save'
+          : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const saved = await persist()
-    if (saved) onSaved(saved.id)
+    if (!saved) return
+    setDirty(false)
+    toast.add({
+      type: 'success',
+      title: v.id ? 'Changes saved' : 'Automation created',
+    })
+    onSaved(saved.id)
   }
 
   return (
@@ -1156,7 +1332,7 @@ export function TaskForm({
               <Button
                 type="submit"
                 variant="primary"
-                disabled={save.isPending || !workspaceUsable || !promptUsable}
+                disabled={save.isPending || !workspaceUsable || !promptUsable || pristine}
               >
                 {save.isPending ? 'Saving…' : v.id ? 'Save changes' : 'Create'}
               </Button>
@@ -1203,14 +1379,17 @@ export function TaskForm({
             error={nativeQuery.data?.error}
             selectedId={v.resumeSessionId ?? ''}
             selectedLabel={v.resumeSessionLabel ?? ''}
+            onOpen={() => nativeQuery.refetch()}
             disabled={!hasWorkspaceId(v.workspaceId)}
             disabledReason={!projectId ? 'Select a project first' : 'Select a branch first'}
             onSelectNew={() => {
               setNativeError(null)
+              setDirty(true)
               setV((prev) => ({ ...prev, resumeSessionId: '', resumeSessionLabel: '' }))
             }}
             onSelect={(session, group) => {
               setNativeError(null)
+              setDirty(true)
               seededRuntimeRef.current = null
               setV((prev) => ({
                 ...prev,
@@ -1219,6 +1398,10 @@ export function TaskForm({
                 resumeSessionLabel: session.title,
                 prompt: hasTaskPrompt(prev.prompt) ? prev.prompt : NATIVE_RESUME_DEFAULT_PROMPT,
                 fireOnce: prev.cron.trim() ? 1 : prev.fireOnce,
+                scheduledAt:
+                  prev.cron.trim() && !prev.scheduledAt
+                    ? (nextRunAt(prev.cron) ?? 0)
+                    : prev.scheduledAt,
               }))
               remember({ runtimeId: group.runtimeId })
             }}
@@ -1244,16 +1427,73 @@ export function TaskForm({
         <section>
           <StepLabel n={1}>What the agent should do</StepLabel>
           <div
-            className={`flex min-h-40 flex-col rounded-xl border bg-elevated p-1 ${
+            className={`relative flex min-h-40 flex-col rounded-xl border bg-elevated p-1 ${
               promptError ? 'border-rose-500/40' : 'border-border'
             }`}
           >
+            {slashMenuOpen ? (
+              <SlashCommandMenu
+                commands={slashMatches}
+                activeIndex={Math.min(slashIndex, slashMatches.length - 1)}
+                {...(slashCommands?.note ? { note: slashCommands.note } : {})}
+                onPick={pickSlashCommand}
+              />
+            ) : null}
+            {pluginMenuOpen ? (
+              <PluginMentionMenu
+                plugins={pluginMatches}
+                activeIndex={Math.min(slashIndex, pluginMatches.length - 1)}
+                {...(pluginListing?.note ? { note: pluginListing.note } : {})}
+                onPick={pickPlugin}
+              />
+            ) : null}
             <textarea
+              ref={promptRef}
               className="min-h-28 flex-1 resize-y bg-transparent px-3.5 py-3 text-ui-base text-foreground outline-none placeholder:text-tier-quaternary"
               value={v.prompt}
               onChange={(e) => {
                 set('prompt', e.target.value)
+                setSlashIndex(0)
+                setSlashDismissed(false)
                 if (promptError) setPromptError(null)
+              }}
+              onKeyDown={(e) => {
+                if (pluginMenuOpen && pluginMatches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSlashIndex((i) => (i + 1) % pluginMatches.length)
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSlashIndex((i) => (i - 1 + pluginMatches.length) % pluginMatches.length)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setSlashDismissed(true)
+                  } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    const active = pluginMatches[Math.min(slashIndex, pluginMatches.length - 1)]
+                    if (active) {
+                      e.preventDefault()
+                      pickPlugin(active)
+                    }
+                  }
+                  return
+                }
+                if (!slashMenuOpen || slashMatches.length === 0) return
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i + 1) % slashMatches.length)
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setSlashDismissed(true)
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  const active = slashMatches[Math.min(slashIndex, slashMatches.length - 1)]
+                  if (active) {
+                    e.preventDefault()
+                    pickSlashCommand(active)
+                  }
+                }
               }}
               aria-invalid={Boolean(promptError)}
               aria-describedby={promptError ? 'prompt-required-error' : undefined}
@@ -1262,6 +1502,12 @@ export function TaskForm({
             {promptError ? (
               <p id="prompt-required-error" className="px-3.5 pb-2 text-[12px] text-rose-300">
                 {promptError}
+              </p>
+            ) : null}
+            {missingMentions.length > 0 ? (
+              <p className="px-3.5 pb-1 text-[11px] text-amber-300/90">
+                No installed plugin answers {missingMentions.map((n) => `$${n}`).join(', ')} — the
+                agent will read it as plain text.
               </p>
             ) : null}
             {v.prompt.length > 8_000 ? (
@@ -1313,22 +1559,31 @@ export function TaskForm({
           <StepLabel n={2}>When it should run</StepLabel>
           <div className="space-y-1.5">
             {v.cron ? (
-              <ScheduleTriggerRow
-                cron={v.cron}
-                fireOnce={Boolean(v.fireOnce)}
-                onChange={(cron) => {
-                  set('cron', cron)
-                  setRunOnce(false)
-                  setTriggerError(null)
-                }}
-                onRemove={() => {
-                  set('cron', '')
-                  set('fireOnce', 0)
-                  setAddingTrigger(false)
-                  setTriggerDraft('')
-                  setTriggerError(null)
-                }}
-              />
+              <>
+                <ScheduleTriggerRow
+                  cron={v.cron}
+                  fireOnce={Boolean(v.fireOnce)}
+                  scheduledAt={v.scheduledAt}
+                  onChange={(cron) => {
+                    set('cron', cron)
+                    if (v.fireOnce) set('scheduledAt', nextRunAt(cron) ?? 0)
+                    setRunOnce(false)
+                    setTriggerError(null)
+                  }}
+                  onRemove={() => {
+                    set('cron', '')
+                    set('fireOnce', 0)
+                    set('scheduledAt', 0)
+                    setAddingTrigger(false)
+                    setTriggerDraft('')
+                    setTriggerError(null)
+                  }}
+                />
+                <p className="px-1 text-[12px] text-tier-quaternary">
+                  Open Run must remain running. Recurring fires missed while offline are recorded
+                  and skipped; one-offs catch up for 15 minutes, then show as missed.
+                </p>
+              </>
             ) : null}
 
             {runOnce && !v.cron ? (
@@ -1343,7 +1598,10 @@ export function TaskForm({
                 <button
                   type="button"
                   aria-label="Remove trigger"
-                  onClick={() => setRunOnce(false)}
+                  onClick={() => {
+                    setDirty(true)
+                    setRunOnce(false)
+                  }}
                   className="shrink-0 rounded-md p-1.5 text-tier-quaternary hover:bg-hover hover:text-foreground"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1353,6 +1611,7 @@ export function TaskForm({
 
             {webhookEnabled ? (
               <WebhookTriggerRow
+                taskId={v.id}
                 integrationId={v.webhookIntegrationId ?? ''}
                 events={v.webhookEvents ?? []}
                 filters={v.webhookFilters ?? {}}
@@ -1363,6 +1622,7 @@ export function TaskForm({
                 onEventsChange={(events) => set('webhookEvents', events)}
                 onFiltersChange={(filters) => set('webhookFilters', filters)}
                 onRemove={() => {
+                  setDirty(true)
                   setWebhookEnabled(false)
                   set('webhookIntegrationId', '')
                   set('webhookEvents', [])
@@ -1398,6 +1658,7 @@ export function TaskForm({
                         return
                       }
                       set('cron', next)
+                      if (v.fireOnce) set('scheduledAt', nextRunAt(next) ?? 0)
                       setAddingTrigger(false)
                       setTriggerDraft('')
                       setTriggerError(null)
@@ -1433,6 +1694,10 @@ export function TaskForm({
                     setRunOnce(false)
                     set('cron', cron)
                     set('fireOnce', (v.resumeSessionId ?? '').trim() ? 1 : 0)
+                    set(
+                      'scheduledAt',
+                      (v.resumeSessionId ?? '').trim() ? (nextRunAt(cron) ?? 0) : 0,
+                    )
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)
@@ -1441,13 +1706,16 @@ export function TaskForm({
                     setRunOnce(false)
                     set('cron', '')
                     set('fireOnce', (v.resumeSessionId ?? '').trim() ? 1 : 0)
+                    set('scheduledAt', 0)
                     setAddingTrigger(true)
                     setTriggerError(null)
                   }}
                   onOnceAt={() => {
                     setRunOnce(false)
-                    set('cron', defaultOnceAtCron())
+                    const cron = defaultOnceAtCron()
+                    set('cron', cron)
                     set('fireOnce', 1)
+                    set('scheduledAt', nextRunAt(cron) ?? 0)
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)
@@ -1455,12 +1723,14 @@ export function TaskForm({
                   onRunOnce={() => {
                     set('cron', '')
                     set('fireOnce', 0)
+                    set('scheduledAt', 0)
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)
                     setRunOnce(true)
                   }}
                   onWebhook={() => {
+                    setDirty(true)
                     setRunOnce(false)
                     setWebhookEnabled(true)
                     setAddingTrigger(false)
@@ -1492,11 +1762,20 @@ export function TaskForm({
           {showVerificationSettings ? (
             <VerificationSection
               verifyEnabled={verifyEnabled}
-              onVerifyEnabledChange={setVerifyEnabled}
+              onVerifyEnabledChange={(on) => {
+                setDirty(true)
+                setVerifyEnabled(on)
+              }}
               repairAttempts={repairAttempts}
-              onRepairAttemptsChange={setRepairAttempts}
+              onRepairAttemptsChange={(n) => {
+                setDirty(true)
+                setRepairAttempts(n)
+              }}
               timeoutMinutes={timeoutMinutes}
-              onTimeoutMinutesChange={setTimeoutMinutes}
+              onTimeoutMinutesChange={(n) => {
+                setDirty(true)
+                setTimeoutMinutes(n)
+              }}
             />
           ) : null}
         </section>
@@ -1507,6 +1786,13 @@ export function TaskForm({
             className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300"
           >
             {workspaceError}
+          </p>
+        ) : null}
+
+        {isMainCheckout(selectedWorkspace) ? (
+          <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-300">
+            This automation writes into your main checkout — the branch your editor has open. Pick
+            another branch to give it a worktree of its own under <code>~/.openrun</code>.
           </p>
         ) : null}
 

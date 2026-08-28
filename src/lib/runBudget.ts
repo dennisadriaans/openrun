@@ -42,3 +42,19 @@ export function runTimedOutMessage(timeoutMs: number): string {
   const minutes = Math.round(timeoutMs / 60_000)
   return `Run stopped after its ${minutes}-minute budget elapsed.`
 }
+
+/**
+ * Silence watchdog. A CLI waiting out a usage limit produces no output at all,
+ * which is indistinguishable from a long tool call until you know how long the
+ * quiet has lasted — so say so in the log rather than killing the turn.
+ */
+export const RUN_STALL_AFTER_MS = 5 * 60 * 1000
+export const RUN_STALL_CHECK_MS = 30 * 1000
+
+export function runStalledMessage(silentMs: number): string {
+  const minutes = Math.max(1, Math.round(silentMs / 60_000))
+  return `No output from the agent for ${minutes} minutes — it may be wedged or waiting out a usage limit.`
+}
+
+/** How long a CLI may linger after it said the turn was done. */
+export const TURN_DONE_LINGER_MS = 15 * 1000

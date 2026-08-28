@@ -10,17 +10,24 @@
  * When a run has a `baseSnapshot` (captured at start), diffs/commits/discards
  * are scoped to the delta from that snapshot so pre-existing dirt is ignored.
  */
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { ensureProcessPathAugmented, findOnPath } from './userPath.ts'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { extractHunkPatch, parseUnifiedDiff } from '../lib/diff.ts'
 import {
   ghNotAuthenticatedMessage,
   ghNotInstalledMessage,
   missingOriginRemoteMessage,
 } from '../lib/gitActionGate.ts'
 import { parseGitForEachRef, type GitBranchRow } from '../lib/gitBranches.ts'
+import {
+  NO_RUN_COMMITS,
+  undoCommitsBlockedReason,
+  type RunCommit,
+  type RunCommitSummary,
+} from '../lib/undoRun.ts'
 
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
 
@@ -57,6 +64,7 @@ function git(
   cwd: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
+  input?: string,
 ): { ok: boolean; stdout: string; stderr: string } {
   try {
     const res = spawnSync('git', args, {
@@ -64,6 +72,7 @@ function git(
       encoding: 'utf8',
       maxBuffer: MAX_BUFFER,
       env: env ?? gitEnv(),
+      input,
     })
     return {
       ok: res.status === 0,
@@ -73,6 +82,44 @@ function git(
   } catch (err) {
     return { ok: false, stdout: '', stderr: String(err) }
   }
+}
+
+function gitAsync(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+  input?: string,
+): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn('git', args, {
+        cwd,
+        env: env ?? gitEnv(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      let stdout = ''
+      let stderr = ''
+      if (input != null) child.stdin.write(input)
+      child.stdin.end()
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk
+        if (stdout.length > MAX_BUFFER) child.kill('SIGTERM')
+      })
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk
+      })
+      child.on('error', (err) => {
+        resolve({ ok: false, stdout: '', stderr: String(err) })
+      })
+      child.on('close', (code) => {
+        resolve({ ok: code === 0, stdout, stderr })
+      })
+    } catch (err) {
+      resolve({ ok: false, stdout: '', stderr: String(err) })
+    }
+  })
 }
 
 /**
@@ -139,6 +186,43 @@ export function repoInfo(cwd: string): RepoInfo {
   const dirty = git(cwd, ['status', '--porcelain']).stdout.trim().length > 0
 
   return { isRepo: true, branch, head, remote, hasUpstream, ahead, dirty }
+}
+
+export async function repoInfoAsync(cwd: string): Promise<RepoInfo> {
+  const empty: RepoInfo = {
+    isRepo: false,
+    branch: '',
+    head: '',
+    remote: '',
+    hasUpstream: false,
+    ahead: 0,
+    dirty: false,
+  }
+  const inside = await gitAsync(cwd, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.stdout.trim() !== 'true') return empty
+
+  const [branchRes, headRes, remoteRes, upstream] = await Promise.all([
+    gitAsync(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    gitAsync(cwd, ['rev-parse', '--short', 'HEAD']),
+    gitAsync(cwd, ['remote', 'get-url', 'origin']),
+    gitAsync(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']),
+  ])
+  const hasUpstream = upstream.ok && upstream.stdout.trim().length > 0
+  let ahead = 0
+  if (hasUpstream) {
+    const counts = await gitAsync(cwd, ['rev-list', '--left-right', '--count', '@{u}...HEAD'])
+    ahead = Number(counts.stdout.trim().split(/\s+/)[1] ?? 0) || 0
+  }
+  const dirtyRes = await gitAsync(cwd, ['status', '--porcelain'])
+  return {
+    isRepo: true,
+    branch: branchRes.stdout.trim(),
+    head: headRes.stdout.trim(),
+    remote: remoteRes.stdout.trim(),
+    hasUpstream,
+    ahead,
+    dirty: dirtyRes.stdout.trim().length > 0,
+  }
 }
 
 function statusFromCode(code: string): FileStatus {
@@ -221,6 +305,131 @@ export function captureBaseSnapshot(cwd: string): string {
       // best-effort cleanup
     }
   }
+}
+
+/** Field separator inside one `git log --format` record; never appears in a subject. */
+const LOG_SEP = '\x1f'
+
+function parseRunCommitLog(stdout: string): RunCommit[] {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [sha = '', subject = ''] = line.split(LOG_SEP)
+      return { sha, subject }
+    })
+    .filter((c) => c.sha.length > 0)
+}
+
+/**
+ * The commit the branch pointed at when the run started, or '' when nothing
+ * safe to reset to remains.
+ *
+ * `captureBaseSnapshot` writes a dangling commit whose *parent* is that HEAD,
+ * so the snapshot itself must never become a reset target — it carries the
+ * working tree as its tree. When capture fell back to HEAD (clean tree, or a
+ * failure) the snapshot is already the commit we want, which is exactly the
+ * case where it is reachable from HEAD.
+ *
+ * A base that is no longer an ancestor of HEAD means the history moved under
+ * us — a rebase, an amend, a reset by hand. Resetting to it then would throw
+ * away work this run never made, so we report nothing instead.
+ */
+function runBaseCommit(cwd: string, baseSnapshot: string): string {
+  const base = baseSnapshot.trim()
+  if (!base) return ''
+  if (!git(cwd, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) return ''
+
+  const candidate = git(cwd, ['merge-base', '--is-ancestor', base, 'HEAD']).ok
+    ? base
+    : git(cwd, ['rev-parse', '--verify', '--quiet', `${base}^`]).stdout.trim()
+
+  if (!candidate) return ''
+  return git(cwd, ['merge-base', '--is-ancestor', candidate, 'HEAD']).ok ? candidate : ''
+}
+
+/**
+ * Commits made during the run, and how many of them a remote already has.
+ *
+ * `--not --remotes` is the cheap form of "which of these has never left this
+ * machine": anything reachable from a remote-tracking ref drops out, so the
+ * remainder is what a reset could drop without rewriting published history.
+ */
+export function runCommits(cwd: string, baseSnapshot: string): RunCommitSummary {
+  if (!isRepo(cwd)) return NO_RUN_COMMITS
+
+  const baseCommit = runBaseCommit(cwd, baseSnapshot)
+  if (!baseCommit) return NO_RUN_COMMITS
+
+  const log = git(cwd, ['log', `--format=%H${LOG_SEP}%s`, `${baseCommit}..HEAD`])
+  const commits = log.ok ? parseRunCommitLog(log.stdout) : []
+  if (commits.length === 0) return { baseCommit, commits: [], published: 0 }
+
+  const unpublished = git(cwd, ['rev-list', '--count', `${baseCommit}..HEAD`, '--not', '--remotes'])
+  const local = unpublished.ok ? Number(unpublished.stdout.trim()) || 0 : commits.length
+  return { baseCommit, commits, published: Math.max(0, commits.length - local) }
+}
+
+/** Async twin of {@link runCommits} for the read path. */
+export async function runCommitsAsync(
+  cwd: string,
+  baseSnapshot: string,
+): Promise<RunCommitSummary> {
+  const inside = await gitAsync(cwd, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.stdout.trim() !== 'true') return NO_RUN_COMMITS
+
+  const base = baseSnapshot.trim()
+  if (!base) return NO_RUN_COMMITS
+  if (!(await gitAsync(cwd, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`])).ok) {
+    return NO_RUN_COMMITS
+  }
+
+  const snapshotOnBranch = await gitAsync(cwd, ['merge-base', '--is-ancestor', base, 'HEAD'])
+  const candidate = snapshotOnBranch.ok
+    ? base
+    : (await gitAsync(cwd, ['rev-parse', '--verify', '--quiet', `${base}^`])).stdout.trim()
+  if (!candidate) return NO_RUN_COMMITS
+  if (!(await gitAsync(cwd, ['merge-base', '--is-ancestor', candidate, 'HEAD'])).ok) {
+    return NO_RUN_COMMITS
+  }
+
+  const [log, unpublished] = await Promise.all([
+    gitAsync(cwd, ['log', `--format=%H${LOG_SEP}%s`, `${candidate}..HEAD`]),
+    gitAsync(cwd, ['rev-list', '--count', `${candidate}..HEAD`, '--not', '--remotes']),
+  ])
+  const commits = log.ok ? parseRunCommitLog(log.stdout) : []
+  if (commits.length === 0) return { baseCommit: candidate, commits: [], published: 0 }
+
+  const local = unpublished.ok ? Number(unpublished.stdout.trim()) || 0 : commits.length
+  return { baseCommit: candidate, commits, published: Math.max(0, commits.length - local) }
+}
+
+/**
+ * Move the branch back to where the run found it, keeping the working tree.
+ *
+ * `--mixed` rather than `--hard` on purpose: the caller has already restored
+ * every file to the base snapshot, and that snapshot includes changes the user
+ * had in flight *before* the run. A hard reset would take those with it.
+ * Afterwards the branch is back, the index is clean, and anything the user was
+ * mid-edit on is still sitting in the worktree as unstaged work.
+ *
+ * The dropped commits stay in the reflog; `previousHead` is what you hand
+ * someone who wants them back.
+ */
+export function resetRunCommits(
+  cwd: string,
+  baseSnapshot: string,
+): { baseCommit: string; previousHead: string; dropped: number } {
+  if (!isRepo(cwd)) throw new Error('Not a git repository')
+
+  const summary = runCommits(cwd, baseSnapshot)
+  const blocked = undoCommitsBlockedReason(summary)
+  if (blocked) throw new Error(blocked)
+
+  const previousHead = git(cwd, ['rev-parse', 'HEAD']).stdout.trim()
+  gitOrThrow(cwd, ['reset', '--mixed', summary.baseCommit])
+  return { baseCommit: summary.baseCommit, previousHead, dropped: summary.commits.length }
 }
 
 /**
@@ -342,6 +551,142 @@ export function changedFiles(cwd: string, since?: string): DiffFile[] {
       binary: stats.binary,
     })
   }
+
+  return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
+}
+
+export async function changedFilesAsync(cwd: string, since?: string): Promise<DiffFile[]> {
+  const inside = await gitAsync(cwd, ['rev-parse', '--is-inside-work-tree'])
+  if (inside.stdout.trim() !== 'true') return []
+
+  const base = since && since.length > 0 ? since : 'HEAD'
+  const files = new Map<string, DiffFile>()
+
+  const [nameStatusRes, numstatRes, untrackedRes] = await Promise.all([
+    gitAsync(cwd, ['diff', base, '--name-status', '-M', '-z']),
+    gitAsync(cwd, ['diff', base, '--numstat', '-M', '-z']),
+    gitAsync(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
+  ])
+
+  const parts = nameStatusRes.stdout.split('\0').filter((p) => p.length > 0)
+  const pendingHash: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const code = parts[i]!
+    if (code.startsWith('R')) {
+      const oldPath = parts[++i] ?? ''
+      const path = parts[++i] ?? ''
+      files.set(path, {
+        path,
+        oldPath,
+        status: 'renamed',
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      })
+    } else {
+      const path = parts[++i] ?? ''
+      if (!path) continue
+      if (code.includes('D') && existsSync(join(cwd, path))) {
+        pendingHash.push(path)
+        continue
+      }
+      files.set(path, {
+        path,
+        oldPath: null,
+        status: statusFromCode(code),
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      })
+    }
+  }
+
+  await Promise.all(
+    pendingHash.map(async (path) => {
+      const [prev, cur] = await Promise.all([
+        gitAsync(cwd, ['rev-parse', `${base}:${path}`]),
+        gitAsync(cwd, ['hash-object', '--', path]),
+      ])
+      const prevHash = prev.ok ? prev.stdout.trim() : ''
+      const curHash = cur.ok ? cur.stdout.trim() : ''
+      if (prevHash && curHash && prevHash === curHash) return
+      files.set(path, {
+        path,
+        oldPath: null,
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        binary: false,
+      })
+    }),
+  )
+
+  const nparts = numstatRes.stdout.split('\0').filter((p) => p.length > 0)
+  for (let i = 0; i < nparts.length; i++) {
+    const line = nparts[i]!
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.*)$/)
+    if (!m) continue
+    const [, addRaw, delRaw, tail] = m
+    let path = tail!
+    if (path === '') {
+      i++
+      path = nparts[++i] ?? ''
+    }
+    const entry = files.get(path)
+    if (!entry) continue
+    entry.binary = addRaw === '-' || delRaw === '-'
+    entry.additions = entry.binary ? 0 : Number(addRaw)
+    entry.deletions = entry.binary ? 0 : Number(delRaw)
+  }
+
+  const untrackedPaths = untrackedRes.stdout.split('\0').filter((p) => p.length > 0)
+  await Promise.all(
+    untrackedPaths.map(async (path) => {
+      const statsRes = await gitAsync(cwd, ['diff', '--no-index', '--numstat', '/dev/null', path])
+      const statMatch = statsRes.stdout.match(/^(\d+|-)\t(\d+|-)\t/)
+      const binary = statMatch ? statMatch[1] === '-' : false
+      const additions = binary || !statMatch ? 0 : Number(statMatch[1])
+
+      if (files.has(path)) {
+        const entry = files.get(path)!
+        entry.additions = additions
+        entry.deletions = 0
+        entry.binary = binary
+        return
+      }
+
+      if (since && since.length > 0) {
+        const inTree = await gitAsync(cwd, ['cat-file', '-e', `${base}:${path}`])
+        if (inTree.ok) {
+          const [prev, cur] = await Promise.all([
+            gitAsync(cwd, ['rev-parse', `${base}:${path}`]),
+            gitAsync(cwd, ['hash-object', '--', path]),
+          ])
+          const prevHash = prev.ok ? prev.stdout.trim() : ''
+          const curHash = cur.ok ? cur.stdout.trim() : ''
+          if (prevHash && curHash && prevHash === curHash) return
+          files.set(path, {
+            path,
+            oldPath: null,
+            status: 'modified',
+            additions,
+            deletions: 0,
+            binary,
+          })
+          return
+        }
+      }
+
+      files.set(path, {
+        path,
+        oldPath: null,
+        status: 'untracked',
+        additions,
+        deletions: 0,
+        binary,
+      })
+    }),
+  )
 
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
@@ -481,6 +826,46 @@ export function discard(
   return { discarded: paths.length }
 }
 
+/**
+ * Reverse one hunk of the run delta, like `git apply -R` on a `git log -p`
+ * slice. A file whose remaining diff is a single hunk is restored wholesale.
+ */
+export function discardHunk(
+  cwd: string,
+  path: string,
+  hunkIndex: number,
+  since?: string,
+): { discarded: number } {
+  if (!isRepo(cwd)) throw new Error('Not a git repository')
+  if (!Number.isInteger(hunkIndex) || hunkIndex < 0) {
+    throw new Error('That change is no longer in the diff')
+  }
+
+  const diff = fileDiff(cwd, path, since)
+  const parsed = parseUnifiedDiff(diff)
+  if (parsed.binary) throw new Error('Binary files can only be undone as a whole')
+  if (hunkIndex >= parsed.hunks.length) {
+    throw new Error('That change is no longer in the diff')
+  }
+  if (parsed.hunks.length === 1) {
+    discard(cwd, [path], since)
+    return { discarded: 1 }
+  }
+
+  const patch = extractHunkPatch(diff, hunkIndex)
+  if (!patch) throw new Error('That change is no longer in the diff')
+
+  const attempt = (args: string[]) => git(cwd, args, undefined, patch)
+  const first = attempt(['apply', '-R', '--whitespace=nowarn', '--recount'])
+  if (first.ok) return { discarded: 1 }
+
+  const retry = attempt(['apply', '-R', '--whitespace=nowarn', '--unidiff-zero', '-C0'])
+  if (!retry.ok) {
+    throw new Error(gitErrorMessage(retry.stderr, 'Could not undo that change'))
+  }
+  return { discarded: 1 }
+}
+
 const GH_STATUS_TTL_MS = 60_000
 let ghStatusCache: { at: number; value: { installed: boolean; authenticated: boolean } } | null =
   null
@@ -500,6 +885,32 @@ export function ghStatus(): { installed: boolean; authenticated: boolean } {
     }
     const auth = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' })
     const value = { installed: true, authenticated: auth.status === 0 }
+    ghStatusCache = { at: now, value }
+    return value
+  } catch {
+    const value = { installed: false, authenticated: false }
+    ghStatusCache = { at: now, value }
+    return value
+  }
+}
+
+export async function ghStatusAsync(): Promise<{ installed: boolean; authenticated: boolean }> {
+  const now = Date.now()
+  if (ghStatusCache && now - ghStatusCache.at < GH_STATUS_TTL_MS) {
+    return ghStatusCache.value
+  }
+  try {
+    ensureProcessPathAugmented()
+    if (!findOnPath('gh')) {
+      const value = { installed: false, authenticated: false }
+      ghStatusCache = { at: now, value }
+      return value
+    }
+    const value = await new Promise<{ installed: boolean; authenticated: boolean }>((resolve) => {
+      const child = spawn('gh', ['auth', 'status'], { stdio: ['ignore', 'ignore', 'ignore'] })
+      child.on('error', () => resolve({ installed: true, authenticated: false }))
+      child.on('close', (code) => resolve({ installed: true, authenticated: code === 0 }))
+    })
     ghStatusCache = { at: now, value }
     return value
   } catch {

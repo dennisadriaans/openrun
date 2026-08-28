@@ -29,18 +29,31 @@ import {
 } from '../lib/models'
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import {
+  hiddenRuntimesIn,
+  installedRuntimes,
+  toggleHiddenRuntime,
+  visibleRuntimes,
+} from '../lib/pickRuntime'
+import {
   DEFAULT_RUNTIME_MODE,
   RUNTIME_MODES,
   runtimeModeLabel,
   type RuntimeMode,
 } from '../lib/runtimeMode'
 import { ProviderIcon } from './ProviderIcons'
+import { Tooltip } from './ui'
 
 export type RuntimeOption = {
   id: string
   label: string
   bin: string
   description?: string
+  /** False / missing means the binary is not on PATH. */
+  installed?: boolean
+  /** 'cli' or 'acp' — decides whether Supervised is offered. */
+  transport?: string
+  /** Discovered catalog, when the caller has one; falls back to the seed. */
+  models?: ModelOption[]
 }
 
 function useClickOutside(
@@ -68,23 +81,27 @@ function useClickOutside(
   }, [open, onClose, triggerRef, menuRef])
 }
 
-function FooterMenu({
+export function FooterMenu({
   label,
   title,
+  tooltip,
   disabled,
   leading,
   align = 'start',
   invalid,
   'aria-describedby': ariaDescribedBy,
+  onOpen,
   children,
 }: {
   label: string
   title?: string
+  tooltip?: string
   disabled?: boolean
   leading?: ReactNode
   align?: 'start' | 'end'
   invalid?: boolean
   'aria-describedby'?: string
+  onOpen?: () => void
   children: (close: () => void) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -95,6 +112,7 @@ function FooterMenu({
     top: number
     left: number
     openUp: boolean
+    maxHeight: number
   } | null>(null)
 
   useClickOutside(open, () => setOpen(false), triggerRef, menuRef)
@@ -109,9 +127,10 @@ function FooterMenu({
       if (!button) return
       const rect = button.getBoundingClientRect()
       const menuWidth = menuRef.current?.offsetWidth ?? 224
-      const menuHeight = menuRef.current?.offsetHeight ?? 260
+      const menuHeight = menuRef.current?.scrollHeight ?? 260
       const spaceBelow = window.innerHeight - rect.bottom
       const openUp = spaceBelow < menuHeight + 12 && rect.top > spaceBelow
+      const maxHeight = Math.max(120, (openUp ? rect.top : spaceBelow) - 14)
       const left =
         align === 'end'
           ? Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8))
@@ -120,6 +139,7 @@ function FooterMenu({
         top: openUp ? rect.top - 6 : rect.bottom + 6,
         left,
         openUp,
+        maxHeight,
       })
     }
     update()
@@ -133,18 +153,21 @@ function FooterMenu({
     }
   }, [open, align])
 
-  return (
+  const menu = (
     <div ref={triggerRef} className="relative min-w-0">
       <button
         ref={buttonRef}
         type="button"
         disabled={disabled}
-        title={title}
+        title={tooltip ? undefined : title}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-invalid={invalid || undefined}
         aria-describedby={ariaDescribedBy}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) onOpen?.()
+          setOpen((v) => !v)
+        }}
         className={`inline-flex h-8 max-w-52 min-w-0 items-center gap-2 truncate rounded-lg px-2.5 text-ui-base transition-colors hover:bg-hover disabled:pointer-events-none disabled:opacity-40 sm:max-w-60 ${
           invalid
             ? 'text-rose-300 hover:text-rose-200'
@@ -167,9 +190,10 @@ function FooterMenu({
                   ? { bottom: window.innerHeight - (coords?.top ?? 0) }
                   : { top: coords?.top ?? 0 }),
                 zIndex: 200,
+                maxHeight: coords?.maxHeight,
                 visibility: coords ? 'visible' : 'hidden',
               }}
-              className="min-w-52 overflow-hidden rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
+              className="min-w-52 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
             >
               {children(() => setOpen(false))}
             </div>,
@@ -178,9 +202,16 @@ function FooterMenu({
         : null}
     </div>
   )
+
+  if (!tooltip) return menu
+  return (
+    <Tooltip content={tooltip} disabled={open}>
+      {menu}
+    </Tooltip>
+  )
 }
 
-function MenuItem({
+export function MenuItem({
   active,
   disabled,
   label,
@@ -221,22 +252,30 @@ function MenuItem({
 }
 
 /**
- * A model row with its own hide / unhide control.
+ * A picker row with its own hide / unhide control.
  *
  * Separate from {@link MenuItem} because the toggle has to be a real button
  * beside the row rather than inside it — nesting buttons is invalid, and the
- * two need different click targets so hiding a model never selects it.
+ * two need different click targets so hiding an item never selects it.
  */
-function ModelMenuItem({
-  model,
+function HideableMenuItem({
+  label,
+  hint,
+  leading,
   active,
   hidden,
+  hideTitle,
+  showTitle,
   onSelect,
   onToggleHidden,
 }: {
-  model: ModelOption
+  label: string
+  hint?: string
+  leading?: ReactNode
   active: boolean
   hidden: boolean
+  hideTitle: string
+  showTitle: string
   onSelect: () => void
   onToggleHidden: () => void
 }) {
@@ -252,25 +291,53 @@ function ModelMenuItem({
             : 'text-foreground/85 hover:bg-hover hover:text-foreground'
         } ${hidden ? 'opacity-50' : ''}`}
       >
-        <span className="shrink-0 text-tier-secondary">
-          <ProviderIcon kind={model.provider} className="h-3.5 w-3.5 shrink-0" />
-        </span>
+        {leading ? <span className="shrink-0 text-tier-secondary">{leading}</span> : null}
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{model.name}</span>
-          <span className="block truncate text-ui-sm text-tier-quaternary">{model.slug}</span>
+          <span className="block truncate">{label}</span>
+          {hint ? (
+            <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
+          ) : null}
         </span>
         {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
       </button>
       <button
         type="button"
-        title={hidden ? `Show ${model.name} again` : `Hide ${model.name} from this list`}
-        aria-label={hidden ? `Show ${model.name}` : `Hide ${model.name}`}
+        title={hidden ? showTitle : hideTitle}
+        aria-label={hidden ? showTitle : hideTitle}
         onClick={onToggleHidden}
         className="absolute right-1 rounded-md p-1.5 text-tier-quaternary opacity-0 transition-colors group-hover/model:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
       >
         {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
       </button>
     </div>
+  )
+}
+
+function ModelMenuItem({
+  model,
+  active,
+  hidden,
+  onSelect,
+  onToggleHidden,
+}: {
+  model: ModelOption
+  active: boolean
+  hidden: boolean
+  onSelect: () => void
+  onToggleHidden: () => void
+}) {
+  return (
+    <HideableMenuItem
+      label={model.name}
+      hint={model.slug}
+      leading={<ProviderIcon kind={model.provider} className="h-3.5 w-3.5 shrink-0" />}
+      active={active}
+      hidden={hidden}
+      hideTitle={`Hide ${model.name} from this list`}
+      showTitle={`Show ${model.name} again`}
+      onSelect={onSelect}
+      onToggleHidden={onToggleHidden}
+    />
   )
 }
 
@@ -412,6 +479,7 @@ export function ProjectPicker({
     <FooterMenu
       label={selected?.name ?? placeholder}
       title={selected?.path || selected?.name || placeholder}
+      tooltip="Git repo to work in"
       disabled={disabled}
       invalid={invalid}
       aria-describedby={ariaDescribedBy}
@@ -476,11 +544,14 @@ export type BranchOption = {
   hint?: string
 }
 
+const BRANCH_PAGE_SIZE = 5
+
 export function BranchPicker({
   workspaces,
   workspaceId,
   disabled,
   placeholder = 'Select branch',
+  newBranchLabel = 'New branch',
   onChange,
   onRequestNewBranch,
 }: {
@@ -488,24 +559,30 @@ export function BranchPicker({
   workspaceId: string
   disabled?: boolean
   placeholder?: string
+  newBranchLabel?: string
   onChange: (id: string) => void
   onRequestNewBranch?: () => void
 }) {
   const selected = workspaces.find((w) => w.id === workspaceId)
+  const [visibleCount, setVisibleCount] = useState(BRANCH_PAGE_SIZE)
+  const visibleWorkspaces = workspaces.slice(0, visibleCount)
+  const hasMore = visibleWorkspaces.length < workspaces.length
 
   return (
     <FooterMenu
       label={selected?.branch ?? placeholder}
       title={selected?.branch ?? placeholder}
+      tooltip="Branch to check out"
       disabled={disabled}
       leading={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
+      onOpen={() => setVisibleCount(BRANCH_PAGE_SIZE)}
     >
       {(close) => (
         <>
           {workspaces.length === 0 ? (
             <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">No branches yet</div>
           ) : (
-            workspaces.map((w) => (
+            visibleWorkspaces.map((w) => (
               <MenuItem
                 key={w.id}
                 active={w.id === workspaceId}
@@ -522,9 +599,19 @@ export function BranchPicker({
               />
             ))
           )}
+          {hasMore ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setVisibleCount((count) => count + BRANCH_PAGE_SIZE)}
+              className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground"
+            >
+              Load more
+            </button>
+          ) : null}
           {onRequestNewBranch ? (
             <MenuItem
-              label="New branch"
+              label={newBranchLabel}
               leading={<Plus className="h-3.5 w-3.5 shrink-0" />}
               onSelect={() => {
                 close()
@@ -551,8 +638,16 @@ export function RuntimePicker({
   align?: 'start' | 'end'
   onChange: (id: string) => void
 }) {
+  const { prefs, remember } = usePickerPrefs()
+  const [showHidden, setShowHidden] = useState(false)
+
   if (runtimes.length === 0) return null
   const selected = runtimes.find((r) => r.id === runtimeId) ?? runtimes[0]!
+  const present = installedRuntimes(runtimes, selected.id)
+  const shown = visibleRuntimes(present, prefs.hiddenRuntimes, selected.id)
+  const hidden = hiddenRuntimesIn(present, prefs.hiddenRuntimes, selected.id)
+  const toggleHidden = (id: string) =>
+    remember({ hiddenRuntimes: toggleHiddenRuntime(prefs.hiddenRuntimes, id) })
 
   return (
     <FooterMenu
@@ -564,23 +659,39 @@ export function RuntimePicker({
         <ProviderIcon kind={modelKindForBin(selected.bin)} className="h-3.5 w-3.5 shrink-0" />
       }
     >
-      {(close) =>
-        runtimes.map((r) => (
-          <MenuItem
-            key={r.id}
-            active={r.id === selected.id}
-            label={r.label}
-            hint={r.bin}
-            leading={
-              <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
-            }
-            onSelect={() => {
-              onChange(r.id)
-              close()
-            }}
-          />
-        ))
-      }
+      {(close) => (
+        <>
+          {(showHidden ? present : shown).map((r) => (
+            <HideableMenuItem
+              key={r.id}
+              label={r.label}
+              hint={r.bin}
+              leading={
+                <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
+              }
+              active={r.id === selected.id}
+              hidden={hidden.some((h) => h.id === r.id)}
+              hideTitle={`Hide ${r.label} from this list`}
+              showTitle={`Show ${r.label} again`}
+              onSelect={() => {
+                onChange(r.id)
+                close()
+              }}
+              onToggleHidden={() => toggleHidden(r.id)}
+            />
+          ))}
+          {hidden.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowHidden((v) => !v)}
+              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2 pb-1 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary"
+            >
+              {showHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {showHidden ? 'Hide hidden runtimes' : `${hidden.length} hidden`}
+            </button>
+          ) : null}
+        </>
+      )}
     </FooterMenu>
   )
 }

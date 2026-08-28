@@ -129,3 +129,45 @@ export function toSplitRows(hunk: DiffHunk): SplitRow[] {
 
   return rows
 }
+
+/**
+ * File-header lines plus a single hunk, so `git apply -R` can undo one change
+ * the way `git log -p` / `git apply --reverse` does.
+ */
+export function extractHunkPatch(raw: string, hunkIndex: number): string | null {
+  if (!raw || hunkIndex < 0) return null
+
+  const lines = raw.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+
+  const prefix: string[] = []
+  const hunks: string[][] = []
+  let current: string[] | null = null
+
+  for (const line of lines) {
+    if (line.startsWith('Binary files ') || line.startsWith('GIT binary patch')) return null
+    if (line.startsWith('@@ ')) {
+      current = [line]
+      hunks.push(current)
+      continue
+    }
+    if (current) current.push(line)
+    else prefix.push(line)
+  }
+
+  const hunk = hunks[hunkIndex]
+  if (!hunk) return null
+  return `${[...prefix, ...hunk].join('\n')}\n`
+}
+
+/**
+ * Map a tool-call path (often absolute) onto a repo-relative path from the
+ * run's diff list, so chat Undo talks to git with the same path the panel uses.
+ */
+export function matchDiffPath(toolPath: string, diffPaths: string[]): string | undefined {
+  const n = toolPath.replace(/\\/g, '/')
+  return diffPaths.find((p) => {
+    const q = p.replace(/\\/g, '/')
+    return q === n || n.endsWith(`/${q}`) || q.endsWith(`/${n}`)
+  })
+}

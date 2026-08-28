@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { displayPath, editHunksFromInput, toolCallVerb, toolCallView } from './toolCallView.ts'
+import {
+  displayPath,
+  editHunksFromInput,
+  formatToolResult,
+  hasEditHunks,
+  humanizeToolName,
+  toolCallFields,
+  toolCallVerb,
+  toolCallView,
+} from './toolCallView.ts'
 
 describe('displayPath', () => {
   it('keeps the last two directories of an absolute path', () => {
@@ -29,6 +38,8 @@ describe('toolCallVerb', () => {
     assert.equal(toolCallVerb('edit', 'Write', 'completed'), 'Wrote')
     assert.equal(toolCallVerb('search', 'Grep', 'completed'), 'Searched')
     assert.equal(toolCallVerb('search', 'Glob', 'completed'), 'Found')
+    assert.equal(toolCallVerb('fetch', 'web_search', 'completed'), 'Searched')
+    assert.equal(toolCallVerb('fetch', 'WebFetch', 'completed'), 'Fetched')
   })
 
   it('uses progressive tense while the call is in flight', () => {
@@ -114,6 +125,15 @@ describe('toolCallView', () => {
     })
     assert.equal(view.verb, 'Edited')
     assert.deepEqual(view.hunks, [{ oldString: 'const x = 1', newString: 'const x = 2' }])
+    assert.equal(
+      hasEditHunks({
+        name: 'Edit',
+        toolKind: 'edit',
+        toolInput: { old_string: 'const x = 1', new_string: 'const x = 2' },
+      }),
+      true,
+    )
+    assert.equal(hasEditHunks({ name: 'Bash', toolKind: 'execute' }), false)
   })
 
   it('falls back to the title detail when input is missing', () => {
@@ -131,5 +151,106 @@ describe('toolCallView', () => {
     assert.equal(view.kind, 'search')
     assert.equal(view.verb, 'Searched')
     assert.deepEqual(view.target, { type: 'pattern', pattern: 'TODO', scope: 'src' })
+  })
+
+  it('renders web search as a globe fetch with the query, not the title as a URL', () => {
+    const view = toolCallView({
+      name: 'Search',
+      title: 'Search the web',
+      toolKind: 'search',
+      status: 'completed',
+      toolInput: { query: 'openrun' },
+    })
+    assert.equal(view.kind, 'fetch')
+    assert.equal(view.verb, 'Searched')
+    assert.deepEqual(view.target, { type: 'text', text: 'openrun' })
+  })
+})
+
+describe('humanizeToolName', () => {
+  it('reads a snake_case or camelCase tool name as a sentence', () => {
+    assert.equal(humanizeToolName('create_issue'), 'Create issue')
+    assert.equal(humanizeToolName('get-pull-request'), 'Get pull request')
+    assert.equal(humanizeToolName('createIssue'), 'Create Issue')
+  })
+
+  it('drops the MCP prefix, since the server is shown separately', () => {
+    assert.equal(humanizeToolName('mcp__linear__create_issue'), 'Create issue')
+    assert.equal(humanizeToolName('mcp__openrun__run_context'), 'Run context')
+  })
+
+  it('leaves a name that is already a word alone, and an empty one empty', () => {
+    assert.equal(humanizeToolName('Bash'), 'Bash')
+    assert.equal(humanizeToolName(undefined), '')
+    assert.equal(humanizeToolName('   '), '')
+  })
+
+  it('is what an unknown tool falls back to instead of a raw id', () => {
+    assert.equal(toolCallVerb('other', 'mcp__linear__create_issue', 'completed'), 'Create issue')
+    assert.equal(toolCallVerb('other', undefined, 'completed'), 'Tool')
+  })
+})
+
+describe('toolCallFields', () => {
+  it('renders an MCP tool\u2019s arguments as labelled rows', () => {
+    const fields = toolCallFields({ team_id: 'ENG', issue_title: 'Fix the relay' })
+    assert.deepEqual(
+      fields.map((f) => [f.label, f.value, f.block]),
+      [
+        ['Team id', 'ENG', false],
+        ['Issue title', 'Fix the relay', false],
+      ],
+    )
+  })
+
+  it('gives a long or multi-line value its own block', () => {
+    const [prompt] = toolCallFields({ prompt: 'line one\nline two' })
+    assert.equal(prompt?.block, true)
+    const [long] = toolCallFields({ body: 'x'.repeat(80) })
+    assert.equal(long?.block, true)
+  })
+
+  it('skips what the row header already shows, and empty strings', () => {
+    const fields = toolCallFields({ command: 'pnpm test', timeout: 5_000, note: '  ' })
+    assert.deepEqual(
+      fields.map((f) => f.key),
+      ['timeout'],
+    )
+  })
+
+  it('keeps a header key when the header rendered something else', () => {
+    const keys = toolCallFields(
+      { url: 'https://x.test', query: 'openrun' },
+      {
+        type: 'text',
+        text: 'openrun',
+      },
+    ).map((f) => f.key)
+    assert.deepEqual(keys, ['url', 'query'])
+  })
+
+  it('pretty-prints a nested object argument', () => {
+    const [field] = toolCallFields({ filter: { state: 'open', labels: ['bug'] } })
+    assert.equal(field?.block, true)
+    assert.match(String(field?.value), /"state": "open"/)
+  })
+
+  it('has nothing to show for a non-object input', () => {
+    assert.deepEqual(toolCallFields('just a string'), [])
+    assert.deepEqual(toolCallFields(undefined), [])
+  })
+})
+
+describe('formatToolResult', () => {
+  it('pretty-prints a JSON result an MCP server returned on one line', () => {
+    assert.equal(
+      formatToolResult('{"id":"ENG-42","state":"open"}'),
+      '{\n  "id": "ENG-42",\n  "state": "open"\n}',
+    )
+  })
+
+  it('leaves prose and malformed JSON exactly as they came', () => {
+    assert.equal(formatToolResult('Created issue ENG-42.'), 'Created issue ENG-42.')
+    assert.equal(formatToolResult('{"id": '), '{"id": ')
   })
 })

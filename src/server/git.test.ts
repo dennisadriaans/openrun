@@ -7,9 +7,11 @@ import { afterEach, describe, it } from 'node:test'
 import {
   captureBaseSnapshot,
   changedFiles,
+  changedFilesAsync,
   commit,
   createPullRequest,
   discard,
+  discardHunk,
   fileDiff,
   push,
 } from './git.ts'
@@ -31,6 +33,7 @@ function makeRepo(): string {
   git(dir, ['init'])
   git(dir, ['config', 'user.email', 'test@example.com'])
   git(dir, ['config', 'user.name', 'Test'])
+  git(dir, ['config', 'core.autocrlf', 'false'])
   writeFileSync(join(dir, 'tracked.txt'), 'base\n')
   writeFileSync(join(dir, 'clean.txt'), 'clean\n')
   git(dir, ['add', '.'])
@@ -97,6 +100,18 @@ describe('changedFiles since snapshot', () => {
     assert.deepEqual(paths, ['agent.txt', 'tracked.txt'])
     assert.ok(!paths.includes('pre.txt'))
     assert.ok(!paths.includes('clean.txt'))
+  })
+
+  it('matches the sync listing on the async path', async () => {
+    const cwd = makeRepo()
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'tracked.txt'), 'edited\n')
+    writeFileSync(join(cwd, 'new.txt'), 'x\n')
+    const syncPaths = changedFiles(cwd, snap)
+      .map((f) => f.path)
+      .sort()
+    const asyncPaths = (await changedFilesAsync(cwd, snap)).map((f) => f.path).sort()
+    assert.deepEqual(asyncPaths, syncPaths)
   })
 
   it('includes new untracked and modified tracked files', () => {
@@ -178,6 +193,38 @@ describe('fileDiff since snapshot', () => {
     assert.doesNotMatch(diff, /^-base/)
   })
 })
+
+describe('discardHunk', () => {
+  it('reverts one hunk and leaves the other', () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'multi.txt'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n')
+    git(cwd, ['add', 'multi.txt'])
+    git(cwd, ['commit', '-m', 'multi'])
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'multi.txt'), 'A\nb\nc\nd\ne\nf\ng\nh\ni\nJ\n')
+
+    const before = parseHunkCount(fileDiff(cwd, 'multi.txt', snap))
+    assert.equal(before, 2)
+
+    discardHunk(cwd, 'multi.txt', 0, snap)
+    assert.equal(readFileSync(join(cwd, 'multi.txt'), 'utf8'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nJ\n')
+
+    discardHunk(cwd, 'multi.txt', 0, snap)
+    assert.equal(readFileSync(join(cwd, 'multi.txt'), 'utf8'), 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n')
+  })
+
+  it('removes a new file when its only hunk is undone', () => {
+    const cwd = makeRepo()
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'agent.txt'), 'new\n')
+    discardHunk(cwd, 'agent.txt', 0, snap)
+    assert.ok(!existsSync(join(cwd, 'agent.txt')))
+  })
+})
+
+function parseHunkCount(diff: string): number {
+  return diff.split('\n').filter((line) => line.startsWith('@@ ')).length
+}
 
 describe('push / createPullRequest origin gate', () => {
   it('push refuses a repo with no origin remote', () => {

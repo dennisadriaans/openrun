@@ -158,6 +158,7 @@ function NotificationsPage() {
                     <Link
                       to="/runs/$runId"
                       params={{ runId: d.runId }}
+                      viewTransition
                       className="mono text-tier-secondary underline underline-offset-2 hover:text-foreground"
                     >
                       {d.runId}

@@ -78,10 +78,18 @@ test('antigravity binaries map to their own catalog', () => {
   assert.equal(modelKindForBin('claude'), 'claude')
 })
 
+test('fx binaries map to their own catalog', () => {
+  assert.equal(modelKindForBin('fx'), 'fx')
+  assert.equal(modelKindForBin('/usr/local/bin/fx'), 'fx')
+  assert.equal(modelKindForBin('fx.exe'), 'fx')
+  assert.equal(modelKindForBin('fx-json'), 'generic')
+})
+
 test('a runtime prefers the catalog the server discovered', () => {
   const discovered = [model('claude-opus-5')]
   assert.deepEqual(modelsForRuntime({ bin: 'claude', models: discovered }), discovered)
   // No discovery yet — fall back to the static seed rather than an empty picker.
   assert.ok(modelsForRuntime({ bin: 'claude' }).length > 0)
   assert.ok(modelsForRuntime({ bin: 'claude', models: [] }).length > 0)
+  assert.ok(modelsForRuntime({ bin: 'fx' }).length > 0)
 })

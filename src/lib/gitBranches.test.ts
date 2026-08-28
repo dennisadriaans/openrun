@@ -63,6 +63,15 @@ describe('projectBranchChoices', () => {
     assert.equal(rows[0]?.id, 'ws-1')
     assert.equal(rows[0]?.blockedReason, 'setting up')
   })
+
+  it('blocks workspaces that already have an active run', () => {
+    const rows = projectBranchChoices({
+      gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
+      workspaces: [{ id: 'ws-1', branch: 'feat', status: 'ready', activeRunId: 'run-active' }],
+    })
+    assert.equal(rows[0]?.id, 'ws-1')
+    assert.equal(rows[0]?.blockedReason, 'run active')
+  })
 })
 
 describe('pendingGitBranchId', () => {

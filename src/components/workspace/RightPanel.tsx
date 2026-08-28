@@ -29,7 +29,11 @@ export function RightPanel({
   runBusy,
   selectedPath,
   onSelectPath,
-  onDiscardPath,
+  onReviewFile,
+  onUndoAllFiles,
+  reviewPath,
+  undoDisabled = false,
+  undoDisabledReason,
   terminalOpen: _terminalOpen,
   onToggleTerminal: _onToggleTerminal,
   onToggleRightPanel,
@@ -46,7 +50,11 @@ export function RightPanel({
   runBusy: boolean
   selectedPath: string | null
   onSelectPath: (path: string | null) => void
-  onDiscardPath: (path: string) => void
+  onReviewFile: (path: string) => void
+  onUndoAllFiles: () => void
+  reviewPath: string | null
+  undoDisabled?: boolean
+  undoDisabledReason?: string
   terminalOpen: boolean
   onToggleTerminal: () => void
   onToggleRightPanel: () => void
@@ -180,12 +188,12 @@ export function RightPanel({
             runId={runId}
             files={files}
             path={selectedPath}
+            discardDisabled={undoDisabled}
+            discardDisabledReason={undoDisabledReason}
             onClose={() => onSelectPath(null)}
             onSelect={onSelectPath}
-            onDiscard={(path) => {
-              onDiscardPath(path)
-              onSelectPath(null)
-            }}
+            onDiscard={() => onSelectPath(null)}
+            onDiscardAll={onUndoAllFiles}
           />
         </div>
       </div>
@@ -225,7 +233,17 @@ export function RightPanel({
             <p className="text-sm text-muted-foreground/60">No checks ran for this run.</p>
           )
         ) : files.length > 0 ? (
-          <FilesChanged files={files} activePath={selectedPath} onSelect={onSelectPath} />
+          <FilesChanged
+            files={files}
+            activePath={reviewPath}
+            onSelect={onReviewFile}
+            onReview={() => {
+              if (files[0]) onReviewFile(files[0].path)
+            }}
+            onUndoAll={onUndoAllFiles}
+            undoDisabled={undoDisabled}
+            undoDisabledReason={undoDisabledReason}
+          />
         ) : (
           <p className="text-sm text-muted-foreground/60">No changed files in this workspace.</p>
         )}

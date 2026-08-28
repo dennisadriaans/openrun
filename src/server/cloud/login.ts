@@ -8,6 +8,7 @@ import {
   cloudIntegrationStartUrl,
   cloudLoginUrl,
   localCloudCallbackUrl,
+  safeLocalNext,
 } from '../../lib/cloud/login.ts'
 import { isIntegrationProviderId } from '../../lib/integrations/catalog.ts'
 import { createPkcePair, randomOAuthState } from '../../lib/cloud/pkce.ts'
@@ -41,13 +42,26 @@ function deviceName(): string {
   }
 }
 
-export async function startCloudLogin(origin: string): Promise<{ url: string }> {
+/**
+ * `next` is an in-app path to resume afterwards — clicking Connect while
+ * signed out sends the user through sign-in and back to the same provider
+ * page. It never leaves this machine: the control plane only ever sees the
+ * loopback callback.
+ */
+export async function startCloudLogin(origin: string, next?: string): Promise<{ url: string }> {
   const cloudUrl = configuredCloudUrl()
   if (!cloudUrl) throw new Error('Cloud is turned off (AGENTOPS_CLOUD_URL=off).')
   const { verifier, challenge } = await createPkcePair()
   const state = randomOAuthState()
   const redirectUri = localCloudCallbackUrl(origin)
-  writePkcePending({ verifier, state, redirectUri, createdAt: Date.now() })
+  const resume = safeLocalNext(next)
+  writePkcePending({
+    verifier,
+    state,
+    redirectUri,
+    createdAt: Date.now(),
+    ...(resume ? { next: resume } : {}),
+  })
   return {
     url: cloudLoginUrl({
       cloudUrl,
@@ -95,10 +109,15 @@ async function exchange(
   return session
 }
 
+export type CompletedCloudLogin = CloudSessionStored & {
+  /** In-app path the sign-in was started from, or '' when there was none. */
+  next: string
+}
+
 export async function completeCloudLogin(input: {
   code: string
   state: string
-}): Promise<CloudSessionStored> {
+}): Promise<CompletedCloudLogin> {
   const cloudUrl = configuredCloudUrl()
   if (!cloudUrl) throw new Error('Cloud is turned off.')
   const pending = readPkcePending()
@@ -119,7 +138,9 @@ export async function completeCloudLogin(input: {
     redirect_uri: pending.redirectUri,
   })
   clearPkcePending()
-  return session
+  // Re-validated on the way out: the pending file is ours, but it is still the
+  // one value here that turns into a navigation.
+  return { ...session, next: safeLocalNext(pending.next) }
 }
 
 /**

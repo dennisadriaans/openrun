@@ -27,6 +27,7 @@ import type { PermissionOption } from '../lib/acp'
 import { cancelledOutcome, permissionOutcome } from '../lib/approvals'
 import { parseAcpSessionUpdate } from '../lib/agentEvents/acp.ts'
 import type { ParsedTurnEvent } from '../lib/agentEvents/types.ts'
+import type { McpServerConfig } from '../lib/mcp.ts'
 import { agentSpawnOptions } from './processControl'
 
 export type AcpTurnHandle = {
@@ -41,6 +42,11 @@ export type AcpTurnHandle = {
   hasPending: () => boolean
   /** Cancel every outstanding permission request (run ending). */
   cancelPending: () => void
+  /**
+   * Ask the agent to end the in-flight prompt (`session/cancel`). The
+   * executor still SIGTERM/SIGKILLs the child if the turn does not stop.
+   */
+  cancelTurn: () => void
 }
 
 export type AcpTurnCallbacks = {
@@ -65,6 +71,13 @@ export type AcpTurnInput = {
   prompt: string
   /** Existing ACP session to resume; empty for a first turn. */
   sessionId: string
+  /**
+   * MCP servers Open Run hands the agent when the session opens. Only the
+   * protocol-scoped list (`server/mcp.ts`) belongs here — servers the agent
+   * reads from its own config file would register twice.
+   */
+  mcpServers?: McpServerConfig[]
+  extraEnv?: Record<string, string>
 }
 
 /** A permission request waiting on a human decision. */
@@ -78,6 +91,36 @@ type PendingPermission = {
 /** ACP ids are opaque strings; ours just need to be unique within a turn. */
 function requestId(seq: number): string {
   return `acp-perm-${seq}`
+}
+
+/**
+ * Config shape → the protocol's `McpServer`.
+ *
+ * ACP spells env and headers as name/value arrays rather than the objects
+ * every config file uses, and stdio is the variant with no `type` tag.
+ */
+function toAcpMcpServers(servers: readonly McpServerConfig[]): acp.McpServer[] {
+  const out: acp.McpServer[] = []
+  for (const server of servers) {
+    if (server.transport === 'stdio') {
+      if (!server.command) continue
+      out.push({
+        name: server.name,
+        command: server.command,
+        args: server.args ?? [],
+        env: Object.entries(server.env ?? {}).map(([name, value]) => ({ name, value })),
+      })
+      continue
+    }
+    if (!server.url) continue
+    out.push({
+      type: server.transport,
+      name: server.name,
+      url: server.url,
+      headers: Object.entries(server.headers ?? {}).map(([name, value]) => ({ name, value })),
+    })
+  }
+  return out
 }
 
 /**
@@ -115,11 +158,12 @@ function normalizeOptions(raw: unknown): PermissionOption[] {
  * has exactly one completion path to handle.
  */
 export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurnHandle {
-  const child = spawn(input.bin, input.args, agentSpawnOptions(input.cwd))
+  const child = spawn(input.bin, input.args, agentSpawnOptions(input.cwd, input.extraEnv))
 
   const pending = new Map<string, PendingPermission>()
   let permissionSeq = 0
   let finished = false
+  let sendSessionCancel: (() => void) | null = null
 
   const finish = (result: { code: number; error?: string }) => {
     if (finished) return
@@ -131,6 +175,11 @@ export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurn
   function cancelPending() {
     for (const [, entry] of pending) entry.resolve(cancelledOutcome())
     pending.clear()
+  }
+
+  function cancelTurn() {
+    cancelPending()
+    sendSessionCancel?.()
   }
 
   const answer = (id: string, optionId: string): boolean => {
@@ -158,7 +207,7 @@ export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurn
     // Deferred so the caller has its handle (and its live-process bookkeeping)
     // in place before the completion callback runs.
     queueMicrotask(() => finish({ code: 1, error: 'ACP agent has no stdio pipes' }))
-    return { child, answer, hasPending: () => false, cancelPending }
+    return { child, answer, hasPending: () => false, cancelPending, cancelTurn }
   }
 
   const stream = acp.ndJsonStream(
@@ -210,6 +259,7 @@ export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurn
       if (events.length > 0) cb.onEvents(events)
     })
     .connectWith(stream, async (ctx) => {
+      const mcpServers = toAcpMcpServers(input.mcpServers ?? [])
       await ctx.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
@@ -229,7 +279,7 @@ export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurn
           await ctx.request(acp.methods.agent.session.load, {
             sessionId: input.sessionId,
             cwd: input.cwd,
-            mcpServers: [],
+            mcpServers,
           })
           sessionId = input.sessionId
         } catch (err) {
@@ -239,12 +289,17 @@ export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurn
       if (!sessionId) {
         const created = await ctx.request(acp.methods.agent.session.new, {
           cwd: input.cwd,
-          mcpServers: [],
+          mcpServers,
         })
         sessionId = created.sessionId
       }
 
       cb.onSessionId(sessionId)
+      sendSessionCancel = () => {
+        void ctx.notify(acp.methods.agent.session.cancel, { sessionId }).catch(() => {
+          // Agent already gone — killChildTree is the fallback.
+        })
+      }
 
       const response = await ctx.request(acp.methods.agent.session.prompt, {
         sessionId,
@@ -268,5 +323,6 @@ export function startAcpTurn(input: AcpTurnInput, cb: AcpTurnCallbacks): AcpTurn
     answer,
     hasPending: () => pending.size > 0,
     cancelPending,
+    cancelTurn,
   }
 }

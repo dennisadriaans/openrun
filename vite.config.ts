@@ -6,8 +6,8 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-import { allowRemoteRequest } from './src/lib/loopback'
-import { lanAllowedHosts } from './src/server/mobile/lan'
+import { allowRemoteRequest } from './src/lib/loopback.ts'
+import { lanAllowedHosts } from './src/server/mobile/lan.ts'
 
 /**
  * Open Run assumes one local user on loopback: there is no authentication on
@@ -22,6 +22,7 @@ import { lanAllowedHosts } from './src/server/mobile/lan'
  * behaves exactly as before either way.
  */
 const MOBILE_ENABLED = process.env.AGENTOPS_MOBILE === '1'
+const DEMO_FLAG = process.env.OPENRUN_DEMO ?? process.env.AGENTOPS_DEMO ?? ''
 
 function remoteAccessGuard(): Plugin {
   return {
@@ -52,7 +53,24 @@ function remoteAccessGuard(): Plugin {
   }
 }
 
+/** Boot unattended work in dev without waiting for the first browser request. */
+function automationBootstrap(): Plugin {
+  return {
+    name: 'openrun:automation-bootstrap',
+    configureServer(server) {
+      if (DEMO_FLAG.trim()) return
+      void server.ssrLoadModule('/src/server/core.ts').catch((error: unknown) => {
+        server.config.logger.error(`[scheduler] development bootstrap failed: ${String(error)}`)
+      })
+    },
+  }
+}
+
 const config = defineConfig({
+  define: {
+    'process.env.OPENRUN_DEMO': JSON.stringify(DEMO_FLAG),
+    'process.env.AGENTOPS_DEMO': JSON.stringify(process.env.AGENTOPS_DEMO ?? ''),
+  },
   resolve: { tsconfigPaths: true },
   server: MOBILE_ENABLED
     ? {
@@ -65,6 +83,7 @@ const config = defineConfig({
     : undefined,
   plugins: [
     remoteAccessGuard(),
+    automationBootstrap(),
     devtools(),
     tailwindcss(),
     tanstackStart(),

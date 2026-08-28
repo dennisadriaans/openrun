@@ -63,3 +63,11 @@ describe('hidden models', () => {
     assert.deepEqual(applyPatch(next, { runtimeId: 'claude' }).hiddenModels, ['claude-sonnet-4-6'])
   })
 })
+
+describe('hidden runtimes', () => {
+  it('round-trips through a patch so the choice survives a reload', () => {
+    const next = applyPatch({}, { hiddenRuntimes: ['grok'] })
+    assert.deepEqual(next.hiddenRuntimes, ['grok'])
+    assert.deepEqual(applyPatch(next, { runtimeId: 'claude' }).hiddenRuntimes, ['grok'])
+  })
+})

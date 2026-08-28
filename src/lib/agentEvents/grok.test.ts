@@ -17,10 +17,32 @@ describe('parseGrokObject', () => {
     assert.deepEqual(parseGrokObject({ type: 'thought', data: 'The' }), [
       { kind: 'thought', payload: { text: 'The' } },
     ])
+    assert.deepEqual(parseGrokObject({ type: 'reasoning', data: 'hmm' }), [
+      { kind: 'thought', payload: { text: 'hmm' } },
+    ])
+    assert.deepEqual(parseGrokObject({ type: 'thinking', text: 'why' }), [
+      { kind: 'thought', payload: { text: 'why' } },
+    ])
   })
 
-  it('drops usage / available_commands noise instead of raw JSON', () => {
-    assert.deepEqual(parseGrokObject({ type: 'usage', usage: { input_tokens: 1 } }), [])
+  it('turns a usage envelope into a context snapshot', () => {
+    assert.deepEqual(
+      parseGrokObject({
+        type: 'usage',
+        usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 6 },
+      }),
+      [
+        {
+          kind: 'usage',
+          payload: {
+            usage: { input: 10, output: 4, cacheRead: 6, cacheWrite: 0, contextTokens: 20 },
+          },
+        },
+      ],
+    )
+  })
+
+  it('drops available_commands noise instead of raw JSON', () => {
     assert.deepEqual(
       parseGrokObject({
         type: 'available_commands',
@@ -48,6 +70,19 @@ describe('parseGrokObject', () => {
     assert.equal(event?.payload.toolKind, 'search')
     assert.equal(event?.payload.status, 'pending')
     assert.deepEqual(event?.payload.input, { target_directory: '.' })
+  })
+
+  it('maps web search to fetch even when the agent sends search kind', () => {
+    const [event] = parseGrokObject({
+      type: 'tool_call',
+      toolCallId: 'w1',
+      title: 'Search the web',
+      toolName: 'Search',
+      status: 'pending',
+      kind: 'search',
+      rawInput: { query: 'openrun' },
+    })
+    assert.equal(event?.payload.toolKind, 'fetch')
   })
 
   it('infers a tool kind when the agent sends none', () => {
@@ -108,6 +143,20 @@ describe('parseGrokObject', () => {
     })
     assert.equal(failed?.payload.status, 'failed')
     assert.equal(failed?.payload.content, 'permission denied')
+  })
+
+  it('reclassifies a settled web search update that only has arguments', () => {
+    const [done] = parseGrokObject({
+      type: 'tool_call_update',
+      toolCallId: 'w1',
+      toolName: 'Search',
+      title: 'Search the web',
+      kind: 'search',
+      status: 'completed',
+      arguments: { query: 'openrun' },
+      rawOutput: 'ok',
+    })
+    assert.equal(done?.payload.toolKind, 'fetch')
   })
 
   it('maps end to turn_done and error to error', () => {

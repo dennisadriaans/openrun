@@ -1,5 +1,6 @@
 /** Reusable presentational primitives. */
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { statusMeta } from '../lib/format'
 import {
@@ -10,20 +11,100 @@ import {
   type VerdictTone,
 } from '../lib/verdict'
 
+export function Tooltip({
+  content,
+  delay = 400,
+  disabled = false,
+  children,
+}: {
+  content: string
+  delay?: number
+  disabled?: boolean
+  children: ReactNode
+}) {
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const clear = () => {
+    if (timer.current) {
+      clearTimeout(timer.current)
+      timer.current = null
+    }
+  }
+
+  const hide = () => {
+    clear()
+    setOpen(false)
+  }
+
+  const show = () => {
+    if (disabled || !content) return
+    clear()
+    timer.current = setTimeout(() => {
+      const el = wrapRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setPos({ top: rect.top - 6, left: rect.left + rect.width / 2 })
+      setOpen(true)
+    }, delay)
+  }
+
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
+  useEffect(() => () => clear(), [])
+
+  return (
+    <span
+      ref={wrapRef}
+      className="inline-flex min-w-0"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocusCapture={show}
+      onBlurCapture={hide}
+      onPointerDown={hide}
+    >
+      {children}
+      {open && pos
+        ? createPortal(
+            <span
+              role="tooltip"
+              style={{
+                position: 'fixed',
+                top: pos.top,
+                left: pos.left,
+                transform: 'translate(-50%, -100%)',
+                zIndex: 300,
+              }}
+              className="pointer-events-none inline-flex w-fit max-w-xs origin-bottom items-center rounded-md bg-foreground px-3 py-1.5 text-ui-sm text-background"
+            >
+              {content}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  )
+}
+
 export function Modal({
   title,
   onClose,
   children,
   wide = false,
+  className = 'z-50',
 }: {
   title: string
   onClose: () => void
   children: ReactNode
   wide?: boolean
+  className?: string
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim px-4 py-10"
+      className={`fixed inset-0 flex items-start justify-center overflow-y-auto bg-scrim px-4 py-10 ${className}`}
       onClick={onClose}
     >
       <div

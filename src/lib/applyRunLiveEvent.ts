@@ -4,8 +4,10 @@
  * Returns the next cache value, or signals a full refetch (terminal status, or
  * a turn_event whose message is not cached yet).
  */
+import type { QueuedMessage } from './messageQueue'
 import type { CheckResultFrame, RunLiveEvent } from './runLive'
 import type { TurnEventRow } from './turnEvents'
+import type { TurnUsage } from './turnUsage'
 
 /**
  * A check as the conversation cache holds it. `outcome: 'running'` is the
@@ -38,11 +40,15 @@ export type ConversationCacheSlice = {
     status: string
     exitCode: number | null
     events: TurnEventRow[]
+    /** Live token accounting; absent until the runtime reports any. */
+    usage?: TurnUsage | null
     diffSummary?: unknown[]
     createdAt?: number
     finishedAt?: number | null
   }>
   canFollowUp?: boolean
+  /** Follow-ups waiting on the current turn; absent on caches that predate them. */
+  queued?: QueuedMessage[]
 }
 
 export type ApplyRunLiveResult<T> =
@@ -58,15 +64,29 @@ export function applyRunLiveEvent<T extends ConversationCacheSlice>(
     case 'ping':
     case 'hello':
       return { action: 'ignore' }
-    case 'status':
-      // Exit codes, files changed, canFollowUp, finalized content, etc.
-      return { action: 'refetch' }
+    case 'status': {
+      const running = event.status === 'running'
+      return {
+        action: 'patch',
+        data: {
+          ...data,
+          run: { ...data.run, status: event.status, exitCode: event.exitCode },
+          canFollowUp: running ? false : (event.canFollowUp ?? data.canFollowUp),
+        },
+      }
+    }
+    case 'turn_finished':
+      return patchTurnFinished(data, event)
     case 'turn_started':
       return patchTurnStarted(data, event)
     case 'log':
+      if (data.run.status === 'cancelled') return { action: 'ignore' }
       return { action: 'patch', data: patchLog(data, event) }
     case 'turn_event':
+      if (data.run.status === 'cancelled') return { action: 'ignore' }
       return patchTurnEvent(data, event)
+    case 'turn_usage':
+      return patchTurnUsage(data, event)
     case 'check_started':
       return patchCheckStarted(data, event)
     case 'check_finished':
@@ -79,6 +99,8 @@ export function applyRunLiveEvent<T extends ConversationCacheSlice>(
     case 'repair_started':
       // The repair turn's own `turn_started` frame carries the cache update.
       return { action: 'ignore' }
+    case 'queue_changed':
+      return { action: 'patch', data: { ...data, queued: event.queued } }
     default: {
       // Unknown frame shape — do not guess; let polling/refetch converge.
       const _exhaustive: never = event
@@ -158,6 +180,9 @@ function patchTurnStarted<T extends ConversationCacheSlice>(
     exitCode: null,
     events: [] as TurnEventRow[],
     diffSummary: [],
+    sourceProvider: '',
+    sourceUrl: '',
+    sourceLabel: '',
     createdAt: userCreatedAt,
     finishedAt: userCreatedAt,
   }
@@ -172,6 +197,9 @@ function patchTurnStarted<T extends ConversationCacheSlice>(
     exitCode: null,
     events: [] as TurnEventRow[],
     diffSummary: [],
+    sourceProvider: '',
+    sourceUrl: '',
+    sourceLabel: '',
     createdAt: assistantCreatedAt,
     finishedAt: null,
   }
@@ -183,6 +211,27 @@ function patchTurnStarted<T extends ConversationCacheSlice>(
     ...(data.canFollowUp !== undefined ? { canFollowUp: false } : {}),
   }
   return { action: 'patch', data: next as T }
+}
+
+function patchTurnFinished<T extends ConversationCacheSlice>(
+  data: T,
+  event: Extract<RunLiveEvent, { type: 'turn_finished' }>,
+): ApplyRunLiveResult<T> {
+  const idx = data.messages.findIndex((m) => m.id === event.messageId)
+  if (idx < 0) return { action: 'refetch' }
+  const message = data.messages[idx]!
+  if (message.status !== 'running') return { action: 'ignore' }
+  const messages = data.messages.slice()
+  messages[idx] = {
+    ...message,
+    status: event.status,
+    exitCode: event.exitCode,
+    // A turn that produced no prose keeps whatever the stream already showed.
+    content: event.content || message.content,
+    diffSummary: event.diffSummary,
+    finishedAt: event.finishedAt,
+  }
+  return { action: 'patch', data: { ...data, messages } }
 }
 
 function patchLog<T extends ConversationCacheSlice>(
@@ -225,6 +274,18 @@ function patchTurnEvent<T extends ConversationCacheSlice>(
   return { action: 'patch', data: { ...data, messages } }
 }
 
+function patchTurnUsage<T extends ConversationCacheSlice>(
+  data: T,
+  event: Extract<RunLiveEvent, { type: 'turn_usage' }>,
+): ApplyRunLiveResult<T> {
+  const idx = data.messages.findIndex((m) => m.id === event.messageId)
+  // The gauge is not worth a refetch — the next poll or frame carries it.
+  if (idx < 0) return { action: 'ignore' }
+  const messages = data.messages.slice()
+  messages[idx] = { ...messages[idx], usage: event.usage }
+  return { action: 'patch', data: { ...data, messages } }
+}
+
 /** Patch a bare run row cache (`['run', id]`) when present. */
 export function applyRunLiveEventToRunRow<
   T extends { id: string; status: string; stdout: string; stderr: string; exitCode: number | null },
@@ -234,17 +295,23 @@ export function applyRunLiveEventToRunRow<
     case 'hello':
       return { action: 'ignore' }
     case 'status':
-      return { action: 'refetch' }
+      return {
+        action: 'patch',
+        data: { ...run, status: event.status, exitCode: event.exitCode },
+      }
     case 'turn_started':
       return {
         action: 'patch',
         data: { ...run, status: 'running', exitCode: null },
       }
     case 'turn_event':
+    case 'turn_usage':
+    case 'turn_finished':
     case 'check_started':
     case 'check_finished':
     case 'repair_started':
-      // The bare run row carries no check state — the conversation cache does.
+    case 'queue_changed':
+      // The bare run row carries no per-message state — the conversation cache does.
       return { action: 'ignore' }
     case 'verdict':
       return { action: 'patch', data: { ...run, verdict: event.verdict } }

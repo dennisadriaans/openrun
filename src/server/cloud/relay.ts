@@ -33,6 +33,12 @@ const MAX_BACKOFF_MS = 60_000
  * delivering into a dead socket.
  */
 const HEARTBEAT_MS = 30_000
+/**
+ * A dial that neither opens nor closes — the usual shape after the laptop
+ * sleeps — would otherwise leave `connecting` true forever, and both `connect`
+ * and `startCloudRelay` early-return on it. Give every attempt a deadline.
+ */
+const CONNECT_TIMEOUT_MS = 20_000
 
 function state(): RelayState {
   const g = globalThis as Record<string, unknown>
@@ -147,6 +153,7 @@ async function fetchRelayTicket(cloudUrl: string): Promise<string | null> {
     const res = await fetch(`${cloudUrl}${CLOUD_PATHS.ticket}`, {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
     })
     if (!res.ok) return null
     const body = (await res.json()) as { ticket?: string }
@@ -182,7 +189,25 @@ async function connect(): Promise<void> {
     ])
     s.socket = socket
 
+    const dialTimer = setTimeout(() => {
+      if (s.socket !== socket || s.connected) return
+      s.lastError = 'timed out dialling the control plane'
+      try {
+        socket.close()
+      } catch {
+        // Already gone; the close handler still reschedules.
+      }
+      // A socket wedged before `open` may never emit `close` either.
+      if (s.connecting) {
+        s.connecting = false
+        s.socket = null
+        if (!s.stopped) scheduleReconnect()
+      }
+    }, CONNECT_TIMEOUT_MS)
+    dialTimer.unref?.()
+
     socket.addEventListener('open', () => {
+      clearTimeout(dialTimer)
       s.connected = true
       s.connecting = false
       s.attempts = 0
@@ -201,6 +226,8 @@ async function connect(): Promise<void> {
     })
 
     socket.addEventListener('close', () => {
+      clearTimeout(dialTimer)
+      if (s.socket !== socket) return
       s.connected = false
       s.connecting = false
       s.socket = null

@@ -1,2 +1,10 @@
-onlyBuiltDependencies:
-  - better-sqlite3
+# better-sqlite3 13 ships N-API prebuilds and sets `gypfile: false`. Listing it
+# here made pnpm run `node-gyp rebuild` anyway, which fails on GitHub's
+# windows-latest image (Visual Studio 2026 / node-gyp 11).
+onlyBuiltDependencies: []
+
+# Security floors for transitive deps. pnpm only honours overrides from the
+# workspace root, so the private tree repeats these in its own root file.
+overrides:
+  js-yaml: '>=4.3.1'
+  nanoid: '>=3.3.17'

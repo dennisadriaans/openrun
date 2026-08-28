@@ -12,9 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevicesRouteImport } from './routes/devices'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PlannerRouteImport } from './routes/planner'
 import { Route as RuntimesRouteImport } from './routes/runtimes'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as CloudCallbackRouteImport } from './routes/cloud.callback'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
@@ -30,11 +32,12 @@ import { Route as ApiMobileDashboardRouteImport } from './routes/api/mobile/dash
 import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
 import { Route as ApiMobilePairRouteImport } from './routes/api/mobile/pair'
 import { Route as ApiMobileUnpairRouteImport } from './routes/api/mobile/unpair'
-import { Route as ApiWebhooksIntegrationIdRouteImport } from './routes/api/webhooks/$integrationId'
+import { Route as ApiMcpOauthCallbackRouteImport } from './routes/api/mcp/oauth/callback'
 import { Route as ApiMobileActivityStreamRouteImport } from './routes/api/mobile/activity.stream'
 import { Route as ApiMobilePushRegisterRouteImport } from './routes/api/mobile/push.register'
 import { Route as ApiMobileRunsIndexRouteImport } from './routes/api/mobile/runs/index'
 import { Route as ApiMobileTasksIndexRouteImport } from './routes/api/mobile/tasks/index'
+import { Route as ApiRunsRunIdAttachmentRouteImport } from './routes/api/runs/$runId/attachment'
 import { Route as ApiRunsRunIdStreamRouteImport } from './routes/api/runs/$runId/stream'
 import { Route as ApiRunsRunIdUiStreamRouteImport } from './routes/api/runs/$runId/ui-stream'
 import { Route as ApiMobileRunsRunIdIndexRouteImport } from './routes/api/mobile/runs/$runId/index'
@@ -64,6 +67,11 @@ const IntegrationsRoute = IntegrationsRouteImport.update({
   path: '/integrations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -77,6 +85,11 @@ const PlannerRoute = PlannerRouteImport.update({
 const RuntimesRoute = RuntimesRouteImport.update({
   id: '/runtimes',
   path: '/runtimes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WelcomeRoute = WelcomeRouteImport.update({
@@ -154,12 +167,11 @@ const ApiMobileUnpairRoute = ApiMobileUnpairRouteImport.update({
   path: '/api/mobile/unpair',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiWebhooksIntegrationIdRoute =
-  ApiWebhooksIntegrationIdRouteImport.update({
-    id: '/api/webhooks/$integrationId',
-    path: '/api/webhooks/$integrationId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
+const ApiMcpOauthCallbackRoute = ApiMcpOauthCallbackRouteImport.update({
+  id: '/api/mcp/oauth/callback',
+  path: '/api/mcp/oauth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileActivityStreamRoute = ApiMobileActivityStreamRouteImport.update({
   id: '/api/mobile/activity/stream',
   path: '/api/mobile/activity/stream',
@@ -178,6 +190,11 @@ const ApiMobileRunsIndexRoute = ApiMobileRunsIndexRouteImport.update({
 const ApiMobileTasksIndexRoute = ApiMobileTasksIndexRouteImport.update({
   id: '/api/mobile/tasks/',
   path: '/api/mobile/tasks/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRunsRunIdAttachmentRoute = ApiRunsRunIdAttachmentRouteImport.update({
+  id: '/api/runs/$runId/attachment',
+  path: '/api/runs/$runId/attachment',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiRunsRunIdStreamRoute = ApiRunsRunIdStreamRouteImport.update({
@@ -257,9 +274,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/devices': typeof DevicesRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/mcp': typeof McpRoute
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
@@ -275,9 +294,10 @@ export interface FileRoutesByFullPath {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
-  '/api/webhooks/$integrationId': typeof ApiWebhooksIntegrationIdRoute
+  '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
+  '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
   '/api/mobile/runs/': typeof ApiMobileRunsIndexRoute
@@ -297,9 +317,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/devices': typeof DevicesRoute
+  '/mcp': typeof McpRoute
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
@@ -315,9 +337,10 @@ export interface FileRoutesByTo {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
-  '/api/webhooks/$integrationId': typeof ApiWebhooksIntegrationIdRoute
+  '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
+  '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
   '/api/mobile/runs': typeof ApiMobileRunsIndexRoute
@@ -339,9 +362,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/devices': typeof DevicesRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/mcp': typeof McpRoute
   '/notifications': typeof NotificationsRoute
   '/planner': typeof PlannerRoute
   '/runtimes': typeof RuntimesRoute
+  '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/cloud/callback': typeof CloudCallbackRoute
   '/integrations/$provider': typeof IntegrationsProviderRoute
@@ -357,9 +382,10 @@ export interface FileRoutesById {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/pair': typeof ApiMobilePairRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
-  '/api/webhooks/$integrationId': typeof ApiWebhooksIntegrationIdRoute
+  '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
+  '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
   '/api/mobile/runs/': typeof ApiMobileRunsIndexRoute
@@ -382,9 +408,11 @@ export interface FileRouteTypes {
     | '/'
     | '/devices'
     | '/integrations'
+    | '/mcp'
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/usage'
     | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
@@ -400,9 +428,10 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
-    | '/api/webhooks/$integrationId'
+    | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
+    | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
     | '/api/mobile/runs/'
@@ -422,9 +451,11 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/devices'
+    | '/mcp'
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/usage'
     | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
@@ -440,9 +471,10 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
-    | '/api/webhooks/$integrationId'
+    | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
+    | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
     | '/api/mobile/runs'
@@ -463,9 +495,11 @@ export interface FileRouteTypes {
     | '/'
     | '/devices'
     | '/integrations'
+    | '/mcp'
     | '/notifications'
     | '/planner'
     | '/runtimes'
+    | '/usage'
     | '/welcome'
     | '/cloud/callback'
     | '/integrations/$provider'
@@ -481,9 +515,10 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/pair'
     | '/api/mobile/unpair'
-    | '/api/webhooks/$integrationId'
+    | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
+    | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
     | '/api/mobile/runs/'
@@ -505,9 +540,11 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DevicesRoute: typeof DevicesRoute
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
+  McpRoute: typeof McpRoute
   NotificationsRoute: typeof NotificationsRoute
   PlannerRoute: typeof PlannerRoute
   RuntimesRoute: typeof RuntimesRoute
+  UsageRoute: typeof UsageRoute
   WelcomeRoute: typeof WelcomeRoute
   CloudCallbackRoute: typeof CloudCallbackRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -521,9 +558,10 @@ export interface RootRouteChildren {
   ApiMobileMeRoute: typeof ApiMobileMeRoute
   ApiMobilePairRoute: typeof ApiMobilePairRoute
   ApiMobileUnpairRoute: typeof ApiMobileUnpairRoute
-  ApiWebhooksIntegrationIdRoute: typeof ApiWebhooksIntegrationIdRoute
+  ApiMcpOauthCallbackRoute: typeof ApiMcpOauthCallbackRoute
   ApiMobileActivityStreamRoute: typeof ApiMobileActivityStreamRoute
   ApiMobilePushRegisterRoute: typeof ApiMobilePushRegisterRoute
+  ApiRunsRunIdAttachmentRoute: typeof ApiRunsRunIdAttachmentRoute
   ApiRunsRunIdStreamRoute: typeof ApiRunsRunIdStreamRoute
   ApiRunsRunIdUiStreamRoute: typeof ApiRunsRunIdUiStreamRoute
   ApiMobileRunsIndexRoute: typeof ApiMobileRunsIndexRoute
@@ -562,6 +600,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/notifications': {
       id: '/notifications'
       path: '/notifications'
@@ -581,6 +626,13 @@ declare module '@tanstack/react-router' {
       path: '/runtimes'
       fullPath: '/runtimes'
       preLoaderRoute: typeof RuntimesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/welcome': {
@@ -688,11 +740,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileUnpairRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/webhooks/$integrationId': {
-      id: '/api/webhooks/$integrationId'
-      path: '/api/webhooks/$integrationId'
-      fullPath: '/api/webhooks/$integrationId'
-      preLoaderRoute: typeof ApiWebhooksIntegrationIdRouteImport
+    '/api/mcp/oauth/callback': {
+      id: '/api/mcp/oauth/callback'
+      path: '/api/mcp/oauth/callback'
+      fullPath: '/api/mcp/oauth/callback'
+      preLoaderRoute: typeof ApiMcpOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/mobile/activity/stream': {
@@ -721,6 +773,13 @@ declare module '@tanstack/react-router' {
       path: '/api/mobile/tasks'
       fullPath: '/api/mobile/tasks/'
       preLoaderRoute: typeof ApiMobileTasksIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/runs/$runId/attachment': {
+      id: '/api/runs/$runId/attachment'
+      path: '/api/runs/$runId/attachment'
+      fullPath: '/api/runs/$runId/attachment'
+      preLoaderRoute: typeof ApiRunsRunIdAttachmentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/runs/$runId/stream': {
@@ -863,9 +922,11 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DevicesRoute: DevicesRoute,
   IntegrationsRoute: IntegrationsRouteWithChildren,
+  McpRoute: McpRoute,
   NotificationsRoute: NotificationsRoute,
   PlannerRoute: PlannerRoute,
   RuntimesRoute: RuntimesRoute,
+  UsageRoute: UsageRoute,
   WelcomeRoute: WelcomeRoute,
   CloudCallbackRoute: CloudCallbackRoute,
   RunsRunIdRoute: RunsRunIdRoute,
@@ -879,9 +940,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileMeRoute: ApiMobileMeRoute,
   ApiMobilePairRoute: ApiMobilePairRoute,
   ApiMobileUnpairRoute: ApiMobileUnpairRoute,
-  ApiWebhooksIntegrationIdRoute: ApiWebhooksIntegrationIdRoute,
+  ApiMcpOauthCallbackRoute: ApiMcpOauthCallbackRoute,
   ApiMobileActivityStreamRoute: ApiMobileActivityStreamRoute,
   ApiMobilePushRegisterRoute: ApiMobilePushRegisterRoute,
+  ApiRunsRunIdAttachmentRoute: ApiRunsRunIdAttachmentRoute,
   ApiRunsRunIdStreamRoute: ApiRunsRunIdStreamRoute,
   ApiRunsRunIdUiStreamRoute: ApiRunsRunIdUiStreamRoute,
   ApiMobileRunsIndexRoute: ApiMobileRunsIndexRoute,

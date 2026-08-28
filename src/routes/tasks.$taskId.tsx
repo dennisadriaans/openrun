@@ -7,6 +7,7 @@ import { Button, Card, EmptyState, StatusBadge, VerdictBadge } from '../componen
 import { duration, relativeTime } from '../lib/format'
 import { useDeleteTask, useRunNow, useRuns, useTask } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
+import { taskFormInitial } from '../lib/taskFormInitial'
 
 export const Route = createFileRoute('/tasks/$taskId')({
   component: TaskDetail,
@@ -90,21 +91,7 @@ function TaskDetail() {
     <div className="mx-auto max-w-4xl px-6 py-6">
       <TaskForm
         key={task.id}
-        initial={{
-          id: task.id,
-          name: task.name,
-          description: task.description,
-          runtimeId: task.runtimeId,
-          prompt: task.prompt,
-          workspaceId: task.workspaceId,
-          cron: task.cron,
-          enabled: !!task.enabled,
-          model: task.model,
-          effort: task.effort,
-          verifyEnabled: task.verifyEnabled,
-          maxRepairAttempts: task.maxRepairAttempts,
-          timeoutMs: task.timeoutMs,
-        }}
+        initial={taskFormInitial(task)}
         onCancel={() => navigate({ to: '/tasks' })}
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ['task', taskId] })
@@ -121,6 +108,7 @@ function TaskDetail() {
                 key={r.id}
                 to="/runs/$runId"
                 params={{ runId: r.id }}
+                viewTransition
                 className="flex items-center justify-between gap-4 px-4 py-2.5 transition-colors hover:bg-hover"
               >
                 <div className="min-w-0">

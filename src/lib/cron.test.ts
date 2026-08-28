@@ -33,6 +33,7 @@ describe('isValidCron', () => {
       '0 8 * * 1-5',
       '30 18 1,15 * *',
       '1-5/2 * * * *',
+      '*/60 * * * *',
     ]) {
       assert.equal(isValidCron(expr), true, expr)
     }
@@ -53,6 +54,8 @@ describe('isValidCron', () => {
       '0-99 * * * *',
       '0 9 * * MONDAY',
       '@daily',
+      '0 9 * * 1/2',
+      '0 9 * * mon/2',
     ]) {
       assert.equal(isValidCron(expr), false, expr)
     }

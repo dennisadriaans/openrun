@@ -30,6 +30,7 @@ import {
   type NotifierRow,
   type RunRow,
 } from './db.ts'
+import { isSealed, revealString, sealString, secretAad } from './secretBox.ts'
 
 /** Where the app is reachable, for the links inside notifications. */
 function appBaseUrl(): string {
@@ -46,14 +47,28 @@ function id(prefix: string) {
 // CRUD
 // ---------------------------------------------------------------------------
 
+function revealNotifier(row: NotifierRow): NotifierRow {
+  const target = revealString(row.target, secretAad('notifier.target', row.id))
+  if (row.target && !isSealed(row.target) && target) {
+    getDb()
+      .prepare('UPDATE notifiers SET target = ? WHERE id = ?')
+      .run(sealString(target, secretAad('notifier.target', row.id)), row.id)
+  }
+  return { ...row, target }
+}
+
 export function listNotifiers(): NotifierRow[] {
-  return getDb().prepare('SELECT * FROM notifiers ORDER BY createdAt ASC').all() as NotifierRow[]
+  const rows = getDb()
+    .prepare('SELECT * FROM notifiers ORDER BY createdAt ASC')
+    .all() as NotifierRow[]
+  return rows.map(revealNotifier)
 }
 
 export function getNotifier(notifierId: string): NotifierRow | undefined {
-  return getDb().prepare('SELECT * FROM notifiers WHERE id = ?').get(notifierId) as
+  const row = getDb().prepare('SELECT * FROM notifiers WHERE id = ?').get(notifierId) as
     | NotifierRow
     | undefined
+  return row ? revealNotifier(row) : undefined
 }
 
 export type NotifierInput = {
@@ -90,7 +105,7 @@ export function upsertNotifier(input: NotifierInput): NotifierRow {
     id: nid,
     kind: input.kind,
     name,
-    target,
+    target: sealString(target, secretAad('notifier.target', nid)),
     verdicts: JSON.stringify(input.verdicts ?? []),
     enabled: input.enabled ? 1 : 0,
     createdAt: existing?.createdAt ?? now,

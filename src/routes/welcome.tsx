@@ -1,6 +1,6 @@
 /**
  * First-run screen. Signing in links this machine to an Open Run account so
- * hosted integrations can reach it; skipping keeps every local feature.
+ * integrations can reach it; skipping keeps every local feature except those.
  */
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { Cloud, Loader2, ShieldCheck, Webhook } from 'lucide-react'
@@ -60,7 +60,7 @@ function WelcomePage() {
     <div className="grid min-h-screen place-items-center bg-chrome px-6 py-12">
       <div className="w-full max-w-lg">
         <div className="mb-8 flex items-center gap-2">
-          <Icon className="size-6 rounded-[5px] bg-inverted text-foreground" />
+          <Icon className="size-6 rounded-[5px]" />
           <span className="text-ui-base font-medium tracking-tight text-foreground">Open Run</span>
         </div>
 

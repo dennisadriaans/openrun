@@ -1,5 +1,8 @@
 /**
- * Webhook delivery pipeline: verify → parse → match automations → startRun.
+ * Webhook delivery pipeline: relayed event → match automations → startRun.
+ *
+ * Verification and normalization happen on the control plane, so what arrives
+ * here is already a `CanonicalWebhookEvent`.
  */
 import { hasWorkspaceId } from '../../lib/workspaceRef.ts'
 import { assertWorkspaceReady } from '../../lib/workspaceReady.ts'
@@ -8,13 +11,12 @@ import {
   parseWebhookFilters,
   taskMatchesWebhookEvent,
 } from '../../lib/integrations/match.ts'
-import { renderWebhookPrompt } from '../../lib/integrations/prompt.ts'
+import { renderWebhookPrompt, webhookSourceLink } from '../../lib/integrations/prompt.ts'
 import type { CanonicalWebhookEvent } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow, type TaskRow } from '../db.ts'
 import { startRun } from '../executor.ts'
 import { enqueueRun } from '../runQueue.ts'
 import { getIntegration } from './connections.ts'
-import { getIntegrationProvider } from './registry.ts'
 import { getWorkspace } from '../workspaces.ts'
 
 export type WebhookHandleResult = {
@@ -103,6 +105,7 @@ function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
   const workspace = getWorkspace(task.workspaceId)
   assertWorkspaceReady(workspace?.status)
   const prompt = renderWebhookPrompt(task.prompt, event)
+  const source = webhookSourceLink(event)
   return startRun({
     runtime,
     taskId: task.id,
@@ -116,87 +119,11 @@ function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
     timeoutMs: task.timeoutMs,
     resumeSessionId: task.resumeSessionId,
     resumeSessionLabel: task.resumeSessionLabel,
+    ...(source ? { source } : {}),
   })
 }
 
-/**
- * Handle one inbound POST for a connection id.
- * Always safe to call from the HTTP route — returns an HTTP-ish result object.
- */
-export async function handleWebhookRequest(input: {
-  integrationId: string
-  rawBody: Buffer
-  headers: Headers
-}): Promise<WebhookHandleResult> {
-  const integration = getIntegration(input.integrationId)
-  if (!integration?.enabled) {
-    return { ok: false, status: 404, body: { error: 'Integration not found' } }
-  }
-
-  const provider = getIntegrationProvider(integration.provider)
-  if (!provider) {
-    return { ok: false, status: 500, body: { error: 'Provider not registered' } }
-  }
-
-  let payload: unknown = null
-  const rawText = input.rawBody.toString('utf8')
-  try {
-    payload = rawText ? JSON.parse(rawText) : null
-  } catch {
-    return { ok: false, status: 400, body: { error: 'Invalid JSON body' } }
-  }
-
-  if (
-    !provider.verify({
-      rawBody: input.rawBody,
-      headers: input.headers,
-      secret: integration.secret,
-      payload,
-    })
-  ) {
-    return { ok: false, status: 401, body: { error: 'Invalid signature' } }
-  }
-
-  let events: CanonicalWebhookEvent[]
-  try {
-    events = provider.parse({
-      rawBody: rawText,
-      headers: input.headers,
-      payload,
-    })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    recordDelivery({
-      integrationId: integration.id,
-      deliveryKey: `parse_error_${Date.now()}`,
-      eventType: 'parse_error',
-      status: 'error',
-      runIds: [],
-      error: message,
-    })
-    return { ok: false, status: 400, body: { error: 'Failed to parse webhook', detail: message } }
-  }
-
-  if (events.length === 0) {
-    recordDelivery({
-      integrationId: integration.id,
-      deliveryKey: `empty_${Date.now()}`,
-      eventType: 'ignored',
-      status: 'ignored',
-      runIds: [],
-    })
-    return { ok: true, status: 202, body: { accepted: true, matched: 0, runs: [] } }
-  }
-
-  return ingestCanonicalEvents(integration.id, events)
-}
-
-/**
- * Match automations and start runs for already-canonical events.
- *
- * Used by the local HMAC path after verify/parse, and by the cloud relay
- * after the Worker has verified the vendor delivery.
- */
+/** Match automations and start runs for a relayed, already-canonical event. */
 export async function ingestCanonicalEvent(
   integrationId: string,
   event: CanonicalWebhookEvent,
@@ -229,6 +156,7 @@ function ingestCanonicalEvents(
     }
 
     const tasks = matchingTasks(integration.id, event)
+    const source = webhookSourceLink(event)
     const runIds: string[] = []
     const queuedTaskIds: string[] = []
     for (const task of tasks) {
@@ -242,6 +170,7 @@ function ingestCanonicalEvents(
           workspaceId: task.workspaceId,
           trigger: 'webhook',
           prompt: renderWebhookPrompt(task.prompt, event),
+          ...(source ? { source } : {}),
         })
         if (queued.queued) {
           queuedTaskIds.push(task.id)

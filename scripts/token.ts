@@ -1,9 +1,6 @@
 /**
- * Print (creating on first use) the Open Run access token.
- *
- * Run with `pnpm token:print`. Needed only when binding a non-loopback interface —
- * a default install is protected by the operating system and has no token at
- * all. See SECURITY.md.
+ * Print (creating on first use) the Open Run access token; see SECURITY.md.
+ * Needed only when binding a non-loopback interface. Run with `pnpm token:print`.
  */
 import {
   ACCESS_TOKEN_HEADER,

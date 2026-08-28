@@ -6,6 +6,7 @@
  */
 import { createServerFn } from '@tanstack/react-start'
 import type {
+  CreateIntegrationAutomationInput,
   CreateIntegrationInput,
   NotifierInput,
   PreviewCommandInput,
@@ -14,14 +15,15 @@ import type {
   UpdateIntegrationInput,
 } from '../server/core'
 import type { PlanProposal } from '../lib/planProposals'
-import type { IntegrationProviderId } from '../lib/integrations/types'
-import type { InstallIntegrationInput } from '../lib/integrations/install'
+import type { IntegrationProviderId, WebhookFilters } from '../lib/integrations/types'
 import type { CheckDef } from '../lib/checks'
+import type { McpServerConfig } from '../lib/mcp'
 
 export type { PlanProposal } from '../lib/planProposals'
 
 export type {
   LocalDirEntry,
+  LocalPlace,
   ProjectRow,
   WorkspaceRow,
   ProjectWithMeta,
@@ -45,6 +47,10 @@ export const listRuntimes = createServerFn({ method: 'GET' }).handler(async () =
     ...r,
     ...c.checkRuntimeInstalled(r.bin),
   }))
+})
+
+export const listPresetBins = createServerFn({ method: 'GET' }).handler(async () => {
+  return (await core()).listPresetBinStatus()
 })
 
 export const saveRuntime = createServerFn({ method: 'POST' })
@@ -80,6 +86,80 @@ export const removeRuntime = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+// --- MCP servers -----------------------------------------------------------
+
+export const getMcpConfig = createServerFn({ method: 'GET' })
+  .validator((d: { runtimeId: string; workspaceId?: string }) => d)
+  .handler(async ({ data }) => (await core()).getMcpConfig(data))
+
+export const saveMcpServer = createServerFn({ method: 'POST' })
+  .validator(
+    (d: {
+      runtimeId: string
+      workspaceId?: string
+      targetId: string
+      server: McpServerConfig
+      previousName?: string
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).saveMcpServerConfig(data))
+
+export const removeMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { runtimeId: string; workspaceId?: string; targetId: string; name: string }) => d)
+  .handler(async ({ data }) => (await core()).removeMcpServerConfig(data))
+
+export const getSharedMcp = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getSharedMcpConfig(),
+)
+
+export const saveSharedMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { server: McpServerConfig; previousName?: string; force?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).saveSharedMcpServerConfig(data))
+
+export const removeSharedMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { name: string; scope?: 'registry' | 'everywhere' }) => d)
+  .handler(async ({ data }) => (await core()).removeSharedMcpServerConfig(data))
+
+export const discoverMcpServers = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).discoverMcpServersConfig(),
+)
+
+export const importMcpServers = createServerFn({ method: 'POST' })
+  .validator((d: { choices: { name: string; fromTargetId: string }[] }) => d)
+  .handler(async ({ data }) => (await core()).importMcpServersConfig(data))
+
+export const getMcpOAuthStatus = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getMcpOAuthStatus(),
+)
+
+export const startMcpOAuth = createServerFn({ method: 'POST' })
+  .validator((d: { name: string; redirectUri: string }) => d)
+  .handler(async ({ data }) => (await core()).startMcpOAuth(data))
+
+export const disconnectMcpServer = createServerFn({ method: 'POST' })
+  .validator((d: { name: string }) => d)
+  .handler(async ({ data }) => (await core()).disconnectMcpServer(data))
+
+export const syncSharedMcp = createServerFn({ method: 'POST' })
+  .validator((d: { force?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).syncSharedMcpConfig(data))
+
+// --- Slash commands --------------------------------------------------------
+
+export const listSlashCommands = createServerFn({ method: 'GET' })
+  .validator((d: { runtimeId: string; workspaceId?: string; includeApp?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).listSlashCommandsFor(data))
+
+// --- Plugins ---------------------------------------------------------------
+
+export const listPlugins = createServerFn({ method: 'GET' })
+  .validator((d: { runtimeId: string; workspaceId?: string }) => d)
+  .handler(async ({ data }) => (await core()).listPluginsFor(data))
+
+export const listInstalledPlugins = createServerFn({ method: 'GET' })
+  .validator((d: { workspaceId?: string }) => d)
+  .handler(async ({ data }) => (await core()).listInstalledPlugins(data))
+
 // --- Tasks -----------------------------------------------------------------
 
 export const listTasks = createServerFn({ method: 'GET' }).handler(async () =>
@@ -93,6 +173,17 @@ export const getTask = createServerFn({ method: 'GET' })
 export const saveTask = createServerFn({ method: 'POST' })
   .validator((d: TaskInput) => d)
   .handler(async ({ data }) => (await core()).upsertTask(data))
+
+export const saveTaskWebhook = createServerFn({ method: 'POST' })
+  .validator(
+    (d: {
+      taskId: string
+      webhookIntegrationId?: string
+      webhookEvents?: string[]
+      webhookFilters?: WebhookFilters
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).updateTaskWebhook(data) ?? null)
 
 export const toggleTask = createServerFn({ method: 'POST' })
   .validator((d: { id: string; enabled: boolean }) => d)
@@ -123,8 +214,14 @@ export const listNativeSessions = createServerFn({ method: 'GET' })
 // --- Runs ------------------------------------------------------------------
 
 export const listRuns = createServerFn({ method: 'GET' })
-  .validator((d: { taskId?: string; limit?: number; includeArchived?: boolean }) => d)
+  .validator(
+    (d: { taskId?: string; limit?: number; offset?: number; includeArchived?: boolean }) => d,
+  )
   .handler(async ({ data }) => (await core()).listRuns(data))
+
+export const countRuns = createServerFn({ method: 'GET' })
+  .validator((d: { taskId?: string; includeArchived?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).countRuns(data))
 
 export const listRunChecks = createServerFn({ method: 'GET' })
   .validator((d: { runId: string }) => d)
@@ -141,6 +238,10 @@ export const getRun = createServerFn({ method: 'GET' })
 export const cancelRun = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => (await core()).cancelRun(data.id) ?? null)
+
+export const markRunRead = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).markRunRead(data.id))
 
 export const removeRun = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
@@ -162,6 +263,8 @@ export const startChat = createServerFn({ method: 'POST' })
       model?: string
       effort?: string
       runtimeMode?: string
+      resumeSessionId?: string
+      resumeSessionLabel?: string
     }) => d,
   )
   .handler(async ({ data }) => (await core()).startChat(data))
@@ -178,10 +281,35 @@ export const getRunWorkspace = createServerFn({ method: 'GET' })
 
 export const postMessage = createServerFn({ method: 'POST' })
   .validator(
-    (d: { runId: string; prompt: string; model?: string; effort?: string; runtimeMode?: string }) =>
-      d,
+    (d: {
+      runId: string
+      prompt: string
+      runtimeId?: string
+      model?: string
+      effort?: string
+      runtimeMode?: string
+      userMessageId?: string
+      assistantMessageId?: string
+      /** Interrupt the running turn instead of queueing behind it. */
+      force?: boolean
+    }) => d,
   )
   .handler(async ({ data }) => (await core()).postMessage(data))
+
+/** Drop one follow-up waiting on the current turn. */
+export const dequeueMessage = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).dequeueFollowUp(data))
+
+/** Drop every follow-up waiting on a run. */
+export const clearQueuedMessages = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string }) => d)
+  .handler(async ({ data }) => (await core()).clearQueuedFollowUps(data.runId))
+
+/** Deliver the next queued follow-up on a run that is no longer working. */
+export const flushQueuedMessages = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string }) => d)
+  .handler(async ({ data }) => (await core()).flushQueuedFollowUps(data.runId))
 
 /**
  * Answer a pending tool-approval on a supervised run (allow/deny). The run
@@ -221,6 +349,15 @@ export const writeWorkspaceFile = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; path: string; content: string }) => d)
   .handler(async ({ data }) => (await core()).writeWorkspaceFile(data))
 
+export const restoreWorkspaceFile = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string; path: string; content: string }) => d)
+  .handler(async ({ data }) => (await core()).restoreWorkspaceFile(data))
+
+/** Upload a composer image; `data` is raw base64 without the data-URL prefix. */
+export const saveAttachment = createServerFn({ method: 'POST' })
+  .validator((d: { workspaceId: string; name: string; mimeType: string; data: string }) => d)
+  .handler(async ({ data }) => (await core()).saveWorkspaceAttachment(data))
+
 export const commitChanges = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; message: string; paths?: string[] }) => d)
   .handler(async ({ data }) => (await core()).commitChanges(data))
@@ -230,8 +367,12 @@ export const pushChanges = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => (await core()).pushChanges(data))
 
 export const discardChanges = createServerFn({ method: 'POST' })
-  .validator((d: { runId: string; paths?: string[] }) => d)
+  .validator((d: { runId: string; paths?: string[]; resetCommits?: boolean }) => d)
   .handler(async ({ data }) => (await core()).discardChanges(data))
+
+export const discardHunk = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string; path: string; hunkIndex: number }) => d)
+  .handler(async ({ data }) => (await core()).discardHunk(data))
 
 export const createBranch = createServerFn({ method: 'POST' })
   .validator((d: { runId: string; name: string }) => d)
@@ -267,8 +408,12 @@ export const listProjects = createServerFn({ method: 'GET' }).handler(async () =
 )
 
 export const listLocalDirectories = createServerFn({ method: 'GET' })
-  .validator((d: { dir?: string }) => d)
-  .handler(async ({ data }) => (await core()).listLocalDirectories(data.dir))
+  .validator((d: { dir?: string; showHidden?: boolean }) => d)
+  .handler(async ({ data }) => (await core()).listLocalDirectories(data.dir, data.showHidden))
+
+export const listLocalPlaces = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listLocalPlaces(),
+)
 
 export const createLocalFolder = createServerFn({ method: 'POST' })
   .validator((d: { parent?: string; name: string }) => d)
@@ -335,6 +480,16 @@ export const archiveWorkspace = createServerFn({ method: 'POST' })
   .validator((d: { id: string; force: boolean }) => d)
   .handler(async ({ data }) => (await core()).archiveWorkspace(data.id, data.force))
 
+// --- Usage -----------------------------------------------------------------
+
+export const usageReport = createServerFn({ method: 'GET' })
+  .validator((d: { range?: string }) => d)
+  .handler(async ({ data }) => (await core()).getUsageReport(data))
+
+export const usagePressure = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getUsagePressure(),
+)
+
 // --- Notifications ---------------------------------------------------------
 
 export const listNotifiers = createServerFn({ method: 'GET' }).handler(async () =>
@@ -371,11 +526,8 @@ export const listIntegrations = createServerFn({ method: 'GET' }).handler(async 
 )
 
 export const getIntegration = createServerFn({ method: 'GET' })
-  .validator((d: { id: string; revealSecret?: boolean }) => d)
-  .handler(
-    async ({ data }) =>
-      (await core()).getIntegrationPublic(data.id, Boolean(data.revealSecret)) ?? null,
-  )
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).getIntegrationPublic(data.id) ?? null)
 
 export const createIntegration = createServerFn({ method: 'POST' })
   .validator((d: CreateIntegrationInput) => d)
@@ -384,17 +536,6 @@ export const createIntegration = createServerFn({ method: 'POST' })
 export const updateIntegration = createServerFn({ method: 'POST' })
   .validator((d: UpdateIntegrationInput) => d)
   .handler(async ({ data }) => (await core()).updateIntegration(data))
-
-export const rotateIntegrationSecret = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => (await core()).rotateIntegrationSecret(data.id))
-
-export const removeIntegration = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => {
-    ;(await core()).deleteIntegration(data.id)
-    return { ok: true }
-  })
 
 export const listWebhookDeliveries = createServerFn({ method: 'GET' })
   .validator((d: { integrationId?: string; limit?: number }) => d)
@@ -406,17 +547,17 @@ export const listWebhookDeliveries = createServerFn({ method: 'GET' })
     return c.listRecentDeliveries(data.limit ?? 50)
   })
 
-export const getInstallContext = createServerFn({ method: 'GET' }).handler(async () =>
-  (await core()).getInstallContext(),
+export const getAutomationSetupContext = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).getAutomationSetupContext(),
 )
 
-export const installIntegration = createServerFn({ method: 'POST' })
-  .validator((d: InstallIntegrationInput) => d)
-  .handler(async ({ data }) => (await core()).installIntegration(data))
+/** Bind a connected integration to a workspace + runtime so deliveries run. */
+export const createIntegrationAutomation = createServerFn({ method: 'POST' })
+  .validator((d: CreateIntegrationAutomationInput) => d)
+  .handler(async ({ data }) => (await core()).createIntegrationAutomation(data))
 
 /** Soft type re-export for UI forms. */
 export type { IntegrationProviderId }
-export type { InstallIntegrationInput }
 
 // --- Mobile devices --------------------------------------------------------
 
@@ -456,8 +597,8 @@ export const cloudStatus = createServerFn({ method: 'GET' }).handler(async () =>
 )
 
 export const startCloudLogin = createServerFn({ method: 'POST' })
-  .validator((d: { origin: string }) => d)
-  .handler(async ({ data }) => (await core()).startCloudLogin(data.origin))
+  .validator((d: { origin: string; next?: string }) => d)
+  .handler(async ({ data }) => (await core()).startCloudLogin(data.origin, data.next))
 
 export const completeCloudLogin = createServerFn({ method: 'POST' })
   .validator((d: { code: string; state: string }) => d)
@@ -465,8 +606,13 @@ export const completeCloudLogin = createServerFn({ method: 'POST' })
     const c = await core()
     const session = await c.completeCloudLogin(data)
     await c.afterSignIn()
-    return { email: session.email, userId: session.userId }
+    return { email: session.email, userId: session.userId, next: session.next }
   })
+
+/** Which providers this control plane can connect. Public — no session needed. */
+export const cloudProviders = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listCloudProviders(),
+)
 
 export const skipCloudOnboarding = createServerFn({ method: 'POST' }).handler(async () =>
   (await core()).skipCloudOnboarding(),

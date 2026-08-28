@@ -15,11 +15,55 @@ import type { PlanEntry, PlanEntryStatus } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
 import {
   locationsFromToolInput,
+  pickNumber,
   pickString,
+  recordAt,
   toolInputSummary,
   toolResultContent,
   type ParsedTurnEvent,
 } from './types.ts'
+import type { TurnUsage } from '../turnUsage.ts'
+
+/**
+ * Codex token counts → a context snapshot.
+ *
+ * Codex is the only CLI here that states its own window
+ * (`info.model_context_window`), and it separates the *last* request from the
+ * turn total — `last_token_usage` is the one that describes what the model is
+ * carrying right now.
+ */
+function codexUsage(counts: Record<string, unknown> | undefined): Partial<TurnUsage> | undefined {
+  if (!counts) return undefined
+  const input = pickNumber(counts, 'input_tokens', 'inputTokens') ?? 0
+  const output = pickNumber(counts, 'output_tokens', 'outputTokens') ?? 0
+  const cacheRead = pickNumber(counts, 'cached_input_tokens', 'cachedInputTokens') ?? 0
+  const total = pickNumber(counts, 'total_tokens', 'totalTokens')
+  if (input + output + cacheRead <= 0 && !total) return undefined
+  // `input_tokens` already includes the cached part, so the sum in
+  // `mergeTurnUsage` would double-count it. State the context directly.
+  return {
+    input: Math.max(0, input - cacheRead),
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    contextTokens: total ?? input + output,
+  }
+}
+
+/** Reasoning body: a string, or Codex/Responses `summary: [{ text }]`. */
+function reasoningText(item: Record<string, unknown>): string {
+  const direct = pickString(item, 'text', 'content')
+  if (direct) return direct
+  if (typeof item.summary === 'string' && item.summary) return item.summary
+  if (!Array.isArray(item.summary)) return ''
+  const parts: string[] = []
+  for (const entry of item.summary) {
+    if (!entry || typeof entry !== 'object') continue
+    const text = pickString(entry as Record<string, unknown>, 'text', 'content')
+    if (text) parts.push(text)
+  }
+  return parts.join('\n')
+}
 
 /** Codex item status → ACP tool status. */
 function statusFor(item: Record<string, unknown>, envelope: string): ToolCallStatus {
@@ -61,6 +105,28 @@ function locationsFromFileChange(item: Record<string, unknown>) {
 export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[] {
   const type = String(obj.type ?? '')
 
+  if (type === 'token_count') {
+    const info = recordAt(obj, 'info') ?? obj
+    const usage = codexUsage(
+      recordAt(info, 'last_token_usage') ?? recordAt(info, 'total_token_usage'),
+    )
+    if (!usage) return []
+    const window = pickNumber(info, 'model_context_window', 'modelContextWindow')
+    const model = pickString(info, 'model', 'model_slug')
+    return [
+      {
+        kind: 'usage',
+        payload: {
+          usage: {
+            ...usage,
+            ...(window ? { contextLimit: window } : {}),
+            ...(model ? { model } : {}),
+          },
+        },
+      },
+    ]
+  }
+
   if (type === 'item.started' || type === 'item.updated' || type === 'item.completed') {
     const item = obj.item as Record<string, unknown> | undefined
     if (!item) return []
@@ -75,9 +141,14 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
     }
 
     if (itemType === 'reasoning') {
-      if (type !== 'item.completed') return []
-      const text = pickString(item, 'text', 'summary', 'content')
-      return text ? [{ kind: 'thought', payload: { text } }] : []
+      const text = reasoningText(item)
+      if (type === 'item.started') {
+        return [{ kind: 'thought', payload: { text } }]
+      }
+      if (type === 'item.updated' || type === 'item.completed') {
+        return text ? [{ kind: 'thought', payload: { text } }] : []
+      }
+      return []
     }
 
     if (itemType === 'todo_list') {
@@ -259,7 +330,11 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
   }
 
   if (type === 'turn.completed') {
-    return [{ kind: 'turn_done', payload: { stopReason: 'end_turn' } }]
+    const usage = codexUsage(recordAt(obj, 'usage'))
+    return [
+      ...(usage ? [{ kind: 'usage' as const, payload: { usage } }] : []),
+      { kind: 'turn_done' as const, payload: { stopReason: 'end_turn' as const } },
+    ]
   }
 
   if (type === 'turn.failed' || type === 'error') {

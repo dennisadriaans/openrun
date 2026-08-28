@@ -8,7 +8,7 @@
  */
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, renameSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { dirname, resolve } from 'node:path'
@@ -19,7 +19,7 @@ import { ensureProcessPathAugmented } from './userPath.ts'
 export type RuntimeRow = {
   id: string
   label: string
-  /** The binary to invoke, e.g. "claude", "codex", "grok". */
+  /** The binary to invoke, e.g. "claude", "codex", "grok", "fx". */
   bin: string
   /**
    * Argument template as a JSON array of tokens. Tokens support the
@@ -93,6 +93,8 @@ export type TaskRow = {
    * wall-clock "once at 03:01" does not repeat every night.
    */
   fireOnce: number
+  /** Absolute local wall-clock fire time for one-shot automations. */
+  scheduledAt: number
   createdAt: number
   updatedAt: number
   lastRunAt: number | null
@@ -155,6 +157,8 @@ export type RunRow = {
   repairAttempts: number
   /** 1 = the run was killed because it exceeded its wall-clock budget. */
   timedOut: number
+  /** When the user last opened this run; agent messages after it read as unread. */
+  lastReadAt: number
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system'
@@ -171,6 +175,13 @@ export type MessageRow = {
   exitCode: number | null
   /** JSON array of DiffFile summaries captured after this turn finished. */
   diffSummary: string
+  /** JSON `TurnUsage` the runtime last reported for this turn; '' when it reports none. */
+  usage: string
+  /** Integration this message was triggered by; empty for anything else. */
+  sourceProvider: string
+  /** The ticket the webhook fired for. Rendered as a badge, never prompted. */
+  sourceUrl: string
+  sourceLabel: string
   createdAt: number
   finishedAt: number | null
 }
@@ -214,6 +225,37 @@ export type RunQueueRow = {
   trigger: string
   /** Rendered prompt for webhook fires; empty means "use the task prompt". */
   prompt: string
+  /** Origin ticket of a parked webhook fire; survives the wait. */
+  sourceProvider: string
+  sourceUrl: string
+  sourceLabel: string
+  /** Schedule-fire audit row this pending run belongs to; empty for webhooks. */
+  scheduleFireId: string
+  queuedAt: number
+}
+
+export type ScheduleFireOutcome = 'started' | 'queued' | 'skipped' | 'failed' | 'missed'
+
+/** Durable account of every cron/one-shot fire, including ones with no run row. */
+export type ScheduleFireRow = {
+  id: string
+  taskId: string
+  scheduledFor: number
+  observedAt: number
+  outcome: ScheduleFireOutcome
+  runId: string
+  detail: string
+}
+
+export type MessageQueueRow = {
+  id: string
+  runId: string
+  prompt: string
+  model: string
+  effort: string
+  runtimeMode: string
+  /** Non-empty only when the queued turn also switches runtime. */
+  runtimeId: string
   queuedAt: number
 }
 
@@ -346,7 +388,17 @@ export function openrunHome(): string {
   if (fromEnv) return fromEnv
   const next = path.join(os.homedir(), '.openrun')
   const legacy = path.join(os.homedir(), '.agentops')
-  if (!existsSync(next) && existsSync(legacy)) return legacy
+  // Move rather than read-through: a fallback that only *reads* the old path
+  // dies the instant anything creates the new one, and the user silently loses
+  // their session. See `adoptLegacyDatabase` for the same reasoning.
+  if (!existsSync(next) && existsSync(legacy)) {
+    try {
+      renameSync(legacy, next)
+    } catch {
+      // Cross-device or permissions — keep serving the old path.
+      return legacy
+    }
+  }
   return next
 }
 
@@ -359,6 +411,78 @@ export function slugify(s: string): string {
     .replace(/^-|-$/g, '')
 }
 
+const DB_SIDECARS = ['-wal', '-shm'] as const
+
+/**
+ * True when `file` is a SQLite database that no one ever finished setting up.
+ *
+ * A healthy boot seeds `runtimes` from `RUNTIME_PRESETS`, so an openable file
+ * with no runtimes and no projects is the residue of a process that died
+ * partway through `getDb()` — not something worth keeping.
+ */
+function isAbandonedDatabase(file: string): boolean {
+  let probe: Database.Database | null = null
+  try {
+    probe = new Database(file, { readonly: true, fileMustExist: true })
+    const counted = (table: string): number => {
+      const row = probe!
+        .prepare(`SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name=?`)
+        .get(table) as { n: number }
+      if (row.n === 0) return 0
+      return (probe!.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n
+    }
+    return counted('runtimes') === 0 && counted('projects') === 0
+  } catch {
+    // Unreadable or not SQLite at all — equally not worth keeping.
+    return true
+  } finally {
+    try {
+      probe?.close()
+    } catch {
+      // Nothing to do; we only ever read.
+    }
+  }
+}
+
+function moveWithSidecars(from: string, to: string): void {
+  renameSync(from, to)
+  for (const suffix of DB_SIDECARS) {
+    if (existsSync(from + suffix)) renameSync(from + suffix, to + suffix)
+  }
+}
+
+/**
+ * Adopt `data/agentops.db` under its new name, once.
+ *
+ * The rename shipped with a read-only fallback ("use legacy if openrun.db is
+ * absent"), which is a one-way trap: anything that creates an empty
+ * `openrun.db` — a build served from a stale cwd, a boot killed mid-migration —
+ * permanently hides a database full of real projects and runs, and the app
+ * comes up looking factory-reset. So move the file instead of reading past it,
+ * and refuse to let an abandoned stub shadow a legacy DB that still has data.
+ */
+function adoptLegacyDatabase(next: string, legacy: string): string {
+  if (!existsSync(legacy)) return next
+
+  if (existsSync(next)) {
+    if (!isAbandonedDatabase(next)) return next
+    try {
+      moveWithSidecars(next, `${next}.abandoned-${Date.now()}`)
+    } catch {
+      return next
+    }
+  }
+
+  try {
+    moveWithSidecars(legacy, next)
+  } catch {
+    // Could not migrate (permissions, open handle) — keep serving the old file
+    // rather than silently starting empty.
+    return legacy
+  }
+  return next
+}
+
 let _db: Database.Database | null = null
 
 export function getDb(): Database.Database {
@@ -366,16 +490,16 @@ export function getDb(): Database.Database {
 
   const next = resolve(process.cwd(), 'data', 'openrun.db')
   const legacy = resolve(process.cwd(), 'data', 'agentops.db')
-  const dbPath = !existsSync(next) && existsSync(legacy) ? legacy : next
-  if (!existsSync(dirname(dbPath))) mkdirSync(dirname(dbPath), { recursive: true })
+  if (!existsSync(dirname(next))) mkdirSync(dirname(next), { recursive: true })
+  const dbPath = adoptLegacyDatabase(next, legacy)
 
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
-  // Webhook signing secrets are stored here in the
-  // clear, so file permissions are the only thing protecting them from other
-  // accounts on the machine. Applied after open so the file exists, and to the
+  // Prompts, run output, and device tokens are stored here in the clear, so
+  // file permissions are the only thing protecting them from other accounts on
+  // the machine. Applied after open so the file exists, and to the
   // WAL sidecars too — they hold the same rows before a checkpoint.
   // Best-effort: Windows and some network filesystems ignore POSIX modes.
   for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -499,11 +623,16 @@ export function getDb(): Database.Database {
  * Adds `column` to `table` if it's missing. SQLite has no "ADD COLUMN IF NOT
  * EXISTS", so we diff against table_info instead.
  */
-function addColumn(db: Database.Database, table: string, column: string, ddl: string) {
-  const cols = new Set(
-    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
-  )
-  if (!cols.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+function addColumn(db: Database.Database, table: string, column: string, ddl: string): boolean {
+  const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  // A table created further down this same migration does not exist yet on a
+  // fresh database, and `table_info` answers with an empty list rather than an
+  // error — so without this the ALTER below throws and first boot dies.
+  if (info.length === 0) return false
+  const cols = new Set(info.map((c) => c.name))
+  if (cols.has(column)) return false
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  return true
 }
 
 /**
@@ -549,9 +678,24 @@ function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'repairAttempts', 'INTEGER NOT NULL DEFAULT 0')
   addColumn(db, 'runs', 'timedOut', 'INTEGER NOT NULL DEFAULT 0')
 
+  // Unread markers on the runs list. Existing rows are backfilled to "now" so
+  // upgrading does not light up every historical run as unread.
+  if (addColumn(db, 'runs', 'lastReadAt', 'INTEGER NOT NULL DEFAULT 0')) {
+    db.prepare('UPDATE runs SET lastReadAt = ?').run(Date.now())
+  }
+
   addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'fireOnce', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'tasks', 'scheduledAt', 'INTEGER NOT NULL DEFAULT 0')
+
+  // Where a webhook-triggered message came from. Held beside the message
+  // rather than inside it so the link never reaches the agent's prompt.
+  // Live token accounting for the turn, as the CLI last reported it.
+  addColumn(db, 'messages', 'usage', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'messages', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'messages', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'messages', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS check_results (
@@ -610,7 +754,44 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_run_queue_workspace
       ON run_queue(workspaceId, queuedAt ASC);
+
+    CREATE TABLE IF NOT EXISTS schedule_fires (
+      id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      scheduledFor INTEGER NOT NULL,
+      observedAt INTEGER NOT NULL,
+      outcome TEXT NOT NULL,
+      runId TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_schedule_fires_task
+      ON schedule_fires(taskId, observedAt DESC);
+
+    -- Follow-ups typed while the agent was still working. Each becomes its own
+    -- turn when the queue drains; see server/messageQueue.ts.
+    CREATE TABLE IF NOT EXISTS message_queue (
+      id TEXT PRIMARY KEY,
+      runId TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT '',
+      effort TEXT NOT NULL DEFAULT '',
+      runtimeMode TEXT NOT NULL DEFAULT '',
+      runtimeId TEXT NOT NULL DEFAULT '',
+      queuedAt INTEGER NOT NULL,
+      FOREIGN KEY (runId) REFERENCES runs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_message_queue_run
+      ON message_queue(runId, queuedAt ASC);
   `)
+
+  // After the table exists: on a fresh database `run_queue` is created above,
+  // and on an upgraded one these are the columns it is missing.
+  addColumn(db, 'run_queue', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'scheduleFireId', "TEXT NOT NULL DEFAULT ''")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS integrations (
@@ -718,6 +899,10 @@ function migrate(db: Database.Database) {
       path TEXT PRIMARY KEY,
       deletedAt INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS deleted_runtime_ids (
+      id TEXT PRIMARY KEY,
+      deletedAt INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS turn_events (
       id TEXT PRIMARY KEY,
       messageId TEXT NOT NULL,
@@ -730,6 +915,8 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_turn_events_message
       ON turn_events(messageId, seq ASC);
+    CREATE INDEX IF NOT EXISTS idx_turn_events_run
+      ON turn_events(runId, createdAt ASC, seq ASC);
     -- Models the installed CLIs actually offer, discovered in the background so
     -- the composer never pays for it. The fingerprint identifies the binary the
     -- rows came from; a mismatch is what schedules the next refresh. Pure
@@ -738,6 +925,46 @@ function migrate(db: Database.Database) {
       kind TEXT PRIMARY KEY,
       fingerprint TEXT NOT NULL,
       models TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    -- One row per CLI history file we have already totalled up, so the Usage
+    -- page re-reads only what changed since the last scan. version bumps
+    -- when the parser or the price table changes. Pure cache: safe to delete.
+    -- OAuth for a hosted MCP server, run by Open Run instead of by each CLI.
+    -- The vendors publish RFC 9728/8414 metadata and accept dynamic client
+    -- registration, so there is no vendor secret here: 'clientId' is one we
+    -- registered ourselves. Access, refresh, clientSecret and pendingVerifier
+    -- are AES-GCM sealed with ~/.openrun/data-key, which is not in this file.
+    -- The access token is copied into every CLI config as an Authorization
+    -- header, which is also why refreshing it rewrites those files.
+    -- 'pendingState'/'pendingVerifier' hold one PKCE flow in progress and are
+    -- cleared the moment it lands.
+    CREATE TABLE IF NOT EXISTS mcp_oauth (
+      name TEXT PRIMARY KEY,
+      resource TEXT NOT NULL,
+      issuer TEXT NOT NULL,
+      authorizationEndpoint TEXT NOT NULL,
+      tokenEndpoint TEXT NOT NULL,
+      registrationEndpoint TEXT NOT NULL DEFAULT '',
+      revocationEndpoint TEXT NOT NULL DEFAULT '',
+      clientId TEXT NOT NULL DEFAULT '',
+      clientSecret TEXT NOT NULL DEFAULT '',
+      redirectUri TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT '',
+      accessToken TEXT NOT NULL DEFAULT '',
+      refreshToken TEXT NOT NULL DEFAULT '',
+      expiresAt INTEGER NOT NULL DEFAULT 0,
+      pendingState TEXT NOT NULL DEFAULT '',
+      pendingVerifier TEXT NOT NULL DEFAULT '',
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS usage_file_cache (
+      path TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      mtimeMs INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      stats TEXT NOT NULL,
       updatedAt INTEGER NOT NULL
     );
   `)
@@ -920,6 +1147,26 @@ export function forgetDeletedProjectPath(projectPath: string): void {
   getDb().prepare('DELETE FROM deleted_project_paths WHERE path = ?').run(projectPath)
 }
 
+/** Remember a builtin id so boot seed will not recreate a deleted runtime. */
+export function rememberDeletedRuntimeId(runtimeId: string): void {
+  getDb()
+    .prepare('INSERT OR REPLACE INTO deleted_runtime_ids (id, deletedAt) VALUES (?, ?)')
+    .run(runtimeId, Date.now())
+}
+
+/** Allow an explicitly re-added runtime id to be seeded / saved again. */
+export function forgetDeletedRuntimeId(runtimeId: string): void {
+  getDb().prepare('DELETE FROM deleted_runtime_ids WHERE id = ?').run(runtimeId)
+}
+
+function deletedRuntimeIdSet(db: Database.Database): Set<string> {
+  return new Set(
+    (db.prepare('SELECT id FROM deleted_runtime_ids').all() as Array<{ id: string }>).map(
+      (row) => row.id,
+    ),
+  )
+}
+
 /** Map gallery presets → DB seed rows (canOpenPrs stays at column default 0). */
 function builtinRuntimeSeeds(): Array<Omit<RuntimeRow, 'createdAt' | 'canOpenPrs'>> {
   return RUNTIME_PRESETS.map((p) => ({
@@ -950,8 +1197,12 @@ function seedRuntimes(db: Database.Database) {
 
   // canOpenPrs is omitted here — it falls back to the column's DEFAULT 0, so
   // seeded runtimes ship without PR-opening rights until a user opts in.
+  const deleted = deletedRuntimeIdSet(db)
   const tx = db.transaction(() => {
-    for (const r of builtinRuntimeSeeds()) insert.run({ ...r, createdAt: now })
+    for (const r of builtinRuntimeSeeds()) {
+      if (deleted.has(r.id)) continue
+      insert.run({ ...r, createdAt: now })
+    }
   })
   tx()
 }
@@ -970,9 +1221,10 @@ function ensureBuiltinRuntimeSeeds(db: Database.Database) {
      VALUES (@id, @label, @bin, @argsTemplate, @promptViaStdin, @description, @enabled, @transport, @createdAt)`,
   )
 
+  const deleted = deletedRuntimeIdSet(db)
   const tx = db.transaction(() => {
     for (const r of builtinRuntimeSeeds()) {
-      if (exists.get(r.id)) continue
+      if (exists.get(r.id) || deleted.has(r.id)) continue
       insert.run({ ...r, createdAt: now })
     }
   })

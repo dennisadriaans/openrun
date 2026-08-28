@@ -4,35 +4,103 @@
  * Renders the turn-by-turn transcript of a run and the follow-up composer.
  * Layout adapted from the t3code chat view (MIT, T3 Tools Inc.).
  */
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, Square, Terminal } from 'lucide-react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { ChevronRight, ListPlus, Square, Terminal } from 'lucide-react'
 import type { ChatMessage } from '../server/core'
+import type { DiffFile } from '../server/git'
 import type { ApprovalDecision } from '../lib/claudeControl'
 import type { TurnEventPayload, TurnEventRow } from '../lib/turnEvents'
-import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
+import {
+  defaultEffort,
+  defaultModel,
+  findModel,
+  modelsForRuntime,
+  type ModelOption,
+} from '../lib/models'
 import { formatChatTimestampTooltip, formatShortTimestamp } from '../lib/format'
-import { useAnswerApproval } from '../lib/queries'
-import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
+import {
+  attachmentUploader,
+  useAnswerApproval,
+  useDiscard,
+  usePlugins,
+  useRestoreFile,
+  useSlashCommands,
+} from '../lib/queries'
+import * as fns from '../fns'
+import {
+  DEFAULT_RUNTIME_MODE,
+  RUNTIME_MODES,
+  parseRuntimeMode,
+  type RuntimeMode,
+} from '../lib/runtimeMode'
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
-import { supportsSupervised } from '../lib/supervisedPolicy'
-import { ComposerModelControls } from './ComposerControls'
+import { isSupervised, supportsSupervised } from '../lib/supervisedPolicy'
+import { ComposerModelControls, RuntimePicker, type RuntimeOption } from './ComposerControls'
+import {
+  RUNTIME_SWITCH_NOTE_POINTS,
+  RUNTIME_SWITCH_NOTE_TITLE,
+  isRuntimeSwitch,
+  resolveSwitchMode,
+  resolveSwitchModel,
+  runtimeSwitchBlockedReason,
+} from '../lib/runtimeSwitch'
+import { PluginMentionMenu } from './PluginMentionMenu'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import {
+  appCommandFor,
+  applySlashCommand,
+  matchSlashCommands,
+  slashMenuQuery,
+  type SlashCommand,
+} from '../lib/slashCommands'
+import { applyPluginMention, matchPlugins, pluginMenuQuery, type AgentPlugin } from '../lib/plugins'
+import { Button, Modal } from './ui'
 import { FilesChanged } from './FilesChanged'
 import { MessageCopyButton } from './MessageCopyButton'
+import { MessageSourceBadge } from './MessageSourceBadge'
 import { PlanProposalsInChat } from './PlanProposalsInChat'
 import { looksLikePlanProposalArray, parsePlanProposals } from '../lib/planProposals'
+import type { QueuedMessage } from '../lib/messageQueue'
 import {
   ApprovalEvent,
   CallEvent,
   ChatMarkdown,
   PlanEvent,
+  QueuedMessages,
   ThoughtEvent,
   TurnFold,
   WorkGroup,
   WorkingIndicator,
+  useChatThemeBehaviour,
+  AttachmentButton,
+  AttachmentStrip,
+  imageFilesFrom,
+  usePendingAttachments,
+  type AttachmentUploader,
 } from './chat/index'
-import { latestActivityLabel } from '../lib/turnActivity'
+import {
+  attachmentPathsIn,
+  promptWithAttachments,
+  promptWithoutAttachments,
+} from '../lib/attachments'
+import { activitySteps, latestActivity } from '../lib/turnActivity'
+import { verificationPhase } from '../lib/runPhase'
+import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
 import { foldedRows, planTurnFold, type TurnFoldStage, type TurnRowKind } from '../lib/turnFold'
+import { hasEditHunks } from '../lib/toolCallView'
+import { mergeThoughtText } from '../lib/orbState'
+import { meaningfulStderr } from '../lib/stderrNoise'
 
 function isJsonlNoiseLine(line: string): boolean {
   const t = line.trim()
@@ -121,18 +189,41 @@ type TranscriptRow = { id: string; kind: TurnRowKind; node: ReactNode }
  */
 function turnRows({
   events,
+  running,
   answering,
   onAnswer,
   onSelectFile,
+  onReviewFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
 }: {
   events: TurnEventRow[]
+  running?: boolean
   answering?: boolean
   onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile?: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
 }): TranscriptRow[] {
   const rows: TranscriptRow[] = []
   const push = (id: string, kind: TurnRowKind, node: ReactNode) => rows.push({ id, kind, node })
   let lastAssistant = ''
+  let lastThought: { index: number; text: string } | null = null
   const openCalls = new Map<string, TurnEventPayload>()
   const consumedResults = new Set<string>()
   // Shared with the mobile API so the two can never disagree about what is
@@ -162,8 +253,26 @@ function turnRows({
           <ChatMarkdown text={payload.text} {...(onSelectFile ? { onSelectFile } : {})} />
         </div>,
       )
-    } else if (ev.kind === 'thought' && payload.text) {
-      push(ev.id, 'work', <ThoughtEvent text={payload.text} />)
+    } else if (ev.kind === 'thought') {
+      const text = payload.text ?? ''
+      const trailing = Boolean(
+        running &&
+          events
+            .slice(i + 1)
+            .every((later) => later.kind === 'thought' || later.kind === 'turn_done'),
+      )
+      if (lastThought && lastThought.index === rows.length - 1) {
+        lastThought.text = mergeThoughtText(lastThought.text, text)
+        const prev = rows[lastThought.index]!
+        rows[lastThought.index] = {
+          id: prev.id,
+          kind: 'work',
+          node: <ThoughtEvent text={lastThought.text} live={trailing} />,
+        }
+      } else {
+        lastThought = { index: rows.length, text }
+        push(ev.id, 'work', <ThoughtEvent text={text} live={trailing} />)
+      }
     } else if (ev.kind === 'plan' && payload.plan && payload.plan.length > 0) {
       push(ev.id, 'work', <PlanEvent plan={payload.plan} />)
     } else if (ev.kind === 'tool_start') {
@@ -171,9 +280,16 @@ function turnRows({
       if (callId) openCalls.set(callId, payload)
       const paired = callId ? resultByCallId.get(callId) : undefined
       if (paired) consumedResults.add(paired.id)
+      const editCard = hasEditHunks({
+        name: payload.name,
+        title: payload.title,
+        toolKind: payload.toolKind,
+        toolInput: payload.input,
+        locations: paired?.payload.locations ?? payload.locations,
+      })
       push(
         ev.id,
-        'work',
+        editCard ? 'edit' : 'work',
         <CallEvent
           name={payload.name}
           title={payload.title}
@@ -189,15 +305,32 @@ function turnRows({
           result={paired?.payload.content ?? ''}
           locations={paired?.payload.locations ?? payload.locations}
           onSelectFile={onSelectFile}
+          onReviewFile={onReviewFile}
+          onUndoFile={onUndoFile}
+          onRedoFile={onRedoFile}
+          undoDisabled={undoDisabled}
+          undoDisabledReason={undoDisabledReason}
+          undoBusyPath={undoBusyPath}
+          redoBusyPath={redoBusyPath}
+          changedPaths={changedPaths}
+          undonePaths={undonePaths}
+          redoablePaths={redoablePaths}
         />,
       )
     } else if (ev.kind === 'tool_result') {
       if (consumedResults.has(ev.id)) continue
       const callId = payload.toolCallId
       const opened = callId ? openCalls.get(callId) : undefined
+      const editCard = hasEditHunks({
+        name: payload.name || opened?.name,
+        title: payload.title || opened?.title,
+        toolKind: payload.toolKind ?? opened?.toolKind,
+        toolInput: opened?.input,
+        locations: payload.locations,
+      })
       push(
         ev.id,
-        'work',
+        editCard ? 'edit' : 'work',
         <CallEvent
           name={payload.name || opened?.name}
           title={payload.title || opened?.title}
@@ -209,6 +342,16 @@ function turnRows({
           result={payload.content || ''}
           locations={payload.locations}
           onSelectFile={onSelectFile}
+          onReviewFile={onReviewFile}
+          onUndoFile={onUndoFile}
+          onRedoFile={onRedoFile}
+          undoDisabled={undoDisabled}
+          undoDisabledReason={undoDisabledReason}
+          undoBusyPath={undoBusyPath}
+          redoBusyPath={redoBusyPath}
+          changedPaths={changedPaths}
+          undonePaths={undonePaths}
+          redoablePaths={redoablePaths}
         />,
       )
     } else if (ev.kind === 'error') {
@@ -297,8 +440,11 @@ function TranscriptRows({ rows }: { rows: TranscriptRow[] }) {
   const groups: { id: string; kind: TurnRowKind; rows: TranscriptRow[] }[] = []
   for (const row of rows) {
     const last = groups.at(-1)
-    if (row.kind === 'work' && last?.kind === 'work') last.rows.push(row)
-    else groups.push({ id: row.id, kind: row.kind, rows: [row] })
+    if (last && row.kind === last.kind && (row.kind === 'work' || row.kind === 'edit')) {
+      last.rows.push(row)
+    } else {
+      groups.push({ id: row.id, kind: row.kind, rows: [row] })
+    }
   }
 
   return (
@@ -306,6 +452,12 @@ function TranscriptRows({ rows }: { rows: TranscriptRow[] }) {
       {groups.map((group) =>
         group.kind === 'work' ? (
           <WorkGroup key={group.id} rows={group.rows} />
+        ) : group.kind === 'edit' ? (
+          <div key={group.id} className="space-y-2 py-1">
+            {group.rows.map((row) => (
+              <div key={row.id}>{row.node}</div>
+            ))}
+          </div>
         ) : (
           <div key={group.id}>{group.rows[0]?.node}</div>
         ),
@@ -343,20 +495,41 @@ function MessageMeta({
   )
 }
 
-const UserMessage = memo(function UserMessage({ message }: { message: ChatMessage }) {
+const UserMessage = memo(function UserMessage({
+  message,
+  runId,
+}: {
+  message: ChatMessage
+  runId: string
+}) {
   const [expanded, setExpanded] = useState(false)
-  const long = message.content.length > 400
+  const attachments = attachmentPathsIn(message.content)
+  const text = attachments.length ? promptWithoutAttachments(message.content) : message.content
+  const long = text.length > 400
 
   return (
-    <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-[10px] border border-border bg-secondary px-3 py-2">
-        <div
-          className={`whitespace-pre-wrap text-sm leading-relaxed text-foreground ${
-            long && !expanded ? 'line-clamp-6' : ''
-          }`}
-        >
-          {message.content}
-        </div>
+    <div className="chat-user group">
+      <div className="chat-user__bubble">
+        {attachments.length ? (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {attachments.map((path) => (
+              <a
+                key={path}
+                href={`/api/runs/${runId}/attachment?path=${encodeURIComponent(path)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block h-20 w-20 overflow-hidden rounded-lg border border-border"
+              >
+                <img
+                  src={`/api/runs/${runId}/attachment?path=${encodeURIComponent(path)}`}
+                  alt={path.split('/').pop() ?? 'Attachment'}
+                  className="h-full w-full object-cover"
+                />
+              </a>
+            ))}
+          </div>
+        ) : null}
+        <div className={`chat-user__text ${long && !expanded ? 'line-clamp-6' : ''}`}>{text}</div>
         {long ? (
           <button
             type="button"
@@ -367,8 +540,14 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
           </button>
         ) : null}
       </div>
-      <div className="w-full max-w-[80%] pe-1">
-        <MessageMeta createdAt={message.createdAt} content={message.content} align="end" />
+      {/* `.chat-user__meta` owns the side it sits on, so the theme decides. */}
+      <div className="chat-user__meta">
+        <MessageMeta createdAt={message.createdAt} content={text} />
+        <MessageSourceBadge
+          provider={message.sourceProvider}
+          url={message.sourceUrl}
+          label={message.sourceLabel}
+        />
       </div>
     </div>
   )
@@ -376,10 +555,19 @@ const UserMessage = memo(function UserMessage({ message }: { message: ChatMessag
 
 const AssistantMessage = memo(function AssistantMessage({
   message,
-  activePath,
   answering,
   onAnswer,
   onSelectFile,
+  onReviewFile,
+  onUndoFile,
+  onRedoFile,
+  undoDisabled,
+  undoDisabledReason,
+  undoBusyPath,
+  redoBusyPath,
+  changedPaths,
+  undonePaths,
+  redoablePaths,
   runId,
   runtimeId,
   runTrigger,
@@ -391,10 +579,19 @@ const AssistantMessage = memo(function AssistantMessage({
   installWorkspaceLabel,
 }: {
   message: ChatMessage
-  activePath: string | null
   answering?: boolean
   onAnswer?: (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => void
   onSelectFile: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onUndoFile?: (path: string) => void
+  onRedoFile?: (path: string) => void
+  undoDisabled?: boolean
+  undoDisabledReason?: string
+  undoBusyPath?: string | null
+  redoBusyPath?: string | null
+  changedPaths?: string[]
+  undonePaths?: string[]
+  redoablePaths?: string[]
   runId: string
   runtimeId?: string
   runTrigger?: string
@@ -405,8 +602,13 @@ const AssistantMessage = memo(function AssistantMessage({
   installProjectName?: string | null
   installWorkspaceLabel?: string | null
 }) {
-  const [foldStage, setFoldStage] = useState<TurnFoldStage>('closed')
+  // Null means "whatever the theme says" — a CLI theme replays the turn inline.
+  // Switching theme therefore restyles turns the reader has not touched yet.
+  const [pickedStage, setFoldStage] = useState<TurnFoldStage | null>(null)
+  const { unfoldTurns } = useChatThemeBehaviour()
+  const foldStage: TurnFoldStage = pickedStage ?? (unfoldTurns ? 'all' : 'closed')
   const running = message.status === 'running'
+  const realStderr = meaningfulStderr(message.stderr)
   const hasEvents = message.events.length > 0
   // Planner / plain CLI dumps used to store one `raw` event per line while
   // `content` already held the real answer — prefer content in that case.
@@ -428,7 +630,8 @@ const AssistantMessage = memo(function AssistantMessage({
       ? parsePlanProposals(message.content)
       : []
   const showPlanCards = planProposals.length > 0 && Boolean(runtimeId)
-  const activityLabel = running ? latestActivityLabel(message.events) : undefined
+  const activity = running ? latestActivity(message.events) : undefined
+  const liveSteps = running ? activitySteps(message.events) : []
   // A turn whose events are all tool calls still has an answer — it just lives
   // on the message rather than in an `assistant` event (older rows, and CLIs
   // that only report their reply once, at the end).
@@ -443,9 +646,20 @@ const AssistantMessage = memo(function AssistantMessage({
   const rows = showEvents
     ? turnRows({
         events: message.events,
+        running,
         answering,
         ...(onAnswer ? { onAnswer } : {}),
         onSelectFile,
+        ...(onReviewFile ? { onReviewFile } : {}),
+        ...(onUndoFile ? { onUndoFile } : {}),
+        ...(onRedoFile ? { onRedoFile } : {}),
+        ...(undoDisabled ? { undoDisabled } : {}),
+        ...(undoDisabledReason ? { undoDisabledReason } : {}),
+        ...(undoBusyPath ? { undoBusyPath } : {}),
+        ...(redoBusyPath ? { redoBusyPath } : {}),
+        ...(changedPaths ? { changedPaths } : {}),
+        ...(undonePaths ? { undonePaths } : {}),
+        ...(redoablePaths ? { redoablePaths } : {}),
       })
     : []
   const fold = planTurnFold(rows, !running)
@@ -456,7 +670,7 @@ const AssistantMessage = memo(function AssistantMessage({
       <div className="relative min-w-0 px-1 py-0.5">
         {showEvents ? (
           <>
-            {fold.foldable ? (
+            {fold.foldable && !running ? (
               <TurnFold
                 startedAt={message.createdAt}
                 finishedAt={message.finishedAt}
@@ -465,7 +679,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 onToggle={() => setFoldStage(foldStage === 'closed' ? 'partial' : 'closed')}
               />
             ) : null}
-            {moreCount > 0 && foldStage !== 'closed' ? (
+            {moreCount > 0 && !running && foldStage !== 'closed' ? (
               <button
                 type="button"
                 aria-expanded={foldStage === 'all'}
@@ -501,10 +715,13 @@ const AssistantMessage = memo(function AssistantMessage({
           <div className="text-sm text-muted-foreground/50">(empty response)</div>
         ) : null}
 
-        {running ? (
+        {running && activity ? (
           <WorkingIndicator
             startedAt={message.createdAt}
-            {...(activityLabel ? { step: activityLabel } : {})}
+            orb={activity.orb}
+            verb={activity.verb}
+            {...(activity.step ? { step: activity.step } : {})}
+            steps={liveSteps}
           />
         ) : null}
 
@@ -514,10 +731,10 @@ const AssistantMessage = memo(function AssistantMessage({
           </pre>
         ) : null}
 
-        {!running && (message.stderr || (!showEvents && !showContentOverRaw && !showPlanCards)) ? (
+        {!running && (realStderr || (!showEvents && !showContentOverRaw && !showPlanCards)) ? (
           <ActivityLog
             stdout={showEvents || showContentOverRaw || showPlanCards ? '' : message.stdout}
-            stderr={message.stderr}
+            stderr={realStderr}
           />
         ) : null}
 
@@ -540,40 +757,23 @@ const AssistantMessage = memo(function AssistantMessage({
           </div>
         ) : null}
       </div>
-
-      {!running && message.diffSummary.length > 0 ? (
-        <FilesChanged files={message.diffSummary} activePath={activePath} onSelect={onSelectFile} />
-      ) : null}
     </div>
   )
 })
 
 /** Stable-sized placeholder while conversation fetches — avoids layout jump. */
-export function ChatBootSkeleton() {
+function TranscriptBootSkeleton() {
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="scroll-thin flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5">
-        <div
-          className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-3 sm:pt-4"
-          style={{ paddingBottom: 156 }}
-        >
-          <div className="flex flex-col items-end gap-1">
-            <div className="h-14 w-[55%] max-w-[80%] animate-pulse rounded-[10px] border border-border bg-secondary/80" />
-          </div>
-          <div className="space-y-2 px-1">
-            <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />
-            <div className="h-3 w-full max-w-md animate-pulse rounded bg-muted-foreground/10" />
-            <div className="h-3 w-[85%] max-w-sm animate-pulse rounded bg-muted-foreground/10" />
-          </div>
-        </div>
+    <>
+      <div className="chat-user">
+        <div className="chat-user__bubble h-14 w-[55%] animate-pulse" />
       </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2">
-        <div className="chat-composer-horizontal-inset relative z-10 isolate">
-          <div className="mx-auto h-[140px] w-full max-w-3xl rounded-t-[20px] border border-border bg-elevated/80" />
-          <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
-        </div>
+      <div className="space-y-2 px-1">
+        <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />
+        <div className="h-3 w-full max-w-md animate-pulse rounded bg-muted-foreground/10" />
+        <div className="h-3 w-[85%] max-w-sm animate-pulse rounded bg-muted-foreground/10" />
       </div>
-    </div>
+    </>
   )
 }
 
@@ -584,6 +784,9 @@ export function Composer({
   leading,
   pending,
   running,
+  canQueue = false,
+  onSendNow,
+  runningLabel,
   models,
   model,
   effort,
@@ -594,6 +797,13 @@ export function Composer({
   onRuntimeModeChange,
   onSend,
   onStop,
+  className,
+  commands,
+  commandNote,
+  plugins,
+  pluginNote,
+  onAppCommand,
+  uploadAttachment,
 }: {
   disabled: boolean
   disabledReason?: string
@@ -603,6 +813,15 @@ export function Composer({
   leading?: ReactNode
   pending: boolean
   running: boolean
+  /**
+   * Keep typing while the agent works — the message joins the run's queue
+   * instead of being refused, the way every CLI we drive behaves.
+   */
+  canQueue?: boolean
+  /** Interrupt the working agent and deliver this message now (⌘/Ctrl + ↵). */
+  onSendNow?: (text: string) => void
+  /** Overrides the busy placeholder — e.g. which check is running. */
+  runningLabel?: string
   models: ModelOption[]
   model: string
   effort: string
@@ -613,9 +832,37 @@ export function Composer({
   onRuntimeModeChange: (mode: RuntimeMode) => void
   onSend: (text: string) => void
   onStop?: () => void
+  className?: string
+  /** Slash commands to offer, app commands included. */
+  commands?: SlashCommand[]
+  /** Caveat shown under the menu (see `server/slashCommands.ts`). */
+  commandNote?: string
+  /** Plugins the runtime's CLI has installed, offered behind `$`. */
+  plugins?: AgentPlugin[]
+  /** Caveat shown under the `$` menu (see `server/plugins.ts`). */
+  pluginNote?: string
+  /**
+   * Run an app command instead of prompting the agent. Returning a string
+   * shows it as an error under the composer; `/help` never gets here.
+   */
+  onAppCommand?: (input: { command: SlashCommand; args: string }) => string | undefined
+  /**
+   * Store a dropped/pasted image in the workspace and return its path. Omitted
+   * where no workspace is settled yet, which hides the attachment affordances.
+   */
+  uploadAttachment?: AttachmentUploader
 }) {
   const [value, setValue] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [menuDismissed, setMenuDismissed] = useState(false)
+  const [commandError, setCommandError] = useState('')
+  const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const dragDepth = useRef(0)
+  const files = usePendingAttachments(uploadAttachment)
+  // Queueing accepts everything a live send does, attachments included.
+  const blocked = disabled || (running && !canQueue)
+  const canAttach = Boolean(uploadAttachment) && !blocked
 
   useEffect(() => {
     const el = ref.current
@@ -624,55 +871,233 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [value])
 
-  const submit = () => {
-    const text = value.trim()
-    if (!text || disabled || pending || running) return
-    onSend(text)
-    setValue('')
+  const query = slashMenuQuery(value)
+  const matches = useMemo(
+    () => (query === null || !commands ? [] : matchSlashCommands(commands, query)),
+    [query, commands],
+  )
+  const menuOpen = !menuDismissed && !disabled && matches.length > 0
+  const active = menuOpen ? matches[Math.min(activeIndex, matches.length - 1)] : undefined
+
+  // A `$` mention can sit anywhere in the prompt, so its menu is driven by the
+  // caret rather than the first character — the two never open together.
+  const mentionQuery = menuOpen ? null : pluginMenuQuery(value)
+  const pluginMatches = useMemo(
+    () => (mentionQuery === null || !plugins ? [] : matchPlugins(plugins, mentionQuery)),
+    [mentionQuery, plugins],
+  )
+  const pluginMenuOpen = !menuDismissed && !disabled && pluginMatches.length > 0
+  const activePlugin = pluginMenuOpen
+    ? pluginMatches[Math.min(activeIndex, pluginMatches.length - 1)]
+    : undefined
+
+  const setText = (next: string) => {
+    setValue(next)
+    setActiveIndex(0)
+    setMenuDismissed(false)
+    if (commandError) setCommandError('')
   }
 
-  const canSend = !disabled && !pending && !running && value.trim().length > 0
+  const pick = (command: SlashCommand) => {
+    setText(applySlashCommand(command))
+    ref.current?.focus()
+  }
+
+  const pickPlugin = (plugin: AgentPlugin) => {
+    setText(applyPluginMention(value, plugin))
+    ref.current?.focus()
+  }
+
+  const submit = (now = false) => {
+    const text = value.trim()
+    if ((!text && files.paths.length === 0) || disabled) return
+
+    // App commands are answered here and never become a turn, so `/model`
+    // still lands while a send is in flight.
+    const app = commands ? appCommandFor(commands, text) : null
+    if (app) {
+      if (app.command.action === 'help') {
+        setText('/')
+        return
+      }
+      const failure = onAppCommand?.(app)
+      if (failure) {
+        setCommandError(failure)
+        return
+      }
+      setValue('')
+      setCommandError('')
+      return
+    }
+
+    if (pending || (running && !canQueue) || files.uploading) return
+    const prompt = promptWithAttachments(text, files.paths)
+    if (now && onSendNow) onSendNow(prompt)
+    else onSend(prompt)
+    setValue('')
+    files.clear()
+  }
+
+  const canSend =
+    !blocked && !pending && !files.uploading && (value.trim().length > 0 || files.paths.length > 0)
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2">
-      <div className="rounded-[22px] p-px">
+    <div className={`relative ${className ?? 'mx-auto w-full min-w-0 max-w-3xl pt-2 pl-2'}`}>
+      {menuOpen ? (
+        <SlashCommandMenu
+          commands={matches}
+          activeIndex={Math.min(activeIndex, matches.length - 1)}
+          {...(commandNote ? { note: commandNote } : {})}
+          onPick={pick}
+        />
+      ) : null}
+      {pluginMenuOpen ? (
+        <PluginMentionMenu
+          plugins={pluginMatches}
+          activeIndex={Math.min(activeIndex, pluginMatches.length - 1)}
+          {...(pluginNote ? { note: pluginNote } : {})}
+          onPick={pickPlugin}
+        />
+      ) : null}
+      <div
+        className="chat-composer-shell rounded-[22px] p-px"
+        onDragEnter={(e) => {
+          if (!canAttach || !e.dataTransfer.types.includes('Files')) return
+          dragDepth.current += 1
+          setDragging(true)
+        }}
+        onDragOver={(e) => {
+          if (!canAttach || !e.dataTransfer.types.includes('Files')) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={() => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (dragDepth.current === 0) setDragging(false)
+        }}
+        onDrop={(e) => {
+          if (!canAttach) return
+          e.preventDefault()
+          dragDepth.current = 0
+          setDragging(false)
+          files.addFiles(imageFilesFrom(e.dataTransfer))
+        }}
+      >
         <div
           className={`chat-composer-glass rounded-[20px] border transition-[background-color,border-color] duration-200 focus-within:border-ring/45 ${
             disabled ? 'border-border opacity-75' : 'border-border'
           }`}
         >
+          <div aria-hidden="true" className="chat-glass-fill" />
+          {dragging ? (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[20px] border-2 border-dashed border-ring/60 bg-background/80 text-ui-sm text-foreground">
+              Drop images to attach
+            </div>
+          ) : null}
           <div className="relative px-3 pb-2 pt-3 sm:px-3.5 sm:pt-3.5">
+            <AttachmentStrip attachments={files.attachments} onRemove={files.remove} />
             <textarea
               ref={ref}
               rows={1}
               value={value}
-              disabled={disabled || running}
-              onChange={(e) => setValue(e.target.value)}
+              disabled={blocked}
+              onChange={(e) => setText(e.target.value)}
+              onPaste={(e) => {
+                if (!canAttach) return
+                const images = imageFilesFrom(e.clipboardData)
+                if (images.length === 0) return
+                e.preventDefault()
+                files.addFiles(images)
+              }}
               onKeyDown={(e) => {
+                if (pluginMenuOpen && pluginMatches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i + 1) % pluginMatches.length)
+                    return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i - 1 + pluginMatches.length) % pluginMatches.length)
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setMenuDismissed(true)
+                    return
+                  }
+                  if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                    if (activePlugin) {
+                      e.preventDefault()
+                      pickPlugin(activePlugin)
+                      return
+                    }
+                  }
+                }
+                if (menuOpen && matches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i + 1) % matches.length)
+                    return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setActiveIndex((i) => (i - 1 + matches.length) % matches.length)
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setMenuDismissed(true)
+                    return
+                  }
+                  // Enter and Tab both complete the highlighted command; the
+                  // next Enter sends it, so a command with arguments can be
+                  // finished before it is submitted.
+                  if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                    if (active) {
+                      e.preventDefault()
+                      pick(active)
+                      return
+                    }
+                  }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  submit()
+                  // ⌘/Ctrl + ↵ while the agent works: interrupt it rather than
+                  // waiting in line behind the turn.
+                  submit(running && (e.metaKey || e.ctrlKey))
                 }
               }}
               placeholder={
-                running
-                  ? 'Agent is working…'
-                  : disabled
-                    ? (disabledReason ?? 'Follow-up unavailable')
-                    : (placeholder ?? 'Ask for follow-up changes…')
+                running && canQueue
+                  ? 'Queue a follow-up…'
+                  : running
+                    ? (runningLabel ?? 'Agent is working…')
+                    : disabled
+                      ? (disabledReason ?? 'Follow-up unavailable')
+                      : (placeholder ?? 'Ask for follow-up changes…')
               }
               className="block max-h-[200px] min-h-[3.25rem] w-full resize-none overflow-y-auto bg-transparent text-[16px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/35 disabled:cursor-not-allowed sm:text-[14px]"
             />
+            {commandError || files.refusal ? (
+              <div className="pt-1 text-ui-xs text-danger">{commandError || files.refusal}</div>
+            ) : null}
           </div>
 
-          <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
+          <div className="relative flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
             {leading}
+            {uploadAttachment ? (
+              <AttachmentButton
+                disabled={!canAttach || files.full}
+                onFiles={(picked) => files.addFiles(picked)}
+              />
+            ) : null}
             <ComposerModelControls
               models={models}
               model={model}
               effort={effort}
               runtimeMode={runtimeMode}
-              disabled={pending || running}
+              disabled={pending || blocked}
               supportsSupervised={supportsSupervised}
               onModelChange={onModelChange}
               onEffortChange={onEffortChange}
@@ -685,20 +1110,24 @@ export function Composer({
                 onClick={onStop}
                 aria-label="Stop"
                 title="Stop"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-danger/90 text-white transition-colors hover:bg-danger"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
               >
                 <Square className="size-3.5 fill-current" />
               </button>
-            ) : (
+            ) : null}
+            {!running || canQueue ? (
               <button
                 type="button"
                 disabled={!canSend}
-                onClick={submit}
-                aria-label={pending ? 'Sending' : 'Send message'}
+                onClick={() => submit()}
+                aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
+                title={running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
               >
                 {pending ? (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                ) : running ? (
+                  <ListPlus className="size-3.5" />
                 ) : (
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                     <path
@@ -711,7 +1140,7 @@ export function Composer({
                   </svg>
                 )}
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -721,16 +1150,21 @@ export function Composer({
 
 export function Chat({
   messages,
+  transcriptPending = false,
   activePath,
   canFollowUp,
+  canQueue = false,
   followUpReason,
   pending,
   running,
+  checkResults,
   models,
   runId,
   runtimeId,
   runtimeBin,
   runtimeTransport,
+  runtimes,
+  canSwitchRuntime = false,
   runTrigger,
   installWorkspaceId,
   installWorkspaceReady,
@@ -741,16 +1175,39 @@ export function Chat({
   initialModel,
   initialEffort,
   initialRuntimeMode,
+  changedFiles,
   onSelectFile,
+  onReviewFile,
+  onReviewFiles,
+  onUndoAllFiles,
+  undoFilesDisabled,
+  undoFilesReason,
   onSend,
+  onSendNow,
   onStop,
+  queued,
+  queueBusy = false,
+  onDropQueued,
+  onClearQueue,
+  onFlushQueue,
+  workspaceId,
+  onNewChat,
 }: {
   messages: ChatMessage[]
+  /** Pulse the transcript scroller while conversation is still in flight. */
+  transcriptPending?: boolean
   activePath: string | null
   canFollowUp: boolean
+  /**
+   * The runtime can resume this chat, so a message typed mid-turn is queued
+   * rather than refused. Unlike `canFollowUp` this stays true while running.
+   */
+  canQueue?: boolean
   followUpReason?: string
   pending: boolean
   running: boolean
+  /** Verification results for the run; drives the post-turn status line. */
+  checkResults?: CachedCheckResult[]
   models: ModelOption[]
   /** Run id — required for supervised Allow/Deny. */
   runId: string
@@ -760,6 +1217,10 @@ export function Chat({
   runtimeBin?: string
   /** 'cli' or 'acp'; ACP runtimes can always be supervised. */
   runtimeTransport?: string
+  /** Runtimes this chat may be handed over to. Empty hides the picker. */
+  runtimes?: RuntimeOption[]
+  /** A handoff needs no resumable session — only an idle run. */
+  canSwitchRuntime?: boolean
   /** e.g. planner — drives proposal install cards in chat. */
   runTrigger?: string
   /** Planner install target (from the run row). */
@@ -772,20 +1233,48 @@ export function Chat({
   initialModel: string
   initialEffort: string
   initialRuntimeMode?: string
+  changedFiles?: DiffFile[]
   onSelectFile: (path: string) => void
+  onReviewFile?: (path: string) => void
+  onReviewFiles?: () => void
+  onUndoAllFiles?: () => void
+  undoFilesDisabled?: boolean
+  undoFilesReason?: string
   onSend: (input: {
     prompt: string
     model: string
     effort: string
     runtimeMode: RuntimeMode
+    /** Present only when this turn hands the chat to another runtime. */
+    runtimeId?: string
+  }) => void
+  /** Same payload, but it interrupts the working agent instead of queueing. */
+  onSendNow?: (input: {
+    prompt: string
+    model: string
+    effort: string
+    runtimeMode: RuntimeMode
+    runtimeId?: string
   }) => void
   onStop?: () => void
+  /** Follow-ups waiting on the current turn, oldest first. */
+  queued?: QueuedMessage[]
+  /** A queue action is in flight. */
+  queueBusy?: boolean
+  onDropQueued?: (id: string) => void
+  onClearQueue?: () => void
+  /** Deliver the queue now — interrupting the agent when one is working. */
+  onFlushQueue?: () => void
+  /** Workspace the run lives in; scopes project slash-command discovery. */
+  workspaceId?: string
+  /** What `/clear` does — the route owns navigation. */
+  onNewChat?: () => void
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
-  const { remember } = usePickerPrefs()
+  const { prefs, remember } = usePickerPrefs()
   const [composerHeight, setComposerHeight] = useState(140)
   const composerOverlayRef = useRef<HTMLDivElement | null>(null)
   const [model, setModel] = useState(initialModel)
@@ -793,8 +1282,112 @@ export function Chat({
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
     parseRuntimeMode(initialRuntimeMode ?? DEFAULT_RUNTIME_MODE),
   )
-  const canSupervise = supportsSupervised({ bin: runtimeBin, transport: runtimeTransport })
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimeId ?? '')
+  const [pendingRuntimeId, setPendingRuntimeId] = useState<string | null>(null)
+  const [dismissSwitchNote, setDismissSwitchNote] = useState(false)
+
+  const uploadAttachment = useMemo(() => attachmentUploader(workspaceId), [workspaceId])
+  const queuedMessages = queued ?? []
+
+  const runtimeCatalog = useMemo(() => runtimes ?? [], [runtimes])
+  // A handoff is only pending until the turn is sent; once the run row moves,
+  // `runtimeId` comes back as the new runtime and this is false again.
+  const switching = isRuntimeSwitch(runtimeId, selectedRuntimeId)
+  const selectedRuntime = runtimeCatalog.find((r) => r.id === selectedRuntimeId)
+  const activeModels = switching && selectedRuntime ? modelsForRuntime(selectedRuntime) : models
+  const canSupervise = supportsSupervised(
+    switching
+      ? { bin: selectedRuntime?.bin, transport: selectedRuntime?.transport }
+      : { bin: runtimeBin, transport: runtimeTransport },
+  )
+  const switchBlockedReason = switching
+    ? runtimeSwitchBlockedReason({
+        running,
+        next: selectedRuntime
+          ? { label: selectedRuntime.label, installed: selectedRuntime.installed }
+          : null,
+      })
+    : null
+  const discardFile = useDiscard(runId)
+  const restoreFile = useRestoreFile(runId)
+  const discardMutate = discardFile.mutate
+  const restoreMutate = restoreFile.mutate
+  const [undoneFiles, setUndoneFiles] = useState(() => new Map<string, string | null>())
+  const [undoPendingPath, setUndoPendingPath] = useState<string | null>(null)
+  const undoneFilesRef = useRef(undoneFiles)
+  undoneFilesRef.current = undoneFiles
+  const changedPaths = useMemo(() => changedFiles?.map((file) => file.path), [changedFiles])
+  const undonePaths = useMemo(() => [...undoneFiles.keys()], [undoneFiles])
+  const redoablePaths = useMemo(
+    () =>
+      [...undoneFiles.entries()].filter(([, content]) => content !== null).map(([path]) => path),
+    [undoneFiles],
+  )
+  const undoBusyPath =
+    undoPendingPath ?? (discardFile.isPending ? (discardFile.variables?.paths?.[0] ?? null) : null)
+  const redoBusyPath = restoreFile.isPending ? (restoreFile.variables?.path ?? null) : null
+
+  const undoChatFile = useCallback(
+    (path: string) => {
+      setUndoPendingPath(path)
+      void fns
+        .readWorkspaceFile({ data: { runId, path } })
+        .then((file) => {
+          const snapshot = file.readOnly ? null : file.content
+          discardMutate(
+            { paths: [path] },
+            {
+              onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, snapshot)),
+              onSettled: () => setUndoPendingPath(null),
+            },
+          )
+        })
+        .catch(() => {
+          discardMutate(
+            { paths: [path] },
+            {
+              onSuccess: () => setUndoneFiles((prev) => new Map(prev).set(path, null)),
+              onSettled: () => setUndoPendingPath(null),
+            },
+          )
+        })
+    },
+    [discardMutate, runId],
+  )
+
+  const redoChatFile = useCallback(
+    (path: string) => {
+      const content = undoneFilesRef.current.get(path)
+      if (content == null) return
+      restoreMutate(
+        { path, content },
+        {
+          onSuccess: () => {
+            setUndoneFiles((prev) => {
+              const next = new Map(prev)
+              next.delete(path)
+              return next
+            })
+          },
+        },
+      )
+    },
+    [restoreMutate],
+  )
+
+  // The run stays `running` while its checks execute, but the assistant
+  // message is already final — that gap is the verification pass, and saying
+  // "Working…" there reads as if the agent were still typing.
+  const verifying = running && !messages.some((m) => m.status === 'running')
+  const phase = verifying ? verificationPhase(checkResults ?? []) : undefined
   const answerApproval = useAnswerApproval(runId)
+  const answerApprovalMutate = answerApproval.mutate
+  const onAnswer = useCallback(
+    (input: { requestId: string; optionId?: string; decision?: ApprovalDecision }) => {
+      answerApprovalMutate(input)
+    },
+    [answerApprovalMutate],
+  )
 
   useEffect(() => {
     setModel(initialModel)
@@ -803,13 +1396,17 @@ export function Chat({
   }, [initialModel, initialEffort, initialRuntimeMode])
 
   useEffect(() => {
-    if (models.length === 0) return
-    if (findModel(models, model)) return
-    const next = defaultModel(models)
+    setSelectedRuntimeId(runtimeId ?? '')
+  }, [runtimeId])
+
+  useEffect(() => {
+    if (activeModels.length === 0) return
+    if (findModel(activeModels, model)) return
+    const next = defaultModel(activeModels)
     if (!next) return
     setModel(next.slug)
     setEffort(defaultEffort(next))
-  }, [models, model])
+  }, [activeModels, model])
 
   // The transcript keeps growing after mount and while a turn streams, so stay
   // pinned to the bottom on every resize rather than scrolling once per message.
@@ -848,17 +1445,112 @@ export function Chat({
   // records it as the last-used default for future new chats and automations.
   const handleModelChange = (slug: string) => {
     setModel(slug)
-    const nextEffort = defaultEffort(findModel(models, slug))
+    const nextEffort = defaultEffort(findModel(activeModels, slug))
     setEffort(nextEffort)
-    remember({ runtimeId, forRuntimeId: runtimeId, model: slug, effort: nextEffort })
+    remember({
+      runtimeId: selectedRuntimeId,
+      forRuntimeId: selectedRuntimeId,
+      model: slug,
+      effort: nextEffort,
+    })
   }
   const handleEffortChange = (value: string) => {
     setEffort(value)
-    remember({ runtimeId, forRuntimeId: runtimeId, effort: value })
+    remember({ runtimeId: selectedRuntimeId, forRuntimeId: selectedRuntimeId, effort: value })
+  }
+
+  /**
+   * Take the pickers to the new runtime. The old runtime's model slug and a
+   * Supervised mode it may not support cannot travel with the conversation.
+   */
+  const applyRuntimeSwitch = (id: string) => {
+    setSelectedRuntimeId(id)
+    const next = runtimeCatalog.find((r) => r.id === id)
+    const picked = resolveSwitchModel(next ? modelsForRuntime(next) : [], model)
+    setModel(picked.model)
+    setEffort(picked.effort)
+    setRuntimeMode((mode) =>
+      resolveSwitchMode(mode, { bin: next?.bin, transport: next?.transport }),
+    )
+  }
+  const handleRuntimePick = (id: string) => {
+    if (id === selectedRuntimeId) return
+    if (id !== runtimeId && !prefs.runtimeSwitchNoteDismissed) {
+      setPendingRuntimeId(id)
+      return
+    }
+    applyRuntimeSwitch(id)
   }
   const handleRuntimeModeChange = (mode: RuntimeMode) => {
     setRuntimeMode(mode)
     remember({ runtimeMode: mode })
+  }
+
+  const navigate = useNavigate()
+  const { data: commandListing } = useSlashCommands(
+    { runtimeId: runtimeId ?? '', ...(workspaceId ? { workspaceId } : {}), includeApp: true },
+    { enabled: !!runtimeId },
+  )
+  const { data: pluginListing } = usePlugins(
+    { runtimeId: runtimeId ?? '', ...(workspaceId ? { workspaceId } : {}) },
+    { enabled: !!runtimeId },
+  )
+
+  /**
+   * Answer an app command. The pickers this changes are the composer's own
+   * state, so `/model sonnet` and clicking the picker end up in the same place
+   * — including the remembered default.
+   */
+  const handleAppCommand = ({
+    command,
+    args,
+  }: {
+    command: SlashCommand
+    args: string
+  }): string | undefined => {
+    if (command.action === 'clear') {
+      if (!onNewChat) return 'Starting a new chat is not available here.'
+      onNewChat()
+      return
+    }
+    if (command.action === 'model') {
+      const picked = findModel(models, args.trim())
+      if (!picked) {
+        const known = models
+          .slice(0, 6)
+          .map((m) => m.slug)
+          .join(', ')
+        return known ? `Unknown model. Try: ${known}` : 'This runtime has no model picker.'
+      }
+      handleModelChange(picked.slug)
+      return
+    }
+    if (command.action === 'effort') {
+      const options = findModel(models, model)?.efforts ?? []
+      const picked = options.find((e) => e.value === args.trim().toLowerCase())
+      if (!picked) {
+        const known = options.map((e) => e.value).join(', ')
+        return known ? `Unknown effort. Try: ${known}` : 'This model has no effort levels.'
+      }
+      handleEffortChange(picked.value)
+      return
+    }
+    if (command.action === 'mcp') {
+      void navigate({ to: '/mcp' })
+      return
+    }
+    if (command.action === 'mode') {
+      const wanted = args.trim().toLowerCase()
+      const picked = RUNTIME_MODES.find((m) => m.value === wanted)
+      if (!picked) {
+        return `Unknown access mode. Try: ${RUNTIME_MODES.map((m) => m.value).join(', ')}`
+      }
+      if (isSupervised(picked.value) && !canSupervise) {
+        return 'This runtime cannot ask for approvals, so Supervised is unavailable.'
+      }
+      handleRuntimeModeChange(picked.value)
+      return
+    }
   }
 
   return (
@@ -872,33 +1564,56 @@ export function Chat({
           className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-3 sm:pt-4"
           style={{ paddingBottom: composerHeight + 16 }}
         >
-          {messages.map((message) =>
-            message.role === 'system' ? (
-              <p key={message.id} className="text-ui-sm text-tier-quaternary">
-                {message.content}
-              </p>
-            ) : message.role === 'user' ? (
-              <UserMessage key={message.id} message={message} />
-            ) : (
-              <AssistantMessage
-                key={message.id}
-                message={message}
-                activePath={activePath}
-                answering={answerApproval.isPending}
-                onAnswer={(input) => answerApproval.mutate(input)}
-                onSelectFile={onSelectFile}
-                runId={runId}
-                runtimeId={runtimeId}
-                runTrigger={runTrigger}
-                installWorkspaceId={installWorkspaceId}
-                installWorkspaceReady={installWorkspaceReady}
-                installWorkspaceStatus={installWorkspaceStatus}
-                installProjectId={installProjectId}
-                installProjectName={installProjectName}
-                installWorkspaceLabel={installWorkspaceLabel}
-              />
-            ),
+          {transcriptPending && messages.length === 0 ? (
+            <TranscriptBootSkeleton />
+          ) : (
+            messages.map((message) =>
+              message.role === 'system' ? (
+                <p key={message.id} className="text-ui-sm text-tier-quaternary">
+                  {message.content}
+                </p>
+              ) : message.role === 'user' ? (
+                <UserMessage key={message.id} message={message} runId={runId} />
+              ) : (
+                <AssistantMessage
+                  key={message.id}
+                  message={message}
+                  answering={answerApproval.isPending}
+                  onAnswer={onAnswer}
+                  onSelectFile={onSelectFile}
+                  onReviewFile={onReviewFile}
+                  onUndoFile={undoChatFile}
+                  onRedoFile={redoChatFile}
+                  undoDisabled={undoFilesDisabled}
+                  undoDisabledReason={undoFilesReason}
+                  undoBusyPath={undoBusyPath}
+                  redoBusyPath={redoBusyPath}
+                  changedPaths={changedPaths}
+                  undonePaths={undonePaths}
+                  redoablePaths={redoablePaths}
+                  runId={runId}
+                  runtimeId={runtimeId}
+                  runTrigger={runTrigger}
+                  installWorkspaceId={installWorkspaceId}
+                  installWorkspaceReady={installWorkspaceReady}
+                  installWorkspaceStatus={installWorkspaceStatus}
+                  installProjectId={installProjectId}
+                  installProjectName={installProjectName}
+                  installWorkspaceLabel={installWorkspaceLabel}
+                />
+              ),
+            )
           )}
+          {phase ? (
+            <div className="px-1">
+              <WorkingIndicator
+                verb={phase.label}
+                orb={phase.command ? 'working' : 'breathing'}
+                {...(phase.startedAt ? { startedAt: phase.startedAt } : {})}
+                {...(phase.command ? { step: phase.command } : {})}
+              />
+            </div>
+          ) : null}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -907,35 +1622,155 @@ export function Chat({
         ref={composerOverlayRef}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
       >
-        <div
-          aria-hidden="true"
-          className="chat-composer-horizontal-inset pointer-events-none absolute inset-x-0 top-1.5 bottom-0 z-0 sm:top-2"
-        >
-          <div className="relative mx-auto h-full w-full max-w-3xl overflow-clip rounded-t-[20px]">
-            <div className="chat-composer-shared-blur absolute -inset-8" />
+        <div className="chat-composer-horizontal-inset pointer-events-auto relative">
+          <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
+            {changedFiles && changedFiles.length > 0 && onReviewFile ? (
+              <div className="relative mx-auto -mb-[2px] w-[92%]">
+                <FilesChanged
+                  variant="composer"
+                  files={changedFiles}
+                  activePath={activePath}
+                  onSelect={onReviewFile}
+                  onReview={onReviewFiles}
+                  onUndoAll={onUndoAllFiles}
+                  undoDisabled={undoFilesDisabled}
+                  undoDisabledReason={undoFilesReason}
+                />
+              </div>
+            ) : null}
+            {queuedMessages.length > 0 ? (
+              <div className="relative z-[5] mx-auto -mb-[2px] w-[92%]">
+                <QueuedMessages
+                  queued={queuedMessages}
+                  running={running}
+                  busy={queueBusy}
+                  onSendNow={() => onFlushQueue?.()}
+                  onDrop={(id) => onDropQueued?.(id)}
+                  onClear={() => onClearQueue?.()}
+                />
+              </div>
+            ) : null}
+            <Composer
+              className={
+                (changedFiles && changedFiles.length > 0 && onReviewFile) ||
+                queuedMessages.length > 0
+                  ? 'relative z-10 w-full'
+                  : 'w-full pt-2'
+              }
+              disabled={!running && ((!canFollowUp && !switching) || switchBlockedReason !== null)}
+              disabledReason={switchBlockedReason ?? followUpReason}
+              pending={pending}
+              running={running}
+              canQueue={canQueue && !switching}
+              {...(queuedMessages.length > 0 && !running
+                ? { placeholder: 'Add to the queue…' }
+                : {})}
+              {...(canQueue && onSendNow
+                ? {
+                    onSendNow: (text: string) =>
+                      onSendNow({ prompt: text, model, effort, runtimeMode }),
+                  }
+                : {})}
+              {...(phase ? { runningLabel: `${phase.label}…` } : {})}
+              {...(canSwitchRuntime && runtimeCatalog.length > 0 && selectedRuntimeId
+                ? {
+                    leading: (
+                      <div className="flex min-w-0 shrink items-center gap-0.5">
+                        <RuntimePicker
+                          runtimes={runtimeCatalog}
+                          runtimeId={selectedRuntimeId}
+                          disabled={pending || running}
+                          align="start"
+                          onChange={handleRuntimePick}
+                        />
+                      </div>
+                    ),
+                  }
+                : {})}
+              models={activeModels}
+              model={model}
+              effort={effort}
+              runtimeMode={runtimeMode}
+              supportsSupervised={canSupervise}
+              onModelChange={handleModelChange}
+              onEffortChange={handleEffortChange}
+              onRuntimeModeChange={handleRuntimeModeChange}
+              onStop={onStop}
+              onSend={(text) =>
+                onSend({
+                  prompt: text,
+                  model,
+                  effort,
+                  runtimeMode,
+                  ...(switching ? { runtimeId: selectedRuntimeId } : {}),
+                })
+              }
+              commands={commandListing?.commands ?? []}
+              {...(commandListing?.note ? { commandNote: commandListing.note } : {})}
+              plugins={pluginListing?.plugins ?? []}
+              {...(pluginListing?.note ? { pluginNote: pluginListing.note } : {})}
+              onAppCommand={handleAppCommand}
+              {...(uploadAttachment ? { uploadAttachment } : {})}
+            />
           </div>
-        </div>
-
-        <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10 isolate">
-          <Composer
-            disabled={!canFollowUp && !running}
-            disabledReason={followUpReason}
-            pending={pending}
-            running={running}
-            models={models}
-            model={model}
-            effort={effort}
-            runtimeMode={runtimeMode}
-            supportsSupervised={canSupervise}
-            onModelChange={handleModelChange}
-            onEffortChange={handleEffortChange}
-            onRuntimeModeChange={handleRuntimeModeChange}
-            onStop={onStop}
-            onSend={(text) => onSend({ prompt: text, model, effort, runtimeMode })}
-          />
           <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
         </div>
       </div>
+
+      {pendingRuntimeId ? (
+        <Modal
+          title={RUNTIME_SWITCH_NOTE_TITLE}
+          onClose={() => {
+            setPendingRuntimeId(null)
+            setDismissSwitchNote(false)
+          }}
+          className="z-[110]"
+        >
+          <div className="space-y-4">
+            <p className="text-ui-base text-tier-secondary">
+              {runtimeCatalog.find((r) => r.id === pendingRuntimeId)?.label ?? 'The new runtime'}{' '}
+              cannot resume this agent session, so the next turn starts a fresh one.
+            </p>
+            <ul className="space-y-1.5 text-ui-sm text-tier-tertiary">
+              {RUNTIME_SWITCH_NOTE_POINTS.map((point) => (
+                <li key={point} className="flex gap-2">
+                  <span aria-hidden="true">•</span>
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+            <label className="flex items-center gap-2 text-ui-sm text-tier-secondary">
+              <input
+                type="checkbox"
+                checked={dismissSwitchNote}
+                onChange={(e) => setDismissSwitchNote(e.target.checked)}
+              />
+              <span>Don’t show this again</span>
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setPendingRuntimeId(null)
+                  setDismissSwitchNote(false)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (dismissSwitchNote) remember({ runtimeSwitchNoteDismissed: true })
+                  applyRuntimeSwitch(pendingRuntimeId)
+                  setPendingRuntimeId(null)
+                  setDismissSwitchNote(false)
+                }}
+              >
+                Switch runtime
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

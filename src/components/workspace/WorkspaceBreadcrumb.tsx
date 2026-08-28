@@ -12,6 +12,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WorkspaceWithMeta } from '../../fns'
 import { fetchLatestRunForWorkspace } from '../../lib/queries'
 
+const BRANCH_PAGE_SIZE = 5
+
 function Separator() {
   return <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
 }
@@ -47,6 +49,7 @@ function BranchSwitcher({
 }) {
   const [open, setOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(BRANCH_PAGE_SIZE)
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
@@ -67,6 +70,8 @@ function BranchSwitcher({
   }, [open])
 
   const ready = workspaces.filter((w) => w.status === 'ready' || w.id === current.id)
+  const visibleWorkspaces = ready.slice(0, visibleCount)
+  const hasMore = visibleWorkspaces.length < ready.length
 
   const switchTo = async (ws: WorkspaceWithMeta) => {
     if (ws.id === current.id) {
@@ -92,7 +97,10 @@ function BranchSwitcher({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setVisibleCount(BRANCH_PAGE_SIZE)
+          setOpen((v) => !v)
+        }}
         title={current.path}
         className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] disabled:opacity-40 ${
           muted ? 'text-muted-foreground' : 'font-medium text-foreground'
@@ -111,7 +119,7 @@ function BranchSwitcher({
           <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Workspaces
           </div>
-          {ready.map((ws) => (
+          {visibleWorkspaces.map((ws) => (
             <button
               key={ws.id}
               type="button"
@@ -131,6 +139,15 @@ function BranchSwitcher({
               {ws.id === current.id ? <Check className="size-3.5 shrink-0" /> : null}
             </button>
           ))}
+          {hasMore ? (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((count) => count + BRANCH_PAGE_SIZE)}
+              className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-[12px] text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground"
+            >
+              Load more
+            </button>
+          ) : null}
           {onRequestNewBranch ? (
             <button
               type="button"

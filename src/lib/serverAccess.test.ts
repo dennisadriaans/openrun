@@ -10,7 +10,6 @@ import {
   isDocumentRequest,
   isLoopbackHost,
   parseAllowedHosts,
-  pathAuthenticatesItself,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
@@ -222,19 +221,6 @@ test('a published bind is not host-checked — it has names we cannot enumerate'
     null,
     'the explicit override opts out of this guard too',
   )
-})
-
-test('signed endpoints bypass the token, app endpoints do not', () => {
-  assert.equal(pathAuthenticatesItself('/api/webhooks/abc123'), true)
-
-  assert.equal(pathAuthenticatesItself('/api/activity/stream'), false)
-  assert.equal(pathAuthenticatesItself('/api/runs/run_1/stream'), false)
-  assert.equal(pathAuthenticatesItself('/'), false)
-  assert.equal(pathAuthenticatesItself('/_serverFn/dashboard'), false)
-
-  // Prefix confusion: a path that merely starts with the same letters is not
-  // a webhook route and must still be checked.
-  assert.equal(pathAuthenticatesItself('/api/webhooksomething'), false)
 })
 
 test('the token cookie is scoped to the whole app and hidden from scripts', () => {

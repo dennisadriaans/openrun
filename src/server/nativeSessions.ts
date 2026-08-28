@@ -374,7 +374,10 @@ const adapters: Record<NativeSessionKind, NativeSessionAdapter> = {
 }
 
 export function listNativeSessionsForKind(cwd: string, kind: NativeSessionKind): NativeSession[] {
-  return adapters[kind].list(cwd)
+  // Adapters read different on-disk stores whose natural row order is not
+  // consistent (notably Codex's SQLite threads table). Keep the picker and
+  // its paginated "load more" results newest-first for every runtime.
+  return adapters[kind].list(cwd).sort((a, b) => b.modifiedAt - a.modifiedAt)
 }
 
 export function nativeSessionExists(

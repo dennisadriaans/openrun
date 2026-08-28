@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { pickDefaultWorkspace, pickDefaultWorkspaceId } from './pickWorkspace.ts'
+import { isMainCheckout, pickDefaultWorkspace, pickDefaultWorkspaceId } from './pickWorkspace.ts'
 
 const mainReady = { id: 'ws-main', status: 'ready', kind: 'main' }
 const featureReady = { id: 'ws-feat', status: 'ready', kind: 'worktree' }
@@ -19,12 +19,23 @@ describe('pickDefaultWorkspace', () => {
     assert.equal(pickDefaultWorkspace([mainCreating]), undefined)
   })
 
-  it('prefers a ready main checkout over other ready worktrees', () => {
-    assert.equal(pickDefaultWorkspace([featureReady, creating, mainReady])?.id, 'ws-main')
+  it('prefers a ready worktree over the main checkout', () => {
+    assert.equal(pickDefaultWorkspace([mainReady, creating, featureReady])?.id, 'ws-feat')
   })
 
-  it('falls back to the first ready worktree when main is not ready', () => {
-    assert.equal(pickDefaultWorkspace([mainCreating, featureReady, creating])?.id, 'ws-feat')
+  it('falls back to main when no worktree is ready', () => {
+    assert.equal(pickDefaultWorkspace([mainReady, creating, errored])?.id, 'ws-main')
+  })
+
+  it('honours an explicit main preference', () => {
+    assert.equal(pickDefaultWorkspace([featureReady, mainReady], { prefer: 'main' })?.id, 'ws-main')
+  })
+
+  it('falls back to a worktree when main is preferred but not ready', () => {
+    assert.equal(
+      pickDefaultWorkspace([mainCreating, featureReady], { prefer: 'main' })?.id,
+      'ws-feat',
+    )
   })
 
   it('picks the sole ready workspace', () => {
@@ -41,8 +52,17 @@ describe('pickDefaultWorkspace', () => {
 
 describe('pickDefaultWorkspaceId', () => {
   it('returns only the id', () => {
-    assert.equal(pickDefaultWorkspaceId([featureReady, mainReady]), 'ws-main')
+    assert.equal(pickDefaultWorkspaceId([featureReady, mainReady]), 'ws-feat')
+    assert.equal(pickDefaultWorkspaceId([mainReady]), 'ws-main')
     assert.equal(pickDefaultWorkspaceId([creating]), undefined)
     assert.equal(pickDefaultWorkspaceId([]), undefined)
+  })
+})
+
+describe('isMainCheckout', () => {
+  it('is true only for a main row', () => {
+    assert.equal(isMainCheckout(mainReady), true)
+    assert.equal(isMainCheckout(featureReady), false)
+    assert.equal(isMainCheckout(undefined), false)
   })
 })

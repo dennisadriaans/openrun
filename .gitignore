@@ -12,3 +12,4 @@ data
 !.env.example
 .wrangler
 .dev.vars
+data-key

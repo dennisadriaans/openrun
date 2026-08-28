@@ -37,6 +37,14 @@ describe('turnEventToUiChunks', () => {
     )
   })
 
+  it('still emits a reasoning span for an empty thought', () => {
+    const chunks = turnEventToUiChunks(row('thought', {}))
+    assert.deepEqual(
+      chunks.map((c) => c.type),
+      ['reasoning-start', 'reasoning-end'],
+    )
+  })
+
   it('maps a tool call to a dynamic tool input part', () => {
     const [chunk] = turnEventToUiChunks(
       row('tool_start', {

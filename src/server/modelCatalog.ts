@@ -17,13 +17,16 @@
  * offline, unparseable bundle, CLI removed — the static catalog simply stays.
  */
 import { spawn } from 'node:child_process'
-import { createReadStream, lstatSync, readlinkSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { createReadStream, lstatSync, readFileSync, readlinkSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import {
   type DiscoveredModel,
   catalogFromDiscovered,
   parseAgyModelsOutput,
   parseClaudeBundleModels,
+  parseCodexModelsCache,
+  parseFxModelsOutput,
   parseGrokModelsOutput,
 } from '../lib/modelDiscovery.ts'
 import {
@@ -39,12 +42,23 @@ import { ensureProcessPathAugmented } from './userPath.ts'
 type Provider = {
   /** Read the CLI's own model list. Rejects or returns [] when unavailable. */
   discover: (binPath: string) => Promise<DiscoveredModel[]>
+  /**
+   * What to watch for staleness instead of the binary. Codex refreshes its
+   * model list from the account into a cache file, so a new model arrives
+   * without the binary changing.
+   */
+  fingerprint?: () => string
 }
 
 const PROVIDERS: Partial<Record<RuntimeModelKind, Provider>> = {
   claude: { discover: (p) => scanClaudeBundle(p) },
+  codex: {
+    discover: async () => readCodexModelsCache(),
+    fingerprint: () => fingerprint(codexModelsCachePath()),
+  },
   antigravity: { discover: (p) => runAndParse(p, ['models'], parseAgyModelsOutput, 20_000) },
   grok: { discover: (p) => runAndParse(p, ['models'], parseGrokModelsOutput, 10_000) },
+  fx: { discover: (p) => runAndParse(p, ['models', '--json'], parseFxModelsOutput, 20_000) },
 }
 
 /**
@@ -121,7 +135,7 @@ export async function refreshModelCatalog(bin: string, opts?: { force?: boolean 
   const { installed, path } = checkRuntimeInstalled(bin)
   if (!installed) return
 
-  const fp = fingerprint(path)
+  const fp = provider.fingerprint ? provider.fingerprint() : fingerprint(path)
   if (!fp) return
 
   const row = getDb().prepare('SELECT fingerprint FROM model_catalog WHERE kind = ?').get(kind) as
@@ -154,7 +168,7 @@ export async function refreshModelCatalog(bin: string, opts?: { force?: boolean 
 
 /** Warm every known CLI's catalog once at boot, off the critical path. */
 export function warmModelCatalogs(): void {
-  for (const bin of ['claude', 'agy', 'grok']) {
+  for (const bin of ['claude', 'codex', 'agy', 'grok', 'fx']) {
     void refreshModelCatalog(bin, { force: true })
   }
 }
@@ -205,6 +219,23 @@ function scanClaudeBundle(binPath: string): Promise<DiscoveredModel[]> {
     stream.on('error', () => finish([]))
     stream.on('end', () => finish([]))
   })
+}
+
+function codexModelsCachePath(): string {
+  const override = process.env.CODEX_HOME?.trim()
+  return join(override ? resolve(override) : join(homedir(), '.codex'), 'models_cache.json')
+}
+
+/**
+ * Codex has no `models` subcommand; the CLI keeps the account's list in
+ * `models_cache.json` under `CODEX_HOME`, so we read that instead of spawning.
+ */
+function readCodexModelsCache(): DiscoveredModel[] {
+  try {
+    return parseCodexModelsCache(readFileSync(codexModelsCachePath(), 'utf8'))
+  } catch {
+    return []
+  }
 }
 
 /** Run `<cli> <args>` and hand stdout to a parser. Bounded and never throws. */

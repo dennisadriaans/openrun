@@ -3,12 +3,23 @@ import {
   Link,
   Outlet,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
   useNavigate,
+  useRouter,
   useRouterState,
 } from '@tanstack/react-router'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Bell, ChevronsUpDown, History, ListChecks, Smartphone, User, Webhook } from 'lucide-react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import {
+  Bell,
+  Blocks,
+  ChevronsUpDown,
+  Gauge,
+  History,
+  ListChecks,
+  Smartphone,
+  User,
+  Webhook,
+} from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import {
@@ -18,33 +29,35 @@ import {
   TopBarActionsProvider,
   useSidebar,
 } from '../components/AppChrome'
+import { ChatThemeProvider } from '../components/chat/ChatThemeProvider'
+import { DevLiveStatus } from '../components/DevLiveStatus'
+import { Toaster } from '../components/toast'
+import { CHAT_THEME_BOOT_SCRIPT } from '../lib/chatTheme'
+import { TERMINAL_PALETTE_BOOT_SCRIPT } from '../lib/terminalPalette'
+import { getQueryClient } from '../lib/queryClient'
 import { ActivityLiveProvider } from '../lib/useActivityLive'
 import { useCloudStatus, useSignOutCloud, useStartCloudLogin } from '../lib/queries'
 import appCss from '../styles.css?url'
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       { title: 'Open Run' },
     ],
-    links: [{ rel: 'stylesheet', href: appCss }],
+    links: [
+      { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', type: 'image/png', href: '/favicon-96x96.png', sizes: '96x96' },
+      { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+      { rel: 'shortcut icon', href: '/favicon.ico' },
+      { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
+      { rel: 'manifest', href: '/site.webmanifest' },
+    ],
   }),
   component: AppLayout,
   shellComponent: RootDocument,
 })
-
-let browserQueryClient: QueryClient | undefined
-function getQueryClient() {
-  if (typeof document === 'undefined') {
-    return new QueryClient({ defaultOptions: { queries: { staleTime: 5_000 } } })
-  }
-  if (!browserQueryClient) {
-    browserQueryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000 } } })
-  }
-  return browserQueryClient
-}
 
 const NAV = [
   { to: '/tasks', label: 'Automations', icon: ListChecks },
@@ -55,103 +68,13 @@ const NAV = [
 const USER_MENU = [
   { to: '/devices', label: 'Devices', icon: Smartphone },
   { to: '/integrations', label: 'Integrations', icon: Webhook },
+  { to: '/mcp', label: 'MCP servers', icon: Blocks },
   { to: '/notifications', label: 'Notifications', icon: Bell },
+  { to: '/usage', label: 'Usage', icon: Gauge },
 ]
 
-export const Icon = ({ className = 'w-6 h-6 rounded bg-inverted', ...props }) => {
-  return (
-    <svg
-      width="93"
-      height="93"
-      viewBox="0 0 93 93"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      {...props}
-    >
-      <rect width="93" height="93" rx="9" />
-      <g className="fill-current text-inverted bg-inverted">
-        <ellipse cx="45.7872" cy="25.5807" rx="3.77421" ry="12.5807" />
-        <ellipse
-          cx="56.6042"
-          cy="28.2985"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(30 56.6042 28.2985)"
-        />
-        <ellipse
-          cx="64.6131"
-          cy="36.0606"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(60 64.6131 36.0606)"
-        />
-        <ellipse
-          cx="67.668"
-          cy="46.7873"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(90 67.668 46.7873)"
-        />
-        <ellipse
-          cx="64.9502"
-          cy="57.6042"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(120 64.9502 57.6042)"
-        />
-        <ellipse
-          cx="57.1881"
-          cy="65.6132"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(150 57.1881 65.6132)"
-        />
-        <ellipse
-          cx="46.4614"
-          cy="68.668"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(-180 46.4614 68.668)"
-        />
-        <ellipse
-          cx="35.6444"
-          cy="65.9503"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(-150 35.6444 65.9503)"
-        />
-        <ellipse
-          cx="27.6355"
-          cy="58.1881"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(-120 27.6355 58.1881)"
-        />
-        <ellipse
-          cx="24.5807"
-          cy="47.4615"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(-90 24.5807 47.4615)"
-        />
-        <ellipse
-          cx="27.2985"
-          cy="36.6445"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(-60 27.2985 36.6445)"
-        />
-        <ellipse
-          cx="35.0606"
-          cy="28.6356"
-          rx="3.77421"
-          ry="12.5807"
-          transform="rotate(-30 35.0606 28.6356)"
-        />
-      </g>
-    </svg>
-  )
+export const Icon = ({ className = 'size-4 rounded-[3px]' }: { className?: string }) => {
+  return <img src="/favicon.svg" alt="" className={className} />
 }
 
 function useClickOutside(
@@ -280,9 +203,9 @@ function Sidebar() {
   if (!open) return null
 
   return (
-    <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-sidebar py-2">
+    <aside className="flex h-full w-52 shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar py-2">
       <div className="mb-2 flex items-center gap-1 px-3">
-        <Icon className="size-4 rounded-[3px] bg-inverted text-foreground" />
+        <Icon className="size-4 rounded-[3px]" />
         <span className="ml-1.5 text-ui-sm font-medium tracking-tight text-foreground">
           Open Run
         </span>
@@ -316,10 +239,13 @@ function isUngatedPath(pathname: string): boolean {
 function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const navigate = useNavigate()
-  const { data: cloud, isPending } = useCloudStatus()
+  const { data: cloud, isPending, isFetching } = useCloudStatus()
 
   const ungated = isUngatedPath(pathname)
-  const needsWelcome = !isPending && Boolean(cloud) && !cloud!.signedIn && !cloud!.onboardingSkipped
+  // `isFetching` too: a sign-in invalidates this query, and acting on the stale
+  // answer while it reloads sends a freshly linked machine back to /welcome.
+  const needsWelcome =
+    !isPending && !isFetching && Boolean(cloud) && !cloud!.signedIn && !cloud!.onboardingSkipped
 
   useEffect(() => {
     if (needsWelcome && !ungated) void navigate({ to: '/welcome', replace: true })
@@ -330,11 +256,11 @@ function AppLayout() {
   return (
     <SidebarProvider>
       <TopBarActionsProvider>
-        <div className="flex min-h-screen bg-chrome">
+        <div className="flex h-dvh max-h-dvh overflow-hidden bg-chrome">
           <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden bg-chrome">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chrome">
             <AppTopBar />
-            <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden">
+            <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
               <Outlet />
             </main>
           </div>
@@ -345,14 +271,28 @@ function AppLayout() {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
+  const queryClient = useRouter().options.context.queryClient ?? getQueryClient()
   return (
-    <html lang="en">
+    // The boot scripts below stamp data-chat-theme / data-term-palette on this
+    // element before hydration, so its attributes never match the SSR markup.
+    <html lang="en" data-theme="dark" className="dark" suppressHydrationWarning>
       <head>
         <HeadContent />
+        {/* Sets data-chat-theme / data-term-palette before paint so the transcript never flashes. */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static boot script generated from allowlisted values */}
+        <script dangerouslySetInnerHTML={{ __html: CHAT_THEME_BOOT_SCRIPT }} />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static boot script generated from allowlisted values */}
+        <script dangerouslySetInnerHTML={{ __html: TERMINAL_PALETTE_BOOT_SCRIPT }} />
       </head>
       <body>
-        <QueryClientProvider client={getQueryClient()}>
-          <ActivityLiveProvider>{children}</ActivityLiveProvider>
+        <QueryClientProvider client={queryClient}>
+          <ChatThemeProvider>
+            <ActivityLiveProvider>
+              {children}
+              <Toaster />
+              <DevLiveStatus />
+            </ActivityLiveProvider>
+          </ChatThemeProvider>
         </QueryClientProvider>
         <Scripts />
       </body>

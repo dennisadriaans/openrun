@@ -21,7 +21,7 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "node --experimental-strip-types scripts/dev.ts",
     "dev:mobile": "AGENTOPS_MOBILE=1 vite dev --port 3000",
     "generate-routes": "tsr generate",
     "build": "vite build",
@@ -29,10 +29,10 @@
     "token:print": "node --experimental-strip-types scripts/token.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src scripts",
+    "lint": "biome check src scripts && node --experimental-strip-types scripts/lint-comments.ts",
     "lint:fix": "biome check --write src scripts",
     "format": "biome format --write src scripts",
-    "test": "node --experimental-strip-types --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -59,7 +59,7 @@
     "better-sqlite3": "^13.0.3",
     "cron-parser": "^4.9.0",
     "lucide-react": "^1.31.0",
-    "node-cron": "^3.0.3",
+    "node-cron": "^4.6.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -82,11 +82,5 @@
     "@vitejs/plugin-react": "^6.0.5",
     "typescript": "^7.0.2",
     "vite": "^8.2.1"
-  },
-  "pnpm": {
-    "overrides": {
-      "js-yaml": ">=4.3.1",
-      "nanoid": ">=3.3.17"
-    }
   }
 }

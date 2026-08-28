@@ -1,7 +1,6 @@
 /**
  * Mobile endpoint logic. Route files under `routes/api/mobile/**` stay thin
- * shells over these, matching how `routes/api/webhooks/$integrationId.ts`
- * delegates to `integrations/dispatcher.ts`.
+ * shells over these.
  *
  * Two rules hold the scope boundary:
  *  - everything reaches the app through `server/core.ts`, never past it;
@@ -206,7 +205,7 @@ export async function handleGetRun(runId: string): Promise<MobileResult> {
 export async function handleRunDiff(runId: string): Promise<MobileResult> {
   if (!(await core()).getRun(runId)) return NOT_FOUND
   try {
-    const workspace = (await core()).getRunWorkspace(runId)
+    const workspace = await (await core()).getRunWorkspace(runId)
     if (!workspace) return NOT_FOUND
     return ok({
       files: workspace.files,
@@ -271,6 +270,8 @@ export async function handleListTasks(): Promise<MobileResult> {
     workspaceId: task.workspaceId,
     nextRunAt: task.nextRunAt,
     lastRunAt: task.lastRunAt,
+    scheduledAt: task.scheduledAt,
+    lastScheduleFire: task.lastScheduleFire,
     queuedCount: task.queuedCount,
     // Why Run now / Enable would refuse, or null when they are clear. Sent so
     // the phone can explain a disabled control instead of failing on tap.

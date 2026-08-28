@@ -2,7 +2,7 @@
  * Known-good headless runtime presets for the Runtimes page gallery.
  *
  * Prefer stdin or `{promptFile}` over embedding `{prompt}` in argv (ARG_MAX /
- * process-list leaks). First-class kinds (claude/codex/grok) get adapters in
+ * process-list leaks). First-class kinds (claude/codex/grok/agy/fx) get adapters in
  * resume.ts; everything else stays generic (single-shot, raw stdout).
  */
 export type RuntimePreset = {
@@ -78,6 +78,16 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     transport: 'acp',
     description:
       'Gemini CLI over the Agent Client Protocol: real tool statuses, plans, file locations, follow-up turns and Supervised approvals.',
+  },
+  {
+    id: 'fx',
+    label: 'fx',
+    bin: 'fx',
+    argsTemplate: ['acp'],
+    promptViaStdin: false,
+    transport: 'acp',
+    description:
+      'Tiny native coding agent from fx.sh, over ACP. Uses your local `fx` login (Vercel or AI Gateway). Follow-up turns, tool statuses, and Supervised approvals come from the protocol; models from `fx models`.',
   },
 ]
 

@@ -19,7 +19,7 @@ export { AssistantDeltaCoalescer, LineBuffer } from './types.ts'
 export type { EventRuntimeKind, ParsedTurnEvent } from './types.ts'
 export { parseAcpSessionUpdate } from './acp.ts'
 export { extractGrokAssistantText, grokToolOutput, parseGrokObject } from './grok.ts'
-export { parseClaudeObject } from './claude.ts'
+export { ClaudeStdoutIngest, parseClaudeObject, parseClaudeStreamEvent } from './claude.ts'
 export { parseCodexObject } from './codex.ts'
 
 /**
@@ -112,6 +112,7 @@ export function ensureMachineReadableArgs(args: string[], kind: EventRuntimeKind
       next.splice(insertAt, 0, '--output-format', 'stream-json')
     }
     if (!next.includes('--verbose')) next.push('--verbose')
+    if (!next.includes('--include-partial-messages')) next.push('--include-partial-messages')
     return next
   }
 

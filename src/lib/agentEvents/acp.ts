@@ -10,10 +10,54 @@
  * because `lib/` stays dependency-free; `lib/acpConformance.ts` is what pins
  * these field names to the real protocol.
  */
-import { isToolCallStatus, isToolKind, toolKindFromName } from '../acp.ts'
+import { isToolCallStatus, isToolKind, resolveToolKind } from '../acp.ts'
 import type { PlanEntry, ToolCallLocation, ToolCallStatus, ToolKind } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
-import { pickString, toolResultContent, type ParsedTurnEvent } from './types.ts'
+import {
+  pickNumber,
+  pickString,
+  recordAt,
+  toolResultContent,
+  type ParsedTurnEvent,
+} from './types.ts'
+import type { TurnUsage } from '../turnUsage.ts'
+
+/**
+ * `usage_update` → a context snapshot.
+ *
+ * The update is not part of the ACP subset in `lib/acp.ts` (it is session
+ * metadata, not transcript content), and agents spell it differently, so this
+ * reads defensively: any of the well-known key names, nested under `usage` or
+ * flat on the update.
+ */
+function acpUsage(update: AcpSessionUpdate): Partial<TurnUsage> | undefined {
+  const u =
+    recordAt(update as Record<string, unknown>, 'usage') ?? (update as Record<string, unknown>)
+  const input = pickNumber(u, 'inputTokens', 'input_tokens', 'promptTokens') ?? 0
+  const output = pickNumber(u, 'outputTokens', 'output_tokens', 'completionTokens') ?? 0
+  const cacheRead =
+    pickNumber(u, 'cachedTokens', 'cached_tokens', 'cacheReadTokens', 'cache_read_input_tokens') ??
+    0
+  const used = pickNumber(u, 'usedTokens', 'used_tokens', 'totalTokens', 'total_tokens')
+  const limit = pickNumber(
+    u,
+    'maxTokens',
+    'max_tokens',
+    'contextWindow',
+    'context_window',
+    'contextLimit',
+  )
+  if (input + output + cacheRead <= 0 && !used) return undefined
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    contextTokens: used ?? input + cacheRead + output,
+    ...(limit ? { contextLimit: limit } : {}),
+    ...(pickString(u, 'model') ? { model: pickString(u, 'model') as string } : {}),
+  }
+}
 
 /** The subset of an ACP session update this adapter reads. */
 export type AcpSessionUpdate = Record<string, unknown> & { sessionUpdate?: string }
@@ -81,8 +125,13 @@ function planFrom(raw: unknown): PlanEntry[] {
 }
 
 function kindFrom(update: AcpSessionUpdate, name: string | undefined): ToolKind | undefined {
-  if (isToolKind(update.kind)) return update.kind
-  return name ? toolKindFromName(name) : undefined
+  const title = pickString(update, 'title')
+  return resolveToolKind(
+    name,
+    isToolKind(update.kind) ? update.kind : undefined,
+    update.rawInput,
+    title,
+  )
 }
 
 function statusFrom(update: AcpSessionUpdate, fallback?: ToolCallStatus) {
@@ -93,8 +142,10 @@ function statusFrom(update: AcpSessionUpdate, fallback?: ToolCallStatus) {
  * Map one `session/update` notification into zero or more turn events.
  *
  * Updates we deliberately drop: `available_commands_update`,
- * `current_mode_update`, `config_option_update`, `session_info_update` and
- * `usage_update` are session metadata, not transcript content.
+ * `current_mode_update`, `config_option_update` and `session_info_update` are
+ * session metadata, not transcript content. `usage_update` is metadata too,
+ * but it drives the live context gauge, so it becomes a transient `usage`
+ * event the executor folds onto the message instead of a transcript row.
  */
 export function parseAcpSessionUpdate(update: AcpSessionUpdate): ParsedTurnEvent[] {
   switch (update.sessionUpdate) {
@@ -104,7 +155,7 @@ export function parseAcpSessionUpdate(update: AcpSessionUpdate): ParsedTurnEvent
     }
     case 'agent_thought_chunk': {
       const text = contentBlockText(update.content)
-      return text ? [{ kind: 'thought', payload: { text } }] : []
+      return [{ kind: 'thought', payload: { text } }]
     }
     case 'user_message_chunk': {
       const text = contentBlockText(update.content)
@@ -162,6 +213,11 @@ export function parseAcpSessionUpdate(update: AcpSessionUpdate): ParsedTurnEvent
           },
         },
       ]
+    }
+    case 'usage_update':
+    case 'usage': {
+      const usage = acpUsage(update)
+      return usage ? [{ kind: 'usage', payload: { usage } }] : []
     }
     case 'plan':
     case 'plan_update': {

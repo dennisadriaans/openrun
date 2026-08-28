@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { parseClaudeObject } from './claude.ts'
+import { ClaudeStdoutIngest, parseClaudeObject } from './claude.ts'
 
 describe('parseClaudeObject', () => {
   it('maps text blocks to assistant and thinking blocks to thought', () => {
@@ -151,6 +151,82 @@ describe('parseClaudeObject', () => {
     })
     assert.equal(event?.payload.callRole, 'mcp')
     assert.equal(event?.payload.mcpServer, 'linear')
+  })
+
+  it('maps redacted thinking to a thought even without visible text', () => {
+    const events = parseClaudeObject({
+      type: 'assistant',
+      message: { content: [{ type: 'redacted_thinking' }] },
+    })
+    assert.deepEqual(events, [{ kind: 'thought', payload: { text: '' } }])
+  })
+
+  it('maps stream_event thinking and text deltas', () => {
+    assert.deepEqual(
+      parseClaudeObject({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          content_block: { type: 'thinking', thinking: '' },
+        },
+      }),
+      [{ kind: 'thought', payload: { text: '' } }],
+    )
+    assert.deepEqual(
+      parseClaudeObject({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'thinking_delta', thinking: 'hmm' },
+        },
+      }),
+      [{ kind: 'thought', payload: { text: 'hmm' } }],
+    )
+    assert.deepEqual(
+      parseClaudeObject({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hi' } },
+      }),
+      [{ kind: 'assistant', payload: { text: 'Hi' } }],
+    )
+  })
+
+  it('coalesces partial thinking and drops the duplicate complete assistant prose', () => {
+    const ingest = new ClaudeStdoutIngest()
+    ingest.pushLine(
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'a' } },
+      }),
+    )
+    ingest.pushLine(
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'b' } },
+      }),
+    )
+    const flushed = ingest.pushLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'thinking', thinking: 'ab' },
+            { type: 'text', text: 'Done.' },
+            { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'a.ts' } },
+          ],
+        },
+      }),
+    )
+    assert.equal(flushed[0]?.kind, 'thought')
+    assert.equal(flushed[0]?.payload.text, 'ab')
+    assert.equal(
+      flushed.some((e) => e.kind === 'assistant'),
+      false,
+    )
+    assert.equal(
+      flushed.some((e) => e.kind === 'tool_start'),
+      true,
+    )
   })
 
   it('ignores envelopes it does not model', () => {

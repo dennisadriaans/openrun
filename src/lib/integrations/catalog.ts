@@ -1,11 +1,11 @@
 /**
  * Provider catalog for the UI (no Node crypto / signature code).
  *
- * Event ids here are the contract with whatever produces a
- * `CanonicalWebhookEvent`: a local webhook handled by `server/integrations/`,
- * or the hosted control plane relaying one in. An automation can only bind an
- * id that appears in this file, so a provider whose events are missing here is
- * unusable even when deliveries arrive.
+ * Event ids here are the contract with the control plane, which verifies and
+ * normalizes every vendor delivery before relaying a `CanonicalWebhookEvent`
+ * in. An automation can only bind an id that appears in this file, so a
+ * provider whose events are missing here is unusable even when deliveries
+ * arrive.
  */
 import type { IntegrationProviderId, ProviderMeta } from './types.ts'
 
@@ -27,11 +27,15 @@ export function providerPageTitle(id: IntegrationProviderId): string {
   return id === 'github' ? 'GitHub' : (providerMeta(id)?.label ?? id)
 }
 
-/** Steps shown when the connection is made through the control plane. */
-const HOSTED_STEPS = [
-  'Sign in to Open Run, then click Connect — the browser handles the rest.',
-  'Approve the app at the provider and pick what it may watch.',
-  'Events arrive over this machine’s outbound connection. No tunnel, no tokens to paste.',
+/**
+ * How a connection is made. Identical for every provider on purpose — Connect
+ * is the only path there is, and the differences between vendors (who picks a
+ * project, who signs how) are handled for the user.
+ */
+const CONNECT_STEPS = [
+  'Click Connect. Open Run sends you to the provider to approve access.',
+  'Approve, and pick what it may watch if the provider asks.',
+  'Pick a workspace and runtime — the automation is created ready to run.',
 ]
 
 export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
@@ -40,7 +44,7 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
     label: 'GitHub Issues',
     description: 'Open, edit, label, assign, close, and reopen issue events from a GitHub repo.',
     docsUrl: 'https://docs.github.com/en/webhooks/webhook-events-and-payloads#issues',
-    supportsLocalInstall: true,
+    emitsCommentText: true,
     events: [
       { id: 'issues.opened', label: 'Opened', description: 'A new issue was created' },
       { id: 'issues.edited', label: 'Edited', description: 'Issue title or body changed' },
@@ -66,18 +70,14 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'issue_comment.edited', label: 'Comment edited' },
       { id: 'issue_comment.deleted', label: 'Comment deleted' },
     ],
-    setupSteps: [
-      'Click Install — Open Run uses your local `gh` login to create the webhook (no tokens to paste).',
-      'Paste a public base URL if you are on localhost (Cloudflare Tunnel / ngrok).',
-      'Pick the repo and events; we create a ready automation in the same step.',
-    ],
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'gitlab',
     label: 'GitLab',
     description: 'GitLab issue open, close, reopen, update, and comment events for one project.',
     docsUrl: 'https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html',
-    supportsLocalInstall: false,
+    emitsCommentText: true,
     events: [
       { id: 'issue.open', label: 'Opened' },
       { id: 'issue.update', label: 'Updated' },
@@ -99,14 +99,14 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         description: 'Comment text is available as {{extra.comment}}',
       },
     ],
-    setupSteps: HOSTED_STEPS,
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'bitbucket',
     label: 'Bitbucket',
     description: 'Bitbucket Cloud issue create, update, and comment events for one repository.',
     docsUrl: 'https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/',
-    supportsLocalInstall: false,
+    emitsCommentText: true,
     events: [
       { id: 'issue:created', label: 'Created' },
       { id: 'issue:updated', label: 'Updated' },
@@ -126,14 +126,15 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         description: 'Derived when assignee changes on update',
       },
     ],
-    setupSteps: HOSTED_STEPS,
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'jira',
     label: 'Jira',
-    description: 'Jira Cloud issue webhooks — status changes, create, update, assign, and more.',
+    description:
+      'Jira Cloud issue webhooks — pick a project (or a whole site), then status changes, create, update, assign, and more.',
     docsUrl: 'https://developer.atlassian.com/cloud/jira/platform/webhooks/',
-    supportsLocalInstall: true,
+    emitsCommentText: true,
     events: [
       { id: 'jira:issue_created', label: 'Created' },
       { id: 'jira:issue_updated', label: 'Updated' },
@@ -155,18 +156,14 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'worklog_updated', label: 'Worklog updated' },
       { id: 'worklog_deleted', label: 'Worklog deleted' },
     ],
-    setupSteps: [
-      'Click Install and paste your Jira site, Atlassian email, and an API token (used once, not stored).',
-      'Paste a public base URL if you are on localhost (Cloudflare Tunnel / ngrok).',
-      'Pick events; we register the webhook in Jira and create a ready automation.',
-    ],
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'linear',
     label: 'Linear',
     description: 'Linear issue create, update, remove, and status-change events.',
     docsUrl: 'https://linear.app/developers/webhooks',
-    supportsLocalInstall: true,
+    emitsCommentText: false,
     events: [
       { id: 'Issue.create', label: 'Created' },
       { id: 'Issue.update', label: 'Updated' },
@@ -189,18 +186,14 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'Cycle.create', label: 'Cycle created' },
       { id: 'Cycle.update', label: 'Cycle updated' },
     ],
-    setupSteps: [
-      'Click Install and paste a Linear personal API key (Settings → API — used once, not stored).',
-      'Paste a public base URL if you are on localhost (Cloudflare Tunnel / ngrok).',
-      'Pick events; we register the webhook in Linear and create a ready automation.',
-    ],
+    setupSteps: CONNECT_STEPS,
   },
   {
     id: 'azure-devops',
     label: 'Azure DevOps',
     description: 'Azure Boards work-item created, updated, and status-change events.',
     docsUrl: 'https://learn.microsoft.com/azure/devops/service-hooks/events',
-    supportsLocalInstall: false,
+    emitsCommentText: false,
     events: [
       { id: 'workitem.created', label: 'Created' },
       { id: 'workitem.updated', label: 'Updated' },
@@ -215,15 +208,10 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         description: 'Derived when System.AssignedTo changes',
       },
     ],
-    setupSteps: HOSTED_STEPS,
+    setupSteps: CONNECT_STEPS,
   },
 ]
 
 export function providerMeta(id: string): ProviderMeta | undefined {
   return INTEGRATION_PROVIDERS.find((p) => p.id === id)
-}
-
-/** Providers that can only be connected through the control plane. */
-export function isHostedOnlyProvider(id: IntegrationProviderId): boolean {
-  return providerMeta(id)?.supportsLocalInstall === false
 }

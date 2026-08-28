@@ -76,11 +76,12 @@ export type ProviderMeta = {
   /** Docs URL for the vendor webhook UI. */
   docsUrl: string
   /**
-   * False when the only way to connect is through the control plane — the
-   * provider has no local verify/parse implementation to receive a webhook
-   * this machine hosts itself.
+   * True when relayed events for this provider fill `extra.comment` with the
+   * comment body. A prompt that interpolates `{{extra.comment}}` on a provider that
+   * does not renders an empty line, so anything offering a comment-driven
+   * template has to check this rather than assume a comment event carries text.
    */
-  supportsLocalInstall: boolean
+  emitsCommentText: boolean
 }
 
 export function emptyIssue(partial?: Partial<CanonicalIssue>): CanonicalIssue {
