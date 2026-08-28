@@ -11,7 +11,7 @@ no hosted runner, no account. Your repositories never leave your disk.
 [![CI](https://github.com/dennisadriaans/openrun/actions/workflows/ci.yml/badge.svg)](https://github.com/dennisadriaans/openrun/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.6-informational)](https://nodejs.org)
 
-<img src="https://openrun.sh/screenshots/setup-automation.png" alt="Open Run automation setup: project, agent instructions, runtime and triggers." width="900">
+<img src="./public/screenshots/setup-automation.png" alt="Open Run automation setup: project, agent instructions, runtime and triggers." width="900">
 
 </div>
 
