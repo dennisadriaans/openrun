@@ -24,12 +24,13 @@ const vite = await createServer({
   logLevel: 'silent',
   server: { middlewareMode: true },
 })
-const { getDb } = (await vite.ssrLoadModule('/src/server/db.ts')) as typeof import('./db.ts')
+const { getDb, closeDb } = (await vite.ssrLoadModule('/src/server/db.ts')) as typeof import('./db.ts')
 const { syncTask, unscheduleTask } = (await vite.ssrLoadModule(
   '/src/server/scheduler.ts',
 )) as typeof import('./scheduler.ts')
 
 after(async () => {
+  closeDb()
   await vite.close()
   process.chdir(cwdBefore)
   rmSync(root, { recursive: true, force: true })
@@ -40,8 +41,8 @@ function seedTask(id: string, scheduledAt: number) {
   db.prepare(
     `INSERT OR REPLACE INTO runtimes
        (id, label, bin, argsTemplate, promptViaStdin, description, enabled, canOpenPrs, transport, createdAt)
-     VALUES ('test-shell', 'Test shell', '/bin/sh', '["-c","printf done"]', 0, '', 1, 0, 'cli', 1)`,
-  ).run()
+     VALUES ('test-shell', 'Test shell', ?, ?, 0, '', 1, 0, 'cli', 1)`,
+  ).run(process.execPath, JSON.stringify(['-e', "process.stdout.write('done')"]))
   db.prepare(
     `INSERT OR REPLACE INTO projects
        (id, name, slug, path, defaultBranch, remoteUrl, managed, setupCommand, checks, createdAt)

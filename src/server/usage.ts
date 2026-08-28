@@ -197,6 +197,16 @@ function record(stats: FileStats, model: string, ts: number, tokens: UsageTokens
 
 // --- Per-CLI file parsers --------------------------------------------------
 
+function jsonQuotedString(blob: string, key: string): string {
+  const match = new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`).exec(blob)
+  if (!match?.[1]) return ''
+  try {
+    return JSON.parse(`"${match[1]}"`) as string
+  } catch {
+    return match[1]
+  }
+}
+
 function parseClaudeFile(file: string): FileStats {
   const stats = emptyStats()
   stats.sessions = 1
@@ -209,16 +219,14 @@ function parseClaudeFile(file: string): FileStats {
 
   const seen = new Set<string>()
   for (const line of text.split('\n')) {
-    if (!stats.cwd && line.includes('"cwd"')) {
-      stats.cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(line)?.[1]?.replace(/\\\//g, '/') ?? ''
-    }
-    if (!line.includes('"usage"')) continue
+    if (!line.trim()) continue
     let obj: Record<string, unknown>
     try {
       obj = JSON.parse(line) as Record<string, unknown>
     } catch {
       continue
     }
+    if (!stats.cwd && typeof obj.cwd === 'string') stats.cwd = obj.cwd
     if (obj.type !== 'assistant') continue
     const message = obj.message as Record<string, unknown> | undefined
     const usage = message?.usage as Record<string, unknown> | undefined
@@ -258,7 +266,7 @@ function parseCodexFile(file: string, size: number): FileStats {
   try {
     const head = readSlice(file, 0, Math.min(CODEX_HEAD_BYTES, size))
     model = /"model":"([^"]+)"/.exec(head)?.[1] ?? ''
-    stats.cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head)?.[1]?.replace(/\\\//g, '/') ?? ''
+    stats.cwd = jsonQuotedString(head, 'cwd')
   } catch {
     return stats
   }

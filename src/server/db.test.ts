@@ -12,9 +12,10 @@ const root = mkdtempSync(join(tmpdir(), 'openrun-db-'))
 const cwdBefore = process.cwd()
 process.chdir(root)
 
-const { getDb, openrunHome } = await import('./db.ts')
+const { getDb, closeDb, openrunHome } = await import('./db.ts')
 
 after(() => {
+  closeDb()
   process.chdir(cwdBefore)
   rmSync(root, { recursive: true, force: true })
 })

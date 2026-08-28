@@ -23,7 +23,7 @@ process.env.GEMINI_HOME = join(home, '.gemini')
 process.env.ANTIGRAVITY_CLI_ROOT = join(home, '.antigravity')
 
 const { collectUsage, readUsagePressure } = await import('./usage.ts')
-const { getDb } = await import('./db.ts')
+const { getDb, closeDb } = await import('./db.ts')
 
 const DAY = 86_400_000
 const now = Date.now()
@@ -167,6 +167,7 @@ before(() => {
 })
 
 after(() => {
+  closeDb()
   process.chdir(cwdBefore)
   rmSync(root, { recursive: true, force: true })
   for (const key of [

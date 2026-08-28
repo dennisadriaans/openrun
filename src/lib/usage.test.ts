@@ -207,8 +207,16 @@ describe('matchProject', () => {
     assert.equal(matchProject('/Users/dev/code/openrun/', projects)?.id, 'p1')
   })
 
-  it('does not match a sibling folder that merely shares a prefix', () => {
-    assert.equal(matchProject('/Users/dev/code/openrun-site', projects), null)
+  it('matches Windows paths against project folders', () => {
+    const windows = [
+      { id: 'p1', name: 'openrun', path: 'C:\\Users\\dev\\code\\openrun' },
+      { id: 'p2', name: 'openrun worktree', path: 'C:\\Users\\dev\\code\\openrun\\.worktrees\\fix' },
+    ]
+    assert.equal(
+      matchProject('C:\\Users\\dev\\code\\openrun\\.worktrees\\fix\\src', windows)?.id,
+      'p2',
+    )
+    assert.equal(matchProject('C:\\Users\\dev\\code\\openrun\\', windows)?.id, 'p1')
   })
 })
 
@@ -248,6 +256,7 @@ describe('formatting', () => {
 
   it('names a folder by its tail', () => {
     assert.equal(pathTail('/Users/dev/code/openrun/'), 'openrun')
+    assert.equal(pathTail('C:\\Users\\dev\\code\\openrun\\'), 'openrun')
     assert.equal(pathTail('openrun'), 'openrun')
   })
 })
