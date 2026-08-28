@@ -5,9 +5,9 @@ import { TaskForm } from '../components/TaskForm'
 import { useTopBarActions } from '../components/AppChrome'
 import { Button, Card, EmptyState, StatusBadge, VerdictBadge } from '../components/ui'
 import { duration, relativeTime } from '../lib/format'
-import { parseWebhookEvents, parseWebhookFilters } from '../lib/integrations/match'
 import { useDeleteTask, useRunNow, useRuns, useTask } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
+import { taskFormInitial } from '../lib/taskFormInitial'
 
 export const Route = createFileRoute('/tasks/$taskId')({
   component: TaskDetail,
@@ -91,24 +91,7 @@ function TaskDetail() {
     <div className="mx-auto max-w-4xl px-6 py-6">
       <TaskForm
         key={task.id}
-        initial={{
-          id: task.id,
-          name: task.name,
-          description: task.description,
-          runtimeId: task.runtimeId,
-          prompt: task.prompt,
-          workspaceId: task.workspaceId,
-          cron: task.cron,
-          webhookIntegrationId: task.webhookIntegrationId,
-          webhookEvents: parseWebhookEvents(task.webhookEvents),
-          webhookFilters: parseWebhookFilters(task.webhookFilters),
-          enabled: !!task.enabled,
-          model: task.model,
-          effort: task.effort,
-          verifyEnabled: task.verifyEnabled,
-          maxRepairAttempts: task.maxRepairAttempts,
-          timeoutMs: task.timeoutMs,
-        }}
+        initial={taskFormInitial(task)}
         onCancel={() => navigate({ to: '/tasks' })}
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ['task', taskId] })
