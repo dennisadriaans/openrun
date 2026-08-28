@@ -9,6 +9,32 @@ import { createCsrfMiddleware, createMiddleware, createStart } from '@tanstack/r
 // credentials. API routes are exempt: the mobile surface carries its own bearer token.
 const csrfGuard = createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === 'serverFn' })
 
+const ABORT_CODES = new Set(['ECONNRESET', 'ECONNABORTED', 'ERR_STREAM_PREMATURE_CLOSE'])
+
+function isClientAbort(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 5; depth++) {
+    if (e instanceof Error) {
+      if (e.name === 'AbortError') return true
+      const code = (e as NodeJS.ErrnoException).code
+      if (code && ABORT_CODES.has(code)) return true
+      e = e.cause
+    } else break
+  }
+  return false
+}
+
+// Reloading a page or closing an SSE tab tears the socket down mid-response.
+// Nothing is left to write to, but h3 still treats the abort as an unhandled
+// 500 and logs a stack, so swallow it here instead.
+const abortGuard = createMiddleware({ type: 'request' }).server(async ({ next }) => {
+  try {
+    return await next()
+  } catch (error) {
+    if (!isClientAbort(error)) throw error
+    return new Response(null, { status: 499 })
+  }
+})
+
 const accessGuard = createMiddleware({ type: 'request' }).server(async ({ request, next }) => {
   const { accessDecision, withAccessCookie } = await import('./server/accessToken.ts')
 
@@ -24,5 +50,5 @@ const accessGuard = createMiddleware({ type: 'request' }).server(async ({ reques
 })
 
 export const startInstance = createStart(() => ({
-  requestMiddleware: [csrfGuard, accessGuard],
+  requestMiddleware: [abortGuard, csrfGuard, accessGuard],
 }))
