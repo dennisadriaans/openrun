@@ -230,6 +230,18 @@ export type RunQueueRow = {
   queuedAt: number
 }
 
+export type MessageQueueRow = {
+  id: string
+  runId: string
+  prompt: string
+  model: string
+  effort: string
+  runtimeMode: string
+  /** Non-empty only when the queued turn also switches runtime. */
+  runtimeId: string
+  queuedAt: number
+}
+
 export type NotifierRow = {
   id: string
   /** 'webhook' | 'desktop' — see lib/notify.ts. */
@@ -729,6 +741,23 @@ function migrate(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_run_queue_workspace
       ON run_queue(workspaceId, queuedAt ASC);
+
+    -- Follow-ups typed while the agent was still working. Each becomes its own
+    -- turn when the queue drains; see `server/messageQueue.ts`.
+    CREATE TABLE IF NOT EXISTS message_queue (
+      id TEXT PRIMARY KEY,
+      runId TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT '',
+      effort TEXT NOT NULL DEFAULT '',
+      runtimeMode TEXT NOT NULL DEFAULT '',
+      runtimeId TEXT NOT NULL DEFAULT '',
+      queuedAt INTEGER NOT NULL,
+      FOREIGN KEY (runId) REFERENCES runs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_message_queue_run
+      ON message_queue(runId, queuedAt ASC);
   `)
 
   // After the table exists: on a fresh database `run_queue` is created above,

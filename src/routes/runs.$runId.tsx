@@ -237,6 +237,8 @@ function RunDetail() {
   )
   const onUndoAllFiles = useCallback(() => setConfirmUndoAll(true), [])
   const sendFollowUp = sendMessage.mutate
+  const runWorking = (data?.run?.status ?? listRow?.status) === 'running'
+  const queuedMessages = data?.queued ?? []
   const onSend = useCallback(
     (input: {
       prompt: string
@@ -245,10 +247,31 @@ function RunDetail() {
       runtimeMode: RuntimeMode
       runtimeId?: string
     }) => {
-      sendFollowUp(input)
+      // Busy agent, or a queue left over from a stopped turn: the message waits
+      // its turn rather than being refused.
+      sendFollowUp({ ...input, queue: runWorking || queuedMessages.length > 0 })
+    },
+    [sendFollowUp, runWorking, queuedMessages.length],
+  )
+  const onSendNow = useCallback(
+    (input: {
+      prompt: string
+      model: string
+      effort: string
+      runtimeMode: RuntimeMode
+      runtimeId?: string
+    }) => {
+      sendFollowUp({ ...input, queue: true, force: true })
     },
     [sendFollowUp],
   )
+  const dropQueued = queueActions.drop.mutate
+  const clearQueue = queueActions.clear.mutate
+  const flushQueue = queueActions.flush.mutate
+  const onDropQueued = useCallback((id: string) => dropQueued({ id }), [dropQueued])
+  const onClearQueue = useCallback(() => clearQueue(), [clearQueue])
+  // The server interrupts a working agent for us; from here it is one action.
+  const onFlushQueue = useCallback(() => flushQueue(), [flushQueue])
   const onNewChat = useCallback(() => {
     void navigate({
       to: '/runs/new',
@@ -519,6 +542,7 @@ function RunDetail() {
                 transcriptPending={booting}
                 activePath={selectedPath}
                 canFollowUp={canFollowUp}
+                canQueue={data?.canQueueFollowUp ?? false}
                 followUpReason={followUpReason}
                 pending={false}
                 running={run?.status === 'running'}
@@ -555,6 +579,16 @@ function RunDetail() {
                 undoFilesReason={undoFilesReason}
                 onStop={onStop}
                 onSend={onSend}
+                onSendNow={onSendNow}
+                queued={queuedMessages}
+                queueBusy={
+                  queueActions.drop.isPending ||
+                  queueActions.clear.isPending ||
+                  queueActions.flush.isPending
+                }
+                onDropQueued={onDropQueued}
+                onClearQueue={onClearQueue}
+                onFlushQueue={onFlushQueue}
                 workspaceId={workspace?.id ?? run?.workspaceId}
                 onNewChat={onNewChat}
               />

@@ -94,10 +94,12 @@ import {
 import {
   agentSpawnOptions,
   isPidAlive,
+  isShuttingDown,
   killChildTree,
   killPidTree,
   setShuttingDown,
 } from './processControl'
+import { peekQueuedMessage, removeQueuedMessage } from './messageQueue'
 
 /**
  * Live process handles must survive Vite HMR. The scheduler already parks its
@@ -132,6 +134,7 @@ const g = globalThis as unknown as {
   __agentopsApprovals?: Map<string, ApprovalController>
   __agentopsVerifying?: Map<string, AbortController>
   __agentopsShutdownHooks?: boolean
+  __agentopsDrainOnExit?: Set<string>
 }
 
 function liveMap(): Map<string, LiveHandle> {
@@ -152,6 +155,17 @@ function approvalsMap(): Map<string, ApprovalController> {
 function verifyingMap(): Map<string, AbortController> {
   if (!g.__agentopsVerifying) g.__agentopsVerifying = new Map()
   return g.__agentopsVerifying
+}
+
+/**
+ * Runs cancelled *in order to* deliver a queued message ("send now"), rather
+ * than to stop working. The queue drains once the agent process is actually
+ * gone — resuming a session while the old child is still writing to it is how
+ * you corrupt one.
+ */
+function drainOnExitSet(): Set<string> {
+  if (!g.__agentopsDrainOnExit) g.__agentopsDrainOnExit = new Set()
+  return g.__agentopsDrainOnExit
 }
 
 /**
@@ -1115,6 +1129,9 @@ function spawnTurn(input: {
       finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
       publishRunStatus(runId, 'cancelled', code)
       publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
+      // The agent is gone for good now, so a "send now" interrupt can hand the
+      // queued message to a fresh turn.
+      if (drainOnExitSet().delete(runId)) drainMessageQueue(runId)
       return
     }
     if (signal) {
@@ -1483,6 +1500,7 @@ function spawnAcpTurn(input: {
           finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
           publishRunStatus(runId, 'cancelled', code)
           publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
+          if (drainOnExitSet().delete(runId)) drainMessageQueue(runId)
           return
         }
 
@@ -1598,7 +1616,47 @@ function finalizeRun(
     .run(status, code, verdict, Date.now(), runId)
   publishRunStatus(runId, status, code)
   publishActivityLive({ type: 'run_changed', runId, status, verdict })
+  // A queued follow-up means the conversation is not over: it takes the
+  // workspace straight back, so neither the "run finished" notification nor
+  // the workspace queue should treat this as the end.
+  if (drainMessageQueue(runId)) return
   onRunFinalized(runId)
+}
+
+/**
+ * Start the oldest follow-up parked for this run, if the run is free. Returns
+ * true when a turn was started.
+ *
+ * The entry is only removed once the turn is under way — a refusal (workspace
+ * taken, binary gone, session no longer resumable) leaves the message queued
+ * so the user can retry or discard it rather than watching it vanish.
+ */
+export function drainMessageQueue(runId: string): boolean {
+  // SIGINT/SIGTERM: a cancelled run must not spawn a replacement agent while
+  // the process is exiting.
+  if (isShuttingDown()) return false
+  const entry = peekQueuedMessage(runId)
+  if (!entry) return false
+  const run = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+    | { status: string }
+    | undefined
+  if (!run || run.status === 'running') return false
+
+  try {
+    sendFollowUp({
+      runId,
+      prompt: entry.prompt,
+      ...(entry.runtimeId ? { runtimeId: entry.runtimeId } : {}),
+      ...(entry.model ? { model: entry.model } : {}),
+      ...(entry.effort ? { effort: entry.effort } : {}),
+      ...(entry.runtimeMode ? { runtimeMode: entry.runtimeMode } : {}),
+    })
+  } catch (err) {
+    console.error(`[messages] could not start queued follow-up for run ${runId}:`, err)
+    return false
+  }
+  removeQueuedMessage(entry.id)
+  return true
 }
 
 /**
@@ -1926,9 +1984,15 @@ export function listTurnEventsForRun(runId: string): TurnEventRow[] {
  * pid when the in-memory handle is missing (server restart / HMR), so Cancel
  * never becomes a DB-only flip that leaves a token-burning orphan.
  */
-export function cancelRun(runId: string): boolean {
+export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boolean {
   const live = liveMap().get(runId)
   const db = getDb()
+  // "Send now": the turn is being interrupted so a queued message can take
+  // over, which is the opposite of a Stop — no finished notification, and the
+  // workspace stays reserved for this conversation.
+  const drainQueue = opts?.drainQueue === true
+  if (drainQueue) drainOnExitSet().add(runId)
+  else drainOnExitSet().delete(runId)
   const row = db.prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
     | { pid: number | null }
     | undefined
@@ -1943,7 +2007,7 @@ export function cancelRun(runId: string): boolean {
 
   publishRunStatus(runId, 'cancelled', null)
   publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
-  onRunFinalized(runId)
+  if (!drainQueue) onRunFinalized(runId)
 
   // A run in verification has no live agent child but is very much still
   // occupying the worktree — cancel has to reach the checks too.
@@ -1967,6 +2031,11 @@ export function cancelRun(runId: string): boolean {
     // No handle (restart/HMR) but the OS process is still there — kill by pid.
     killed = killPidTree(row.pid)
   }
+
+  // With a live child, the queue drains from its close handler. Without one
+  // there is no close handler to wait for — a run cancelled during
+  // verification, or after a restart — so deliver here.
+  if (!child && drainOnExitSet().delete(runId)) drainMessageQueue(runId)
 
   return killed || Boolean(verification)
 }

@@ -4,6 +4,7 @@
  * Returns the next cache value, or signals a full refetch (terminal status, or
  * a turn_event whose message is not cached yet).
  */
+import type { QueuedMessage } from './messageQueue'
 import type { CheckResultFrame, RunLiveEvent } from './runLive'
 import type { TurnEventRow } from './turnEvents'
 import type { TurnUsage } from './turnUsage'
@@ -46,6 +47,8 @@ export type ConversationCacheSlice = {
     finishedAt?: number | null
   }>
   canFollowUp?: boolean
+  /** Follow-ups waiting on the current turn; absent on caches that predate them. */
+  queued?: QueuedMessage[]
 }
 
 export type ApplyRunLiveResult<T> =
@@ -96,6 +99,8 @@ export function applyRunLiveEvent<T extends ConversationCacheSlice>(
     case 'repair_started':
       // The repair turn's own `turn_started` frame carries the cache update.
       return { action: 'ignore' }
+    case 'queue_changed':
+      return { action: 'patch', data: { ...data, queued: event.queued } }
     default: {
       // Unknown frame shape — do not guess; let polling/refetch converge.
       const _exhaustive: never = event
@@ -305,6 +310,7 @@ export function applyRunLiveEventToRunRow<
     case 'check_started':
     case 'check_finished':
     case 'repair_started':
+    case 'queue_changed':
       // The bare run row carries no per-message state — the conversation cache does.
       return { action: 'ignore' }
     case 'verdict':

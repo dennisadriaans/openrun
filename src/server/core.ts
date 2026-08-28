@@ -53,6 +53,7 @@ import {
   listMessages,
   listTurnEventsForRun,
   reconcileOrphanRuns,
+  drainMessageQueue,
   runChecksNow as _runChecksNow,
   sendFollowUp,
   setRunFinalizedHook,
@@ -61,6 +62,12 @@ import {
 import { listCheckResults } from './checks'
 import { notifyRunFinished } from './notify'
 import { clearQueueForTask, drainWorkspace, listQueue, queueDepthByTask } from './runQueue'
+import {
+  clearQueuedMessages,
+  enqueueMessage,
+  listQueuedMessages,
+  removeQueuedMessage,
+} from './messageQueue'
 import type { ApprovalDecision } from '../lib/claudeControl'
 import * as files from './files'
 import * as git from './git'
@@ -1216,6 +1223,41 @@ export function cancelRun(runId: string) {
   return getRun(runId)
 }
 
+/**
+ * Follow-ups parked while the agent was working. The queue drains itself when
+ * the turn ends; these are the manual handles the transcript needs — drop one,
+ * clear them all, or deliver them now on a run the user stopped.
+ */
+export function listQueuedFollowUps(runId: string) {
+  return listQueuedMessages(runId)
+}
+
+export function dequeueFollowUp(input: { id: string }): { ok: true } {
+  removeQueuedMessage(input.id)
+  return { ok: true }
+}
+
+export function clearQueuedFollowUps(runId: string): { ok: true } {
+  clearQueuedMessages(runId)
+  return { ok: true }
+}
+
+/**
+ * Deliver the queue now instead of waiting for the turn. A working agent is
+ * interrupted first — the queue then drains once its process is gone, which is
+ * what "send now" means everywhere else in the product.
+ */
+export function flushQueuedFollowUps(runId: string): { started: boolean } {
+  const run = getRun(runId)
+  if (!run) throw new Error('Run not found')
+  if (listQueuedMessages(runId).length === 0) return { started: false }
+  if (run.status === 'running') {
+    _cancelRun(runId, { drainQueue: true })
+    return { started: true }
+  }
+  return { started: drainMessageQueue(runId) }
+}
+
 export function archiveRun(runId: string): RunRow {
   const run = getRun(runId)
   if (!run) throw new Error('Run not found')
@@ -1320,16 +1362,24 @@ export function getConversation(runId: string) {
 
   const siblingWorkspaces = siblings.filter((w) => w.status !== 'archived')
 
+  const resumable =
+    !!runtime &&
+    supportsResume(runtime.bin, runtime.transport) &&
+    (run.sessionId.length > 0 || runtimeSupportsLastResume(runtime.bin))
+
   return {
     run,
     messages,
     checkResults: listCheckResults(runId),
+    /** Follow-ups typed while this run was working, oldest first. */
+    queued: listQueuedMessages(runId),
     verdict: parseVerdict(run.verdict),
-    canFollowUp:
-      run.status !== 'running' &&
-      !!runtime &&
-      supportsResume(runtime.bin, runtime.transport) &&
-      (run.sessionId.length > 0 || runtimeSupportsLastResume(runtime.bin)),
+    canFollowUp: resumable && run.status !== 'running',
+    /**
+     * Whether a follow-up may be *typed* — the same test minus the busy check,
+     * because a message sent at a working agent is queued rather than refused.
+     */
+    canQueueFollowUp: resumable,
     /**
      * A handoff starts a fresh session, so it needs nothing from the current
      * runtime — a run that cannot resume can still be continued elsewhere.
@@ -1450,6 +1500,18 @@ export function answerApproval(input: {
 /** Hard cap on follow-up prompt size to avoid accidental stdin/DB bloat. */
 const MAX_MESSAGE_PROMPT_CHARS = 100_000
 
+export type PostMessageResult =
+  | { queued: false; userMessageId: string; assistantMessageId: string }
+  | { queued: true; id: string; position: number }
+
+/**
+ * Send a follow-up, or park it when the agent is mid-turn.
+ *
+ * Every CLI we drive lets you keep typing while it works, so refusing here was
+ * the odd one out. A message that lands on a busy run joins the run's queue and
+ * becomes its own turn when the current one ends; `force` says don't wait —
+ * interrupt the agent and start the queue now.
+ */
 export function postMessage(input: {
   runId: string
   prompt: string
@@ -1460,7 +1522,9 @@ export function postMessage(input: {
   runtimeMode?: string
   userMessageId?: string
   assistantMessageId?: string
-}) {
+  /** Interrupt the running turn instead of waiting for it. */
+  force?: boolean
+}): PostMessageResult {
   const prompt = input.prompt.trim()
   if (!prompt) throw new Error('Message cannot be empty')
   if (prompt.length > MAX_MESSAGE_PROMPT_CHARS) {
@@ -1468,16 +1532,39 @@ export function postMessage(input: {
       `Message is too long (max ${MAX_MESSAGE_PROMPT_CHARS.toLocaleString()} characters)`,
     )
   }
-  return sendFollowUp({
-    runId: input.runId,
-    prompt,
-    runtimeId: input.runtimeId,
-    model: input.model,
-    effort: input.effort,
-    runtimeMode: input.runtimeMode,
-    userMessageId: input.userMessageId,
-    assistantMessageId: input.assistantMessageId,
-  })
+
+  const run = getRun(input.runId)
+  if (!run) throw new Error('Run not found')
+
+  // A queue that outlived a stopped turn keeps its order: a new message goes
+  // behind it, not in front, however the run got free.
+  if (run.status === 'running' || listQueuedMessages(input.runId).length > 0) {
+    const parked = enqueueMessage({
+      runId: input.runId,
+      prompt,
+      model: input.model,
+      effort: input.effort,
+      runtimeMode: input.runtimeMode,
+      runtimeId: input.runtimeId,
+    })
+    if (!parked.queued) throw new Error(parked.reason)
+    if (input.force) flushQueuedFollowUps(input.runId)
+    return { queued: true, id: parked.id, position: parked.position }
+  }
+
+  return {
+    queued: false,
+    ...sendFollowUp({
+      runId: input.runId,
+      prompt,
+      runtimeId: input.runtimeId,
+      model: input.model,
+      effort: input.effort,
+      runtimeMode: input.runtimeMode,
+      userMessageId: input.userMessageId,
+      assistantMessageId: input.assistantMessageId,
+    }),
+  }
 }
 
 // ---------------------------------------------------------------------------

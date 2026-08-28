@@ -3,6 +3,7 @@
  * client can type EventSource messages without importing Node modules.
  */
 
+import type { QueuedMessage } from './messageQueue'
 import type { TurnEventKind, TurnEventPayload } from './turnEvents'
 import type { TurnUsage } from './turnUsage'
 import type { RunVerdict } from './verdict'
@@ -88,6 +89,11 @@ export type RunLiveEvent =
   | { type: 'verdict'; verdict: RunVerdict; repairAttempts: number }
   /** A repair turn is about to start after red checks. */
   | { type: 'repair_started'; attempt: number; maxAttempts: number }
+  /**
+   * The run's queued follow-ups changed — sent whole rather than as a delta so
+   * a transcript that missed a frame still converges.
+   */
+  | { type: 'queue_changed'; queued: QueuedMessage[] }
 
 /** Path the browser EventSource connects to for a run's live tail. */
 export function runLiveStreamPath(runId: string): string {

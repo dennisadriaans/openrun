@@ -15,7 +15,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { ChevronRight, Square, Terminal } from 'lucide-react'
+import { ChevronRight, ListPlus, Square, Terminal } from 'lucide-react'
 import type { ChatMessage } from '../server/core'
 import type { DiffFile } from '../server/git'
 import type { ApprovalDecision } from '../lib/claudeControl'
@@ -70,17 +70,25 @@ import { MessageCopyButton } from './MessageCopyButton'
 import { MessageSourceBadge } from './MessageSourceBadge'
 import { PlanProposalsInChat } from './PlanProposalsInChat'
 import { looksLikePlanProposalArray, parsePlanProposals } from '../lib/planProposals'
+import type { QueuedMessage } from '../lib/messageQueue'
 import {
   ApprovalEvent,
   CallEvent,
   ChatMarkdown,
   PlanEvent,
+  QueuedMessages,
   ThoughtEvent,
   TurnFold,
   WorkGroup,
   WorkingIndicator,
   useChatThemeBehaviour,
+  AttachmentButton,
+  AttachmentStrip,
+  imageFilesFrom,
+  usePendingAttachments,
+  type AttachmentUploader,
 } from './chat/index'
+import { attachmentPathsIn, promptWithAttachments, promptWithoutAttachments } from '../lib/attachments'
 import { activitySteps, latestActivity } from '../lib/turnActivity'
 import { verificationPhase } from '../lib/runPhase'
 import type { CachedCheckResult } from '../lib/applyRunLiveEvent'
@@ -746,6 +754,8 @@ export function Composer({
   leading,
   pending,
   running,
+  canQueue = false,
+  onSendNow,
   runningLabel,
   models,
   model,
@@ -772,6 +782,13 @@ export function Composer({
   leading?: ReactNode
   pending: boolean
   running: boolean
+  /**
+   * Keep typing while the agent works — the message joins the run's queue
+   * instead of being refused, the way every CLI we drive behaves.
+   */
+  canQueue?: boolean
+  /** Interrupt the working agent and deliver this message now (⌘/Ctrl + ↵). */
+  onSendNow?: (text: string) => void
   /** Overrides the busy placeholder — e.g. which check is running. */
   runningLabel?: string
   models: ModelOption[]
@@ -1005,16 +1022,26 @@ export function Composer({
               >
                 <Square className="size-3.5 fill-current" />
               </button>
-            ) : (
+            ) : null}
+            {!running || canQueue ? (
               <button
                 type="button"
                 disabled={!canSend}
-                onClick={submit}
-                aria-label={pending ? 'Sending' : 'Send message'}
+                onClick={() => submit()}
+                aria-label={
+                  pending ? 'Sending' : running ? 'Queue message' : 'Send message'
+                }
+                title={
+                  running
+                    ? 'Queue this message (↵) · ⌘↵ interrupts and sends now'
+                    : undefined
+                }
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
               >
                 {pending ? (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                ) : running ? (
+                  <ListPlus className="size-3.5" />
                 ) : (
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                     <path
@@ -1027,7 +1054,7 @@ export function Composer({
                   </svg>
                 )}
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1040,6 +1067,7 @@ export function Chat({
   transcriptPending = false,
   activePath,
   canFollowUp,
+  canQueue = false,
   followUpReason,
   pending,
   running,
@@ -1069,7 +1097,13 @@ export function Chat({
   undoFilesDisabled,
   undoFilesReason,
   onSend,
+  onSendNow,
   onStop,
+  queued,
+  queueBusy = false,
+  onDropQueued,
+  onClearQueue,
+  onFlushQueue,
   workspaceId,
   onNewChat,
 }: {
@@ -1078,6 +1112,11 @@ export function Chat({
   transcriptPending?: boolean
   activePath: string | null
   canFollowUp: boolean
+  /**
+   * The runtime can resume this chat, so a message typed mid-turn is queued
+   * rather than refused. Unlike `canFollowUp` this stays true while running.
+   */
+  canQueue?: boolean
   followUpReason?: string
   pending: boolean
   running: boolean
@@ -1123,7 +1162,23 @@ export function Chat({
     /** Present only when this turn hands the chat to another runtime. */
     runtimeId?: string
   }) => void
+  /** Same payload, but it interrupts the working agent instead of queueing. */
+  onSendNow?: (input: {
+    prompt: string
+    model: string
+    effort: string
+    runtimeMode: RuntimeMode
+    runtimeId?: string
+  }) => void
   onStop?: () => void
+  /** Follow-ups waiting on the current turn, oldest first. */
+  queued?: QueuedMessage[]
+  /** A queue action is in flight. */
+  queueBusy?: boolean
+  onDropQueued?: (id: string) => void
+  onClearQueue?: () => void
+  /** Deliver the queue now — interrupting the agent when one is working. */
+  onFlushQueue?: () => void
   /** Workspace the run lives in; scopes project slash-command discovery. */
   workspaceId?: string
   /** What `/clear` does — the route owns navigation. */
@@ -1144,6 +1199,8 @@ export function Chat({
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimeId ?? '')
   const [pendingRuntimeId, setPendingRuntimeId] = useState<string | null>(null)
   const [dismissSwitchNote, setDismissSwitchNote] = useState(false)
+
+  const queuedMessages = queued ?? []
 
   const runtimeCatalog = useMemo(() => runtimes ?? [], [runtimes])
   // A handoff is only pending until the turn is sent; once the run row moves,
@@ -1494,9 +1551,22 @@ export function Chat({
                 />
               </div>
             ) : null}
+            {queuedMessages.length > 0 ? (
+              <div className="relative z-[5] mx-auto -mb-[2px] w-[92%]">
+                <QueuedMessages
+                  queued={queuedMessages}
+                  running={running}
+                  busy={queueBusy}
+                  onSendNow={() => onFlushQueue?.()}
+                  onDrop={(id) => onDropQueued?.(id)}
+                  onClear={() => onClearQueue?.()}
+                />
+              </div>
+            ) : null}
             <Composer
               className={
-                changedFiles && changedFiles.length > 0 && onReviewFile
+                (changedFiles && changedFiles.length > 0 && onReviewFile) ||
+                queuedMessages.length > 0
                   ? 'relative z-10 w-full'
                   : 'w-full pt-2'
               }
@@ -1504,6 +1574,16 @@ export function Chat({
               disabledReason={switchBlockedReason ?? followUpReason}
               pending={pending}
               running={running}
+              canQueue={canQueue && !switching}
+              {...(queuedMessages.length > 0 && !running
+                ? { placeholder: 'Add to the queue…' }
+                : {})}
+              {...(canQueue && onSendNow
+                ? {
+                    onSendNow: (text: string) =>
+                      onSendNow({ prompt: text, model, effort, runtimeMode }),
+                  }
+                : {})}
               {...(phase ? { runningLabel: `${phase.label}…` } : {})}
               {...(canSwitchRuntime && runtimeCatalog.length > 0 && selectedRuntimeId
                 ? {

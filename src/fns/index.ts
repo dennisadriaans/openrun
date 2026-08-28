@@ -290,9 +290,26 @@ export const postMessage = createServerFn({ method: 'POST' })
       runtimeMode?: string
       userMessageId?: string
       assistantMessageId?: string
+      /** Interrupt the running turn instead of queueing behind it. */
+      force?: boolean
     }) => d,
   )
   .handler(async ({ data }) => (await core()).postMessage(data))
+
+/** Drop one follow-up waiting on the current turn. */
+export const dequeueMessage = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).dequeueFollowUp(data))
+
+/** Drop every follow-up waiting on a run. */
+export const clearQueuedMessages = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string }) => d)
+  .handler(async ({ data }) => (await core()).clearQueuedFollowUps(data.runId))
+
+/** Deliver the next queued follow-up on a run that is no longer working. */
+export const flushQueuedMessages = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string }) => d)
+  .handler(async ({ data }) => (await core()).flushQueuedFollowUps(data.runId))
 
 /**
  * Answer a pending tool-approval on a supervised run (allow/deny). The run

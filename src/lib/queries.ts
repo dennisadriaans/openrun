@@ -470,12 +470,39 @@ export function useSendMessage(runId: string) {
       runtimeMode?: string
       userMessageId: string
       assistantMessageId: string
+      /** The agent is working: this message joins the run's queue. */
+      queue?: boolean
+      /** Interrupt the working agent so the queue starts now. */
+      force?: boolean
     }) => fns.postMessage({ data: { runId, ...input } }),
     onMutate: async (vars) => {
       const convKey = ['conversation', runId] as const
       const runKey = ['run', runId] as const
       await qc.cancelQueries({ queryKey: convKey })
       const previous = qc.getQueryData<ConversationCacheSlice>(convKey)
+      // A queued message is not a turn — it shows in the queue strip until the
+      // server's `queue_changed` frame replaces this optimistic entry.
+      if (vars.queue) {
+        if (previous) {
+          qc.setQueryData<ConversationCacheSlice>(convKey, {
+            ...previous,
+            queued: [
+              ...(previous.queued ?? []),
+              {
+                id: vars.userMessageId,
+                runId,
+                prompt: vars.prompt.trim(),
+                model: vars.model ?? '',
+                effort: vars.effort ?? '',
+                runtimeMode: vars.runtimeMode ?? '',
+                runtimeId: vars.runtimeId ?? '',
+                queuedAt: Date.now(),
+              },
+            ],
+          })
+        }
+        return { previous }
+      }
       const turnStarted = {
         type: 'turn_started' as const,
         userMessageId: vars.userMessageId,
@@ -510,7 +537,13 @@ export function useSendMessage(runId: string) {
         qc.removeQueries({ queryKey: ['conversation', runId] })
       }
     },
-    onSuccess: (_data, _vars, context) => {
+    onSuccess: (data, vars, context) => {
+      // The server parked a message the client thought it was sending (a
+      // stale idea of the run's status) — the optimistic turn never happened.
+      if (data?.queued && !vars.queue) {
+        void qc.refetchQueries({ queryKey: ['conversation', runId] })
+        return
+      }
       if (!context?.previous) {
         void qc.refetchQueries({ queryKey: ['conversation', runId] })
       }
@@ -524,6 +557,10 @@ export function useSendMessage(runId: string) {
     model?: string
     effort?: string
     runtimeMode?: string
+    /** The run is busy — park this message instead of starting a turn. */
+    queue?: boolean
+    /** Interrupt the running turn so the queue is delivered now. */
+    force?: boolean
   }
 
   const mutate = useCallback(
@@ -546,12 +583,38 @@ function sendFollowUpVars(input: {
   model?: string
   effort?: string
   runtimeMode?: string
+  queue?: boolean
+  force?: boolean
 }) {
   return {
     ...input,
     userMessageId: newMessageId(),
     assistantMessageId: newMessageId(),
   }
+}
+
+/**
+ * Manual handles on the follow-up queue. The `queue_changed` frame is what
+ * normally updates the strip; the invalidation covers a dropped stream.
+ */
+export function useQueuedMessageActions(runId: string) {
+  const qc = useQueryClient()
+  const settle = () => {
+    void qc.invalidateQueries({ queryKey: ['conversation', runId] })
+  }
+  const drop = useMutation({
+    mutationFn: (input: { id: string }) => fns.dequeueMessage({ data: input }),
+    onSuccess: settle,
+  })
+  const clear = useMutation({
+    mutationFn: () => fns.clearQueuedMessages({ data: { runId } }),
+    onSuccess: settle,
+  })
+  const flush = useMutation({
+    mutationFn: () => fns.flushQueuedMessages({ data: { runId } }),
+    onSuccess: settle,
+  })
+  return { drop, clear, flush }
 }
 
 /**
