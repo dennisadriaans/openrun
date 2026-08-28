@@ -6,6 +6,7 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+import { isClientAbort } from './src/lib/clientAbort.ts'
 import { allowRemoteRequest } from './src/lib/loopback.ts'
 import { lanAllowedHosts } from './src/server/mobile/lan.ts'
 
@@ -53,6 +54,27 @@ function remoteAccessGuard(): Plugin {
   }
 }
 
+/**
+ * A tab that navigates away mid-render aborts the socket. The request middleware
+ * in `src/start.ts` swallows that, but an abort raced against the first request
+ * of a cold dev server escapes it and h3 prints the 500 itself. Nothing is
+ * broken and nothing can be answered, so keep it out of the dev log.
+ */
+function silenceClientAbortLogs(): Plugin {
+  return {
+    name: 'openrun:silence-client-abort-logs',
+    apply: 'serve',
+    configureServer() {
+      const original = console.error
+      console.error = (...args: unknown[]) => {
+        const [first] = args
+        if (args.length === 1 && first instanceof Error && isClientAbort(first)) return
+        original(...args)
+      }
+    },
+  }
+}
+
 /** Boot unattended work in dev without waiting for the first browser request. */
 function automationBootstrap(): Plugin {
   return {
@@ -83,6 +105,7 @@ const config = defineConfig({
     : undefined,
   plugins: [
     remoteAccessGuard(),
+    silenceClientAbortLogs(),
     automationBootstrap(),
     devtools(),
     tailwindcss(),
