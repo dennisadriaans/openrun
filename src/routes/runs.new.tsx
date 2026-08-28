@@ -26,11 +26,17 @@ import {
 } from '../lib/models'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
-import { nativeResumeKindFor } from '../lib/nativeSessions'
+import {
+  nativeResumeKindFor,
+  type NativeSession,
+  type NativeSessionGroup,
+} from '../lib/nativeSessions'
+import { supportsTranscriptImport } from '../lib/nativeTranscript'
 import {
   attachmentUploader,
   useNativeSessions,
   useCreateWorkspace,
+  useOpenNativeChat,
   useProjectBranches,
   useProjects,
   useRuntimes,
@@ -72,6 +78,7 @@ function NewRun() {
   const { data: projects } = useProjects()
   const { data: runtimes } = useRuntimes()
   const startChat = useStartChat()
+  const openNativeChat = useOpenNativeChat()
   const createWorkspace = useCreateWorkspace()
 
   const [projectId, setProjectId] = useState(search.projectId ?? '')
@@ -235,6 +242,40 @@ function NewRun() {
     }
   }
 
+  /**
+   * Picking a saved chat opens it as its own run: the transcript is imported
+   * and shown, and nothing is prompted until the composer there is used. CLIs
+   * we cannot read a transcript for keep the old behaviour — the chat is armed
+   * here and adopted by the first message.
+   */
+  const pickNativeSession = (session: NativeSession, group: NativeSessionGroup) => {
+    setRuntimeId(group.runtimeId)
+    remember({ runtimeId: group.runtimeId })
+    if (!readyWorkspaceId || !supportsTranscriptImport(group.kind)) {
+      setResumeSessionId(session.sessionId)
+      setResumeSessionLabel(session.title)
+      return
+    }
+    setError(null)
+    // The composer's model belongs to the runtime it was picked for; a chat from
+    // another CLI takes that runtime's defaults instead.
+    const sameRuntime = group.runtimeId === runtimeId
+    openNativeChat.mutate(
+      {
+        workspaceId: readyWorkspaceId,
+        runtimeId: group.runtimeId,
+        sessionId: session.sessionId,
+        sessionLabel: session.title,
+        ...(sameRuntime ? { model, effort } : {}),
+        runtimeMode,
+      },
+      {
+        onSuccess: ({ runId }) => navigate({ to: '/runs/$runId', params: { runId } }),
+        onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+      },
+    )
+  }
+
   const send = (prompt: string) => {
     if (!workspace || !runtime || sent) return
     setError(null)
@@ -306,18 +347,13 @@ function NewRun() {
                 selectedId={resumeSessionId}
                 selectedLabel={resumeSessionLabel}
                 onOpen={() => nativeQuery.refetch()}
-                disabled={!workspaceId || startChat.isPending}
+                disabled={!workspaceId || startChat.isPending || openNativeChat.isPending}
                 disabledReason="Pick a branch first"
                 onSelectNew={() => {
                   setResumeSessionId('')
                   setResumeSessionLabel('')
                 }}
-                onSelect={(session, group) => {
-                  setRuntimeId(group.runtimeId)
-                  setResumeSessionId(session.sessionId)
-                  setResumeSessionLabel(session.title)
-                  remember({ runtimeId: group.runtimeId })
-                }}
+                onSelect={pickNativeSession}
               />
             </>
           ) : null}

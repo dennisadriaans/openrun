@@ -269,6 +269,20 @@ export const startChat = createServerFn({ method: 'POST' })
   )
   .handler(async ({ data }) => (await core()).startChat(data))
 
+export const openNativeChat = createServerFn({ method: 'POST' })
+  .validator(
+    (d: {
+      workspaceId: string
+      runtimeId: string
+      sessionId: string
+      sessionLabel?: string
+      model?: string
+      effort?: string
+      runtimeMode?: string
+    }) => d,
+  )
+  .handler(async ({ data }) => (await core()).openNativeChat(data))
+
 // --- Conversation ----------------------------------------------------------
 
 export const getConversation = createServerFn({ method: 'GET' })

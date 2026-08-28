@@ -119,6 +119,12 @@ function listClaudeFromJsonl(dir: string): NativeSession[] {
   return out
 }
 
+/** Where one Claude chat's JSONL lives, whether or not it exists. */
+export function claudeSessionFile(cwd: string, sessionId: string): string {
+  const dir = claudeDir(cwd)
+  return dir ? join(dir, `${sessionId}.jsonl`) : ''
+}
+
 const claudeAdapter: NativeSessionAdapter = {
   list(cwd) {
     const trimmed = cwd.trim()
@@ -130,7 +136,7 @@ const claudeAdapter: NativeSessionAdapter = {
   exists(cwd, sessionId) {
     const id = sessionId.trim()
     if (!id || !cwd.trim()) return false
-    const file = join(claudeDir(cwd), `${id}.jsonl`)
+    const file = claudeSessionFile(cwd, id)
     try {
       return statSync(file).isFile()
     } catch {

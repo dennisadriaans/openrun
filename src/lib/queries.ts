@@ -938,6 +938,30 @@ export function attachmentUploader(workspaceId: string | undefined) {
   }
 }
 
+export function useOpenNativeChat() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: {
+      workspaceId: string
+      runtimeId: string
+      sessionId: string
+      sessionLabel?: string
+      model?: string
+      effort?: string
+      runtimeMode?: string
+    }) => fns.openNativeChat({ data }),
+    onSuccess: async (data) => {
+      qc.invalidateQueries({ queryKey: ['runs'] })
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+      const runId = data?.runId
+      if (runId) {
+        await prefetchConversation(qc, runId)
+      }
+    },
+  })
+}
+
 export function useStartChat() {
   const qc = useQueryClient()
   return useMutation({
