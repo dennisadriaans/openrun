@@ -743,7 +743,7 @@ function migrate(db: Database.Database) {
       ON run_queue(workspaceId, queuedAt ASC);
 
     -- Follow-ups typed while the agent was still working. Each becomes its own
-    -- turn when the queue drains; see `server/messageQueue.ts`.
+    -- turn when the queue drains; see server/messageQueue.ts.
     CREATE TABLE IF NOT EXISTS message_queue (
       id TEXT PRIMARY KEY,
       runId TEXT NOT NULL,
