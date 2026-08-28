@@ -24,7 +24,9 @@ const vite = await createServer({
   logLevel: 'silent',
   server: { middlewareMode: true },
 })
-const { getDb, closeDb } = (await vite.ssrLoadModule('/src/server/db.ts')) as typeof import('./db.ts')
+const { getDb, closeDb } = (await vite.ssrLoadModule(
+  '/src/server/db.ts',
+)) as typeof import('./db.ts')
 const { syncTask, unscheduleTask } = (await vite.ssrLoadModule(
   '/src/server/scheduler.ts',
 )) as typeof import('./scheduler.ts')
