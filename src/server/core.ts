@@ -9,7 +9,7 @@
 import parser from 'cron-parser'
 import { assertArgsTemplate } from '../lib/argsTemplate'
 import { parseChecks } from '../lib/checks'
-import { isValidCron, normalizeCron } from '../lib/cron'
+import { normalizeCron } from '../lib/cron'
 import { assertRunTimeoutMinutes, resolveRunTimeoutMs } from '../lib/runBudget'
 import { assertTaskPrompt, hasTaskPrompt } from '../lib/taskPrompt'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
@@ -43,6 +43,7 @@ import {
   type MessageRow,
   type RuntimeRow,
   type RunRow,
+  type ScheduleFireRow,
   type TaskRow,
 } from './db'
 import {
@@ -122,7 +123,8 @@ import { collectUsage } from './usage'
 import { parseUsageRange, rangeCutoff, type UsageReport } from '../lib/usage.ts'
 import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
-import { assertSchedulableCron } from './cronValidation.ts'
+import { assertSchedulableCron, isSchedulableCron } from './cronValidation.ts'
+import { latestScheduleFires } from './scheduleFires.ts'
 
 // Reap any CLI left behind by a previous process *before* arming cron or
 // draining the queue — otherwise a phantom `running` row locks the workspace
@@ -623,11 +625,17 @@ export type TaskWithMeta = TaskRow & {
   queuedCount: number
   /** Effective wall-clock budget in ms (the app default when unset on the task). */
   effectiveTimeoutMs: number
+  /** Most recent scheduled-fire outcome, including fires that made no run. */
+  lastScheduleFire: ScheduleFireRow | null
 }
 
-function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWithMeta {
+function decorate(
+  task: TaskRow,
+  queueDepths?: Record<string, number>,
+  scheduleFires?: Record<string, ScheduleFireRow>,
+): TaskWithMeta {
   const runtime = getRuntime(task.runtimeId)
-  const cronOk = isValidCron(task.cron)
+  const cronOk = isSchedulableCron(task.cron)
   const workspaceOk = hasWorkspaceId(task.workspaceId)
   const workspace = workspaceOk ? getWorkspace(task.workspaceId) : undefined
   const workspaceStatus = workspace?.status ?? null
@@ -641,13 +649,16 @@ function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWith
     ...task,
     checkCount: parseChecks(project?.checks).length,
     effectiveTimeoutMs: resolveRunTimeoutMs(task.timeoutMs),
+    lastScheduleFire: (scheduleFires ?? latestScheduleFires([task.id]))[task.id] ?? null,
     // Passed in when decorating a whole list, so one grouped query covers every
     // row instead of one COUNT per task.
     queuedCount: (queueDepths ?? queueDepthByTask())[task.id] ?? 0,
     runtimeLabel: resolveRuntimeLabel(runtime?.label, task.runtimeId),
     nextRunAt:
       task.enabled && cronOk && workspaceReadyOk && runtimeInstalled && promptOk && resumeOk
-        ? nextRun(task.cron)
+        ? task.fireOnce && task.scheduledAt > 0
+          ? task.scheduledAt
+          : nextRun(task.cron)
         : null,
     cronValid: cronOk,
     workspaceValid: workspaceOk,
@@ -663,7 +674,8 @@ function decorate(task: TaskRow, queueDepths?: Record<string, number>): TaskWith
 export function listTasks(): TaskWithMeta[] {
   const rows = getDb().prepare('SELECT * FROM tasks ORDER BY createdAt DESC').all() as TaskRow[]
   const depths = queueDepthByTask()
-  return rows.map((row) => decorate(row, depths))
+  const fires = latestScheduleFires(rows.map((row) => row.id))
+  return rows.map((row) => decorate(row, depths, fires))
 }
 
 function nativeResumeRuntimes(): Array<{
@@ -764,6 +776,8 @@ export type TaskInput = {
   resumeSessionLabel?: string
   /** Disable after the next successful scheduled fire. */
   fireOnce?: boolean
+  /** Absolute epoch milliseconds for a one-shot schedule. */
+  scheduledAt?: number
 }
 
 export function upsertTask(input: TaskInput): TaskWithMeta {
@@ -848,12 +862,23 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
       : (existingRow?.resumeSessionLabel ?? '')
   const fireOnce =
     input.fireOnce !== undefined ? (input.fireOnce ? 1 : 0) : (existingRow?.fireOnce ?? 0)
+  const requestedScheduledAt = Number(input.scheduledAt ?? 0)
+  const scheduledAt = fireOnce
+    ? requestedScheduledAt > 0
+      ? Math.floor(requestedScheduledAt)
+      : existingRow?.fireOnce && existingRow.cron === cron && existingRow.scheduledAt > 0
+        ? existingRow.scheduledAt
+        : (nextRun(cron) ?? 0)
+    : 0
+  if (fireOnce && (!cron || scheduledAt <= 0)) {
+    throw new Error('A one-shot automation needs a valid future fire time.')
+  }
 
   if (input.enabled) assertNativeResume({ resumeSessionId, runtimeId: input.runtimeId, cwd })
 
   db.prepare(
-    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, createdAt, updatedAt, lastRunAt)
-     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @createdAt, @updatedAt, NULL)
+    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, scheduledAt, createdAt, updatedAt, lastRunAt)
+     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @scheduledAt, @createdAt, @updatedAt, NULL)
      ON CONFLICT(id) DO UPDATE SET
        name=@name, description=@description, runtimeId=@runtimeId, prompt=@prompt,
        cwd=@cwd, workspaceId=@workspaceId, cron=@cron, enabled=@enabled,
@@ -862,7 +887,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
        webhookFilters=@webhookFilters, verifyEnabled=@verifyEnabled,
        maxRepairAttempts=@maxRepairAttempts, timeoutMs=@timeoutMs,
        resumeSessionId=@resumeSessionId, resumeSessionLabel=@resumeSessionLabel,
-       fireOnce=@fireOnce,
+       fireOnce=@fireOnce, scheduledAt=@scheduledAt,
        updatedAt=@updatedAt`,
   ).run({
     id: tid,
@@ -885,6 +910,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     resumeSessionId,
     resumeSessionLabel,
     fireOnce,
+    scheduledAt,
     createdAt: existingRow?.createdAt ?? now,
     updatedAt: now,
   })

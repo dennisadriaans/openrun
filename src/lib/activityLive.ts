@@ -15,6 +15,8 @@ export type ActivityLiveEvent =
   | { type: 'run_changed'; runId: string; status: string; verdict?: RunVerdict }
   /** A run moved into or out of the pending queue for its workspace. */
   | { type: 'queue_changed'; workspaceId: string; queued: number }
+  /** An automation fired, missed, failed, or changed schedule health. */
+  | { type: 'task_changed'; taskId: string }
   /**
    * A supervised run is blocked on a tool approval. Carried app-wide (not just
    * on the run's own stream) so list pages — and a phone that is not sitting on
@@ -54,6 +56,8 @@ export function activityLiveInvalidateKeys(
     case 'queue_changed':
       // No run row yet — only the dashboard subtitle and automations badges.
       return [['dashboard'], ['tasks']]
+    case 'task_changed':
+      return [['task', event.taskId], ['dashboard'], ['tasks']]
     case 'approval_pending':
     case 'approval_settled':
       return [['conversation', event.runId], ['runs'], ['dashboard']]

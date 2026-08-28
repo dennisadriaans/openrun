@@ -52,11 +52,13 @@ function isValidCronField(field: string, min: number, max: number, names?: Set<s
     if (stepPart !== undefined) {
       if (!/^\d+$/.test(stepPart)) return false
       const step = Number(stepPart)
-      if (step <= 0 || step > max) return false
+      if (step <= 0) return false
     }
 
     if (rangePart === undefined || rangePart === '') return false
     if (rangePart === '*') return true
+    // node-cron accepts steps on * and ranges, but not on a single value/name.
+    if (stepPart !== undefined && !rangePart.includes('-')) return false
 
     if (rangePart.includes('-')) {
       const [start, end, ...rest] = rangePart.split('-')

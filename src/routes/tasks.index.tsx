@@ -28,6 +28,13 @@ function scheduleCell(t: ListTask, blocked: string | null): string {
     t.webhookIntegrationId?.trim() && !t.cron.trim() ? 'Webhook' : describeCron(t.cron),
   ]
   if (t.queuedCount > 0) parts.push(queueDepthLabel(t.queuedCount))
+  if (
+    t.lastScheduleFire &&
+    ['failed', 'missed', 'skipped'].includes(t.lastScheduleFire.outcome) &&
+    t.lastScheduleFire.observedAt > (t.lastRunAt ?? 0)
+  ) {
+    parts.push(t.lastScheduleFire.detail || t.lastScheduleFire.outcome)
+  }
   return parts.join(' · ')
 }
 

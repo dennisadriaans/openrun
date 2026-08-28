@@ -22,6 +22,7 @@ const stored: TaskFormInitialSource = {
   resumeSessionId: 'session-1',
   resumeSessionLabel: 'Release chat',
   fireOnce: 1,
+  scheduledAt: 1_700_000_100_000,
 }
 
 describe('taskFormInitial', () => {
@@ -52,6 +53,7 @@ describe('taskFormInitial', () => {
       resumeSessionId: 'session-1',
       resumeSessionLabel: 'Release chat',
       fireOnce: 1,
+      scheduledAt: 1_700_000_100_000,
     })
   })
 })

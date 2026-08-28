@@ -270,6 +270,8 @@ export async function handleListTasks(): Promise<MobileResult> {
     workspaceId: task.workspaceId,
     nextRunAt: task.nextRunAt,
     lastRunAt: task.lastRunAt,
+    scheduledAt: task.scheduledAt,
+    lastScheduleFire: task.lastScheduleFire,
     queuedCount: task.queuedCount,
     // Why Run now / Enable would refuse, or null when they are clear. Sent so
     // the phone can explain a disabled control instead of failing on tap.

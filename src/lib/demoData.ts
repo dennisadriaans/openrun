@@ -41,6 +41,11 @@ export type DemoTask = {
   workspaceReady: boolean
   runtimeInstalled: boolean
   promptValid: boolean
+  lastScheduleFire?: {
+    observedAt: number
+    outcome: 'started' | 'queued' | 'skipped' | 'failed' | 'missed'
+    detail: string
+  } | null
 }
 
 export function demoRuns(now: number = Date.now()): DemoRun[] {

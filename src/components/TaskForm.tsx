@@ -74,8 +74,10 @@ import {
   buildCron,
   defaultOnceAtCron,
   formatNextRunLabel,
+  formatScheduledRunLabel,
   formatTime,
   formatTimezoneOffset,
+  nextRunAt,
   parseSchedule,
   scheduleLeadIn,
   type ParsedSchedule,
@@ -247,17 +249,23 @@ function ChipSelect({
 function ScheduleTriggerRow({
   cron,
   fireOnce,
+  scheduledAt,
   onChange,
   onRemove,
 }: {
   cron: string
   fireOnce?: boolean
+  scheduledAt?: number
   onChange: (cron: string) => void
   onRemove: () => void
 }) {
   const schedule = useMemo(() => parseSchedule(cron), [cron])
   const tz = useMemo(() => formatTimezoneOffset(), [])
-  const nextRun = useMemo(() => formatNextRunLabel(cron), [cron])
+  const nextRun = useMemo(
+    () =>
+      fireOnce && scheduledAt ? formatScheduledRunLabel(scheduledAt) : formatNextRunLabel(cron),
+    [cron, fireOnce, scheduledAt],
+  )
   const onceAt = Boolean(fireOnce && schedule.kind === 'daily')
 
   const setSchedule = (next: ParsedSchedule) => onChange(buildCron(next))
@@ -676,6 +684,7 @@ export type TaskFormValues = {
   resumeSessionId?: string
   resumeSessionLabel?: string
   fireOnce?: number
+  scheduledAt?: number
 }
 
 const empty: TaskFormValues = {
@@ -696,6 +705,7 @@ const empty: TaskFormValues = {
   resumeSessionId: '',
   resumeSessionLabel: '',
   fireOnce: 0,
+  scheduledAt: 0,
 }
 
 function WebhookTriggerRow({
@@ -1261,6 +1271,7 @@ export function TaskForm({
       resumeSessionId: v.resumeSessionId ?? '',
       resumeSessionLabel: v.resumeSessionLabel ?? '',
       fireOnce: Boolean(v.fireOnce) && Boolean(cron),
+      scheduledAt: v.fireOnce && cron ? v.scheduledAt || nextRunAt(cron) || 0 : 0,
     })
     return { id: saved.id, name }
   }
@@ -1387,6 +1398,10 @@ export function TaskForm({
                 resumeSessionLabel: session.title,
                 prompt: hasTaskPrompt(prev.prompt) ? prev.prompt : NATIVE_RESUME_DEFAULT_PROMPT,
                 fireOnce: prev.cron.trim() ? 1 : prev.fireOnce,
+                scheduledAt:
+                  prev.cron.trim() && !prev.scheduledAt
+                    ? (nextRunAt(prev.cron) ?? 0)
+                    : prev.scheduledAt,
               }))
               remember({ runtimeId: group.runtimeId })
             }}
@@ -1544,22 +1559,31 @@ export function TaskForm({
           <StepLabel n={2}>When it should run</StepLabel>
           <div className="space-y-1.5">
             {v.cron ? (
-              <ScheduleTriggerRow
-                cron={v.cron}
-                fireOnce={Boolean(v.fireOnce)}
-                onChange={(cron) => {
-                  set('cron', cron)
-                  setRunOnce(false)
-                  setTriggerError(null)
-                }}
-                onRemove={() => {
-                  set('cron', '')
-                  set('fireOnce', 0)
-                  setAddingTrigger(false)
-                  setTriggerDraft('')
-                  setTriggerError(null)
-                }}
-              />
+              <>
+                <ScheduleTriggerRow
+                  cron={v.cron}
+                  fireOnce={Boolean(v.fireOnce)}
+                  scheduledAt={v.scheduledAt}
+                  onChange={(cron) => {
+                    set('cron', cron)
+                    if (v.fireOnce) set('scheduledAt', nextRunAt(cron) ?? 0)
+                    setRunOnce(false)
+                    setTriggerError(null)
+                  }}
+                  onRemove={() => {
+                    set('cron', '')
+                    set('fireOnce', 0)
+                    set('scheduledAt', 0)
+                    setAddingTrigger(false)
+                    setTriggerDraft('')
+                    setTriggerError(null)
+                  }}
+                />
+                <p className="px-1 text-[12px] text-tier-quaternary">
+                  Open Run must remain running. Recurring fires missed while offline are recorded
+                  and skipped; one-offs catch up for 15 minutes, then show as missed.
+                </p>
+              </>
             ) : null}
 
             {runOnce && !v.cron ? (
@@ -1634,6 +1658,7 @@ export function TaskForm({
                         return
                       }
                       set('cron', next)
+                      if (v.fireOnce) set('scheduledAt', nextRunAt(next) ?? 0)
                       setAddingTrigger(false)
                       setTriggerDraft('')
                       setTriggerError(null)
@@ -1669,6 +1694,10 @@ export function TaskForm({
                     setRunOnce(false)
                     set('cron', cron)
                     set('fireOnce', (v.resumeSessionId ?? '').trim() ? 1 : 0)
+                    set(
+                      'scheduledAt',
+                      (v.resumeSessionId ?? '').trim() ? (nextRunAt(cron) ?? 0) : 0,
+                    )
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)
@@ -1677,13 +1706,16 @@ export function TaskForm({
                     setRunOnce(false)
                     set('cron', '')
                     set('fireOnce', (v.resumeSessionId ?? '').trim() ? 1 : 0)
+                    set('scheduledAt', 0)
                     setAddingTrigger(true)
                     setTriggerError(null)
                   }}
                   onOnceAt={() => {
                     setRunOnce(false)
-                    set('cron', defaultOnceAtCron())
+                    const cron = defaultOnceAtCron()
+                    set('cron', cron)
                     set('fireOnce', 1)
+                    set('scheduledAt', nextRunAt(cron) ?? 0)
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)
@@ -1691,6 +1723,7 @@ export function TaskForm({
                   onRunOnce={() => {
                     set('cron', '')
                     set('fireOnce', 0)
+                    set('scheduledAt', 0)
                     setAddingTrigger(false)
                     setTriggerDraft('')
                     setTriggerError(null)

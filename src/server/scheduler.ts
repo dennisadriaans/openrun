@@ -1,12 +1,14 @@
 /**
- * Cron scheduler.
+ * Durable local scheduler.
  *
- * Registers enabled tasks that have a cron expression with node-cron. The
- * schedule is held in a module singleton (guarded on globalThis) so it survives
- * Vite HMR reloads during dev and is shared across all server-function calls.
+ * Recurring cron jobs use node-cron in the machine timezone. One-shot jobs use
+ * an absolute timestamp, catch up within a short grace window, and otherwise
+ * become a visible missed fire instead of silently moving to tomorrow.
  */
-import cron from 'node-cron'
+import parser from 'cron-parser'
+import cron, { type TaskContext } from 'node-cron'
 import { nativeResumeKindFor } from '../lib/nativeSessions.ts'
+import { oneShotDecision } from '../lib/oneShotSchedule.ts'
 import { hasTaskPrompt } from '../lib/taskPrompt'
 import { hasWorkspaceId } from '../lib/workspaceRef'
 import { isWorkspaceReady } from '../lib/workspaceReady'
@@ -16,10 +18,18 @@ import { nativeSessionExists } from './nativeSessions'
 import { isShuttingDown } from './processControl'
 import { drainAllQueues, enqueueRun } from './runQueue'
 import { checkRuntimeInstalled } from './runtimePath'
-import { getWorkspace } from './workspaces'
+import { recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
 import { isSchedulableCron } from './cronValidation.ts'
+import { getWorkspace } from './workspaces'
 
-type Scheduled = { stop: () => void }
+const MAX_TIMER_MS = 2_147_000_000
+const WORKSPACE_BUSY_MESSAGE = 'This workspace already has a run in progress'
+
+type Scheduled = {
+  stop: () => void | Promise<void>
+  destroy?: () => void | Promise<void>
+  on?: (event: 'execution:missed', listener: (context: TaskContext) => void) => void
+}
 
 const g = globalThis as unknown as {
   __agentopsJobs?: Map<string, Scheduled>
@@ -46,105 +56,195 @@ function disableAfterScheduleFire(taskId: string) {
   unscheduleTask(taskId)
 }
 
-function scheduleTask(task: TaskRow) {
-  if (!task.enabled || !task.cron.trim()) return
-  // Same rules as upsertTask / TaskForm — never arm an expression we would
-  // reject on save (node-cron.validate alone used to diverge silently).
-  if (!isSchedulableCron(task.cron)) return
-  // Same for workspace — a blank workspaceId would spawn in process.cwd().
-  if (!hasWorkspaceId(task.workspaceId)) return
-  // And never arm against a creating/error/archived worktree (chat already
-  // refused these; automations used to schedule and fail mid-spawn).
+function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string } | null {
+  if (!task.enabled && !task.fireOnce) {
+    return { outcome: 'skipped', detail: 'Automation is paused.' }
+  }
+  if (!hasWorkspaceId(task.workspaceId)) {
+    return { outcome: 'failed', detail: 'Automation has no workspace.' }
+  }
   const workspace = getWorkspace(task.workspaceId)
-  if (!workspace || !isWorkspaceReady(workspace.status)) return
-  // Don't arm a job whose CLI isn't on PATH — enable already refuses; this
-  // covers legacy rows that were armed before the binary disappeared.
-  const runtimeRow = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
+  if (!workspace || !isWorkspaceReady(workspace.status)) {
+    return { outcome: 'failed', detail: 'Automation workspace is not ready.' }
+  }
+  const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
     | RuntimeRow
     | undefined
-  if (!runtimeRow || !checkRuntimeInstalled(runtimeRow.bin).installed) return
-  // Same for a blank prompt — enable already refuses; this covers legacy rows
-  // armed before Create / Save required Agent Instructions.
-  if (!hasTaskPrompt(task.prompt)) return
-  if (!nativeResumeReady(task, runtimeRow)) return
+  if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) {
+    return { outcome: 'failed', detail: 'Automation runtime is not on PATH.' }
+  }
+  if (!hasTaskPrompt(task.prompt)) {
+    return { outcome: 'failed', detail: 'Automation has empty agent instructions.' }
+  }
+  if (!nativeResumeReady(task, runtime)) {
+    return { outcome: 'failed', detail: 'The native CLI session no longer exists.' }
+  }
+  return null
+}
 
-  const handle = cron.schedule(task.cron, () => {
-    if (isShuttingDown()) return
-    const db = getDb()
-    const fresh = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as TaskRow | undefined
-    if (!fresh?.enabled) return
-    if (!hasWorkspaceId(fresh.workspaceId)) return
-    const freshWs = getWorkspace(fresh.workspaceId)
-    if (!freshWs || !isWorkspaceReady(freshWs.status)) return
-    const runtime = db.prepare('SELECT * FROM runtimes WHERE id = ?').get(fresh.runtimeId) as
-      | RuntimeRow
-      | undefined
-    if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) return
-    if (!hasTaskPrompt(fresh.prompt)) return
-    if (!nativeResumeReady(fresh, runtime)) return
-    try {
-      runTask(fresh, runtime, 'schedule')
-      if (fresh.fireOnce) disableAfterScheduleFire(fresh.id)
-    } catch (err) {
-      // The overwhelmingly common failure is "this workspace already has a run
-      // in progress" — a long run overlapping the next tick. That used to end
-      // here, as a console log with no run row and nothing in the UI. Park it
-      // instead so the fire happens late rather than never.
+function fireTask(taskId: string, scheduledFor: number): void {
+  if (isShuttingDown()) return
+  const db = getDb()
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
+  if (!task) {
+    recordScheduleFire({
+      taskId,
+      scheduledFor,
+      outcome: 'skipped',
+      detail: 'Automation was deleted before the scheduled fire.',
+    })
+    return
+  }
+
+  const blocked = refusal(task)
+  if (blocked) {
+    recordScheduleFire({ taskId, scheduledFor, ...blocked })
+    if (task.fireOnce) disableAfterScheduleFire(task.id)
+    return
+  }
+
+  const runtime = db
+    .prepare('SELECT * FROM runtimes WHERE id = ?')
+    .get(task.runtimeId) as RuntimeRow
+  try {
+    const runId = runTask(task, runtime, 'schedule')
+    recordScheduleFire({ taskId, scheduledFor, outcome: 'started', runId })
+    if (task.fireOnce) disableAfterScheduleFire(task.id)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    if (detail === WORKSPACE_BUSY_MESSAGE) {
+      const fire = recordScheduleFire({ taskId, scheduledFor, outcome: 'queued' })
       const result = enqueueRun({
-        taskId: fresh.id,
-        workspaceId: fresh.workspaceId,
+        taskId: task.id,
+        workspaceId: task.workspaceId,
         trigger: 'schedule',
+        scheduleFireId: fire.id,
       })
-      if (result.queued && fresh.fireOnce) disableAfterScheduleFire(fresh.id)
       if (!result.queued) {
-        console.error(
-          `[scheduler] failed to start task ${fresh.id}: ${String(err)} (not queued: ${result.reason})`,
-        )
+        settleScheduleFire(fire.id, { outcome: 'skipped', detail: result.reason })
       }
+    } else {
+      recordScheduleFire({ taskId, scheduledFor, outcome: 'failed', detail })
+      console.error(`[scheduler] failed to start task ${task.id}:`, err)
     }
+    if (task.fireOnce) disableAfterScheduleFire(task.id)
+  }
+}
+
+function inferLegacyOneShotAt(task: TaskRow): number {
+  try {
+    const scheduledAt = parser.parseExpression(task.cron).next().getTime()
+    getDb()
+      .prepare('UPDATE tasks SET scheduledAt = ?, updatedAt = ? WHERE id = ?')
+      .run(scheduledAt, Date.now(), task.id)
+    return scheduledAt
+  } catch {
+    return 0
+  }
+}
+
+function scheduleOneShot(task: TaskRow): void {
+  const scheduledAt = task.scheduledAt || inferLegacyOneShotAt(task)
+  const decision = oneShotDecision(scheduledAt)
+  if (decision.kind === 'invalid') {
+    recordScheduleFire({
+      taskId: task.id,
+      scheduledFor: scheduledAt,
+      outcome: 'failed',
+      detail: 'One-shot automation has no valid absolute fire time.',
+    })
+    disableAfterScheduleFire(task.id)
+    return
+  }
+  if (decision.kind === 'miss') {
+    recordScheduleFire({
+      taskId: task.id,
+      scheduledFor: scheduledAt,
+      outcome: 'missed',
+      detail: 'Open Run was unavailable beyond the 15-minute one-shot grace window.',
+    })
+    disableAfterScheduleFire(task.id)
+    return
+  }
+  if (decision.kind === 'fire') {
+    queueMicrotask(() => fireTask(task.id, scheduledAt))
+    return
+  }
+
+  const timeout = setTimeout(
+    () => {
+      if (decision.delayMs > MAX_TIMER_MS) syncTask(task.id)
+      else {
+        const atFire = oneShotDecision(scheduledAt)
+        if (atFire.kind === 'miss') {
+          recordScheduleFire({
+            taskId: task.id,
+            scheduledFor: scheduledAt,
+            outcome: 'missed',
+            detail: 'The machine was asleep beyond the 15-minute one-shot grace window.',
+          })
+          disableAfterScheduleFire(task.id)
+        } else {
+          fireTask(task.id, scheduledAt)
+        }
+      }
+    },
+    Math.min(decision.delayMs, MAX_TIMER_MS),
+  )
+  jobs().set(task.id, { stop: () => clearTimeout(timeout) })
+}
+
+function scheduleTask(task: TaskRow) {
+  if (!task.enabled || !task.cron.trim()) return
+  if (!isSchedulableCron(task.cron)) return
+  if (task.fireOnce) {
+    scheduleOneShot(task)
+    return
+  }
+
+  const handle = cron.schedule(task.cron, (context) => fireTask(task.id, context.date.getTime()))
+  handle.on('execution:missed', (context) => {
+    recordScheduleFire({
+      taskId: task.id,
+      scheduledFor: context.date.getTime(),
+      outcome: 'missed',
+      detail: 'The scheduler process could not observe this recurring fire in time.',
+    })
   })
   jobs().set(task.id, handle)
 }
 
-/** (Re)register a single task's cron job, replacing any existing schedule. */
+/** (Re)register a single task's trigger, replacing any existing schedule. */
 export function syncTask(taskId: string) {
-  const existing = jobs().get(taskId)
-  if (existing) {
-    existing.stop()
-    jobs().delete(taskId)
-  }
-  const db = getDb()
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
+  unscheduleTask(taskId)
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as
+    | TaskRow
+    | undefined
   if (task) scheduleTask(task)
 }
 
 export function unscheduleTask(taskId: string) {
   const existing = jobs().get(taskId)
-  if (existing) {
-    existing.stop()
-    jobs().delete(taskId)
-  }
+  if (!existing) return
+  void existing.stop()
+  void existing.destroy?.()
+  jobs().delete(taskId)
 }
 
-/** Boot the scheduler once: load all enabled+cron tasks and register them. */
+/** Boot once, isolate broken rows, and recover any durable workspace queue. */
 export function bootScheduler() {
   if (g.__agentopsBooted) return
   g.__agentopsBooted = true
-  const db = getDb()
-  const tasks = db
+  const tasks = getDb()
     .prepare("SELECT * FROM tasks WHERE enabled = 1 AND cron != ''")
     .all() as TaskRow[]
-  for (const t of tasks) {
+  for (const task of tasks) {
     try {
-      scheduleTask(t)
+      scheduleTask(task)
     } catch (err) {
-      // One legacy/broken row must not prevent every later automation from
-      // arming. The task stays visible as unhealthy through TaskWithMeta.
-      console.error(`[scheduler] failed to arm task ${t.id}:`, err)
+      console.error(`[scheduler] failed to arm task ${task.id}:`, err)
     }
   }
-  // A queue left behind by a crash or a restart would otherwise sit untouched
-  // until the next cron tick happened to finish a run in that workspace.
   try {
     drainAllQueues()
   } catch (err) {

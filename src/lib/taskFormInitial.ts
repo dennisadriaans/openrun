@@ -21,6 +21,7 @@ export type TaskFormInitialSource = {
   resumeSessionId: string
   resumeSessionLabel: string
   fireOnce: number
+  scheduledAt: number
 }
 
 /**
@@ -48,5 +49,6 @@ export function taskFormInitial(task: TaskFormInitialSource) {
     resumeSessionId: task.resumeSessionId,
     resumeSessionLabel: task.resumeSessionLabel,
     fireOnce: task.fireOnce,
+    scheduledAt: task.scheduledAt,
   }
 }

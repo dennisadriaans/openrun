@@ -40,6 +40,9 @@ describe('a brand-new database', () => {
     }
     assert.ok(columns('runs').includes('workspaceId'))
     assert.ok(columns('runs').includes('verdict'))
+    assert.ok(columns('tasks').includes('scheduledAt'))
+    assert.ok(columns('run_queue').includes('scheduleFireId'))
+    assert.ok(columns('schedule_fires').includes('scheduledFor'))
   })
 
   it('accepts the insert the queue actually makes', () => {
@@ -47,8 +50,8 @@ describe('a brand-new database', () => {
       getDb()
         .prepare(
           `INSERT INTO run_queue (id, taskId, workspaceId, trigger, prompt,
-                                  sourceProvider, sourceUrl, sourceLabel, queuedAt)
-           VALUES ('q1', 't1', 'w1', 'webhook', 'go', 'github', 'https://x/1', 'PR #1', 1)`,
+                                  sourceProvider, sourceUrl, sourceLabel, scheduleFireId, queuedAt)
+           VALUES ('q1', 't1', 'w1', 'webhook', 'go', 'github', 'https://x/1', 'PR #1', '', 1)`,
         )
         .run(),
     )

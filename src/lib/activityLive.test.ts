@@ -31,6 +31,14 @@ describe('activityLiveInvalidateKeys', () => {
     )
   })
 
+  it('refreshes automation health when a scheduled fire settles', () => {
+    assert.deepEqual(activityLiveInvalidateKeys({ type: 'task_changed', taskId: 'task-1' }), [
+      ['task', 'task-1'],
+      ['dashboard'],
+      ['tasks'],
+    ])
+  })
+
   it('surfaces and clears a pending approval on list pages', () => {
     // The prompt lives in the conversation, but the "waiting on you" badge is
     // on the list — a phone not sitting on the run has to learn about it here.

@@ -93,6 +93,8 @@ export type TaskRow = {
    * wall-clock "once at 03:01" does not repeat every night.
    */
   fireOnce: number
+  /** Absolute local wall-clock fire time for one-shot automations. */
+  scheduledAt: number
   createdAt: number
   updatedAt: number
   lastRunAt: number | null
@@ -227,7 +229,22 @@ export type RunQueueRow = {
   sourceProvider: string
   sourceUrl: string
   sourceLabel: string
+  /** Schedule-fire audit row this pending run belongs to; empty for webhooks. */
+  scheduleFireId: string
   queuedAt: number
+}
+
+export type ScheduleFireOutcome = 'started' | 'queued' | 'skipped' | 'failed' | 'missed'
+
+/** Durable account of every cron/one-shot fire, including ones with no run row. */
+export type ScheduleFireRow = {
+  id: string
+  taskId: string
+  scheduledFor: number
+  observedAt: number
+  outcome: ScheduleFireOutcome
+  runId: string
+  detail: string
 }
 
 export type MessageQueueRow = {
@@ -606,12 +623,7 @@ export function getDb(): Database.Database {
  * Adds `column` to `table` if it's missing. SQLite has no "ADD COLUMN IF NOT
  * EXISTS", so we diff against table_info instead.
  */
-function addColumn(
-  db: Database.Database,
-  table: string,
-  column: string,
-  ddl: string,
-): boolean {
+function addColumn(db: Database.Database, table: string, column: string, ddl: string): boolean {
   const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
   // A table created further down this same migration does not exist yet on a
   // fresh database, and `table_info` answers with an empty list rather than an
@@ -675,6 +687,7 @@ function migrate(db: Database.Database) {
   addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'fireOnce', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'tasks', 'scheduledAt', 'INTEGER NOT NULL DEFAULT 0')
 
   // Where a webhook-triggered message came from. Held beside the message
   // rather than inside it so the link never reaches the agent's prompt.
@@ -742,6 +755,19 @@ function migrate(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_run_queue_workspace
       ON run_queue(workspaceId, queuedAt ASC);
 
+    CREATE TABLE IF NOT EXISTS schedule_fires (
+      id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      scheduledFor INTEGER NOT NULL,
+      observedAt INTEGER NOT NULL,
+      outcome TEXT NOT NULL,
+      runId TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_schedule_fires_task
+      ON schedule_fires(taskId, observedAt DESC);
+
     -- Follow-ups typed while the agent was still working. Each becomes its own
     -- turn when the queue drains; see server/messageQueue.ts.
     CREATE TABLE IF NOT EXISTS message_queue (
@@ -765,6 +791,7 @@ function migrate(db: Database.Database) {
   addColumn(db, 'run_queue', 'sourceProvider', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'run_queue', 'sourceUrl', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'run_queue', 'sourceLabel', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'run_queue', 'scheduleFireId', "TEXT NOT NULL DEFAULT ''")
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS integrations (

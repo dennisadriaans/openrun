@@ -16,6 +16,7 @@ import { getDb, type RunQueueRow, type RuntimeRow, type TaskRow } from './db.ts'
 import { runTask, type MessageSource } from './executor.ts'
 import { isShuttingDown } from './processControl.ts'
 import { checkRuntimeInstalled } from './runtimePath.ts'
+import { settleScheduleFire } from './scheduleFires.ts'
 import { getWorkspace } from './workspaces.ts'
 
 function id(): string {
@@ -72,6 +73,7 @@ export function enqueueRun(input: {
   trigger: QueueTrigger | string
   prompt?: string
   source?: MessageSource
+  scheduleFireId?: string
 }): EnqueueResult {
   const pending: PendingEntry[] = listQueue(input.workspaceId).map((row) => ({
     taskId: row.taskId,
@@ -92,8 +94,8 @@ export function enqueueRun(input: {
 
   getDb()
     .prepare(
-      `INSERT INTO run_queue (id, taskId, workspaceId, trigger, prompt, sourceProvider, sourceUrl, sourceLabel, queuedAt)
-       VALUES (@id, @taskId, @workspaceId, @trigger, @prompt, @sourceProvider, @sourceUrl, @sourceLabel, @queuedAt)`,
+      `INSERT INTO run_queue (id, taskId, workspaceId, trigger, prompt, sourceProvider, sourceUrl, sourceLabel, scheduleFireId, queuedAt)
+       VALUES (@id, @taskId, @workspaceId, @trigger, @prompt, @sourceProvider, @sourceUrl, @sourceLabel, @scheduleFireId, @queuedAt)`,
     )
     .run({
       id: id(),
@@ -104,6 +106,7 @@ export function enqueueRun(input: {
       sourceProvider: input.source?.provider ?? '',
       sourceUrl: input.source?.url ?? '',
       sourceLabel: input.source?.label ?? '',
+      scheduleFireId: input.scheduleFireId ?? '',
       queuedAt: Date.now(),
     })
 
@@ -118,20 +121,34 @@ function removeEntry(entryId: string) {
 
 export function clearQueueForTask(taskId: string): void {
   const db = getDb()
-  const affected = db
-    .prepare('SELECT DISTINCT workspaceId FROM run_queue WHERE taskId = ?')
-    .all(taskId) as Array<{ workspaceId: string }>
+  const queued = db
+    .prepare('SELECT workspaceId, scheduleFireId FROM run_queue WHERE taskId = ?')
+    .all(taskId) as Array<{ workspaceId: string; scheduleFireId: string }>
   db.prepare('DELETE FROM run_queue WHERE taskId = ?').run(taskId)
-  for (const row of affected) publishDepth(row.workspaceId)
+  for (const row of queued) {
+    settleScheduleFire(row.scheduleFireId, {
+      outcome: 'skipped',
+      detail: 'Queued fire was cancelled when the automation was paused or deleted.',
+    })
+  }
+  for (const workspaceId of new Set(queued.map((row) => row.workspaceId))) {
+    publishDepth(workspaceId)
+  }
 }
 
 export function dequeueEntry(entryId: string): void {
   const db = getDb()
-  const row = db.prepare('SELECT workspaceId FROM run_queue WHERE id = ?').get(entryId) as
-    | { workspaceId: string }
-    | undefined
+  const row = db
+    .prepare('SELECT workspaceId, scheduleFireId FROM run_queue WHERE id = ?')
+    .get(entryId) as { workspaceId: string; scheduleFireId: string } | undefined
   removeEntry(entryId)
-  if (row) publishDepth(row.workspaceId)
+  if (row) {
+    settleScheduleFire(row.scheduleFireId, {
+      outcome: 'skipped',
+      detail: 'Queued fire was removed before it started.',
+    })
+    publishDepth(row.workspaceId)
+  }
 }
 
 function workspaceBusy(workspaceId: string): boolean {
@@ -160,9 +177,6 @@ export function drainWorkspace(workspaceId: string): void {
       .get(workspaceId) as RunQueueRow | undefined
     if (!entry) return
 
-    removeEntry(entry.id)
-    publishDepth(workspaceId)
-
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(entry.taskId) as
       | TaskRow
       | undefined
@@ -170,19 +184,59 @@ export function drainWorkspace(workspaceId: string): void {
     // longer usable while it waited — drop it and try the next entry.
     // Disabled recurring tasks drop too. A fire-once task that was paused
     // *because* it already fired must still drain: the queue entry is that fire.
-    if (!task) continue
-    if (!task.enabled && !task.fireOnce) continue
-    if (!hasTaskPrompt(task.prompt) && !entry.prompt.trim()) continue
+    if (!task) {
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, {
+        outcome: 'skipped',
+        detail: 'Automation was deleted while this fire was queued.',
+      })
+      continue
+    }
+    if (!task.enabled && !task.fireOnce) {
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, {
+        outcome: 'skipped',
+        detail: 'Automation was paused while this fire was queued.',
+      })
+      continue
+    }
+    if (!hasTaskPrompt(task.prompt) && !entry.prompt.trim()) {
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, {
+        outcome: 'failed',
+        detail: 'Agent instructions became empty while this fire was queued.',
+      })
+      continue
+    }
     const workspace = getWorkspace(workspaceId)
-    if (!workspace || !isWorkspaceReady(workspace.status)) continue
+    if (!workspace || !isWorkspaceReady(workspace.status)) {
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, {
+        outcome: 'failed',
+        detail: 'Workspace became unavailable while this fire was queued.',
+      })
+      continue
+    }
 
     const runtime = db.prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
       | RuntimeRow
       | undefined
-    if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) continue
+    if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) {
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, {
+        outcome: 'failed',
+        detail: 'Runtime became unavailable while this fire was queued.',
+      })
+      continue
+    }
 
     try {
-      runTask(
+      const runId = runTask(
         task,
         runtime,
         entry.trigger === 'webhook' ? 'webhook' : 'schedule',
@@ -195,11 +249,21 @@ export function drainWorkspace(workspaceId: string): void {
             }
           : undefined,
       )
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, { outcome: 'started', runId })
       return
     } catch (err) {
-      // Something else grabbed the workspace between the check and the spawn,
-      // or the run refused for a reason the gates above don't cover. Keep
-      // going: the loop re-checks `workspaceBusy` and stops if it is taken.
+      // Something else may have grabbed the workspace between the check and
+      // startRun. Keep the entry in that case; any other refusal is terminal
+      // and becomes visible in the fire audit instead of disappearing.
+      if (workspaceBusy(workspaceId)) return
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, {
+        outcome: 'failed',
+        detail: err instanceof Error ? err.message : String(err),
+      })
       console.error(`[queue] failed to start queued run for task ${entry.taskId}:`, err)
     }
   }

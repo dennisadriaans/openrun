@@ -25,9 +25,9 @@ describe('isSchedulableCron', () => {
     }
   })
 
-  it('catches the known browser-validator mismatch before persistence', () => {
+  it('keeps the scheduler engine as the final write-path authority', () => {
     const expr = '0 9 * * 1/2'
-    assert.equal(isValidCron(expr), true)
+    assert.equal(isValidCron(expr), false)
     assert.equal(cron.validate(expr), false)
     assert.equal(isSchedulableCron(expr), false)
     assert.throws(() => assertSchedulableCron(expr), /Invalid cron expression/)

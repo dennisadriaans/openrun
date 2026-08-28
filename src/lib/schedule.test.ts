@@ -4,6 +4,7 @@ import {
   buildCron,
   defaultOnceAtCron,
   formatTime,
+  formatScheduledRunLabel,
   formatTimezoneOffset,
   nextRunAt,
   parseSchedule,
@@ -76,5 +77,11 @@ describe('format helpers', () => {
   it('defaults once-at to the next local hour', () => {
     assert.equal(defaultOnceAtCron(new Date('2026-08-15T02:40:00')), '0 3 * * *')
     assert.equal(defaultOnceAtCron(new Date('2026-08-15T23:10:00')), '0 0 * * *')
+  })
+
+  it('formats an absolute one-shot without calculating another cron occurrence', () => {
+    const label = formatScheduledRunLabel(new Date('2026-08-15T03:00:00').getTime())
+    assert.match(label ?? '', /^Scheduled /)
+    assert.match(label ?? '', /GMT[+-]/)
   })
 })
