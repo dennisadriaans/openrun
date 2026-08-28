@@ -314,14 +314,18 @@ export function rollingWeekWindow(samples: UsageSample[], now: number): UsageWin
  * Which Open Run project a CLI folder belongs to. Worktree paths live under
  * their own root, so the longest matching path wins over the shortest.
  */
+function folderPath(path: string): string {
+  return path.replaceAll('\\', '/').replace(/\/+$/, '')
+}
+
 export function matchProject(
   cwd: string,
   entries: Array<{ id: string; name: string; path: string }>,
 ): { id: string; name: string } | null {
-  const target = cwd.replace(/\/+$/, '')
+  const target = folderPath(cwd)
   let best: { id: string; name: string; path: string } | null = null
   for (const entry of entries) {
-    const root = entry.path.replace(/\/+$/, '')
+    const root = folderPath(entry.path)
     if (!root) continue
     if (target !== root && !target.startsWith(`${root}/`)) continue
     if (!best || root.length > best.path.length) best = entry
@@ -330,7 +334,7 @@ export function matchProject(
 }
 
 export function pathTail(path: string): string {
-  const parts = path.replace(/\/+$/, '').split('/')
+  const parts = folderPath(path).split('/')
   return parts[parts.length - 1] || path
 }
 

@@ -8,11 +8,13 @@ const root = mkdtempSync(join(tmpdir(), 'openrun-schedule-fires-'))
 const cwdBefore = process.cwd()
 process.chdir(root)
 
+const { closeDb } = await import('./db.ts')
 const { latestScheduleFires, recordScheduleFire, settleScheduleFire } = await import(
   './scheduleFires.ts'
 )
 
 after(() => {
+  closeDb()
   process.chdir(cwdBefore)
   rmSync(root, { recursive: true, force: true })
 })

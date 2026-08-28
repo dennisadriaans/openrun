@@ -170,7 +170,8 @@ describe('saveMcpServer', () => {
     assert.match(toml, /enabled = true/)
 
     const trust = readFileSync(join(home, '.grok', 'trusted_folders.toml'), 'utf8')
-    assert.match(trust, new RegExp(`\\[folders\\."${workspace}"\\]`))
+    const folderKey = workspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    assert.match(trust, new RegExp(`\\[folders\\."${folderKey}"\\]`))
     assert.match(trust, /trusted = true/)
   })
 

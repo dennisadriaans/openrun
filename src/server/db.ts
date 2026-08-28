@@ -619,6 +619,15 @@ export function getDb(): Database.Database {
   return db
 }
 
+export function closeDb(): void {
+  if (!_db) return
+  try {
+    _db.pragma('wal_checkpoint(TRUNCATE)')
+  } catch {}
+  _db.close()
+  _db = null
+}
+
 /**
  * Adds `column` to `table` if it's missing. SQLite has no "ADD COLUMN IF NOT
  * EXISTS", so we diff against table_info instead.

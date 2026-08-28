@@ -17,7 +17,7 @@ const cwdBefore = process.cwd()
 // has to happen before anything touches the module.
 process.chdir(root)
 
-const { getDb } = await import('./db.ts')
+const { getDb, closeDb } = await import('./db.ts')
 const { callOpenrunTool } = await import('./openrunTools.ts')
 
 function git(...args: string[]): string {
@@ -109,6 +109,7 @@ before(() => {
 })
 
 after(() => {
+  closeDb()
   process.chdir(cwdBefore)
   rmSync(root, { recursive: true, force: true })
   rmSync(repo, { recursive: true, force: true })
