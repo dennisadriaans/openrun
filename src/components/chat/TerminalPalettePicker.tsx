@@ -1,37 +1,33 @@
 /**
- * Which palette the debug transcript paints output with. Sits beside the debug
- * toggle and only while debug is on — it changes nothing in the ordinary UI.
+ * Which palette the debug transcript paints output with. Shown in the run
+ * top-bar overflow while debug is on — it changes nothing in the ordinary UI.
  */
-import { Palette } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { TERMINAL_PALETTES } from '../../lib/terminalPalette'
-import { FooterMenu, MenuItem } from '../ComposerControls'
 import { useChatTheme } from './ChatThemeProvider'
 
-export function TerminalPalettePicker() {
+export function TerminalPaletteMenuItems() {
   const { palette, setPalette } = useChatTheme()
-  const current = TERMINAL_PALETTES.find((option) => option.id === palette) ?? TERMINAL_PALETTES[0]!
 
   return (
-    <FooterMenu
-      label={current.label}
-      align="end"
-      tooltip="Terminal palette"
-      leading={<Palette className="h-3.5 w-3.5 shrink-0 text-tier-quaternary" />}
-    >
-      {(close) =>
-        TERMINAL_PALETTES.map((option) => (
-          <MenuItem
-            key={option.id}
-            active={option.id === palette}
-            label={option.label}
-            hint={option.hint}
-            onSelect={() => {
-              setPalette(option.id)
-              close()
-            }}
-          />
-        ))
-      }
-    </FooterMenu>
+    <>
+      <div className="px-2 pb-1 pt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        Palette
+      </div>
+      {TERMINAL_PALETTES.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="menuitem"
+          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm transition-colors hover:bg-hover ${
+            option.id === palette ? 'text-foreground' : 'text-foreground/85'
+          }`}
+          onClick={() => setPalette(option.id)}
+        >
+          <span className="min-w-0 flex-1 truncate">{option.label}</span>
+          {option.id === palette ? <Check className="h-3.5 w-3.5 shrink-0 opacity-70" /> : null}
+        </button>
+      ))}
+    </>
   )
 }

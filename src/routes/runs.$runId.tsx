@@ -5,14 +5,14 @@
  * Panel chrome adapted from t3code ChatView (MIT, T3 Tools Inc.).
  */
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowLeft, Ban, ChevronDown, ChevronRight, Plus, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Ban, ChevronRight, MoreHorizontal, Plus, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
 import { Chat } from '../components/Chat'
-import { ChatDebugToggle } from '../components/chat/ChatDebugToggle'
+import { ChatDebugMenuItem } from '../components/chat/ChatDebugToggle'
 import { ContextMeter } from '../components/chat/ContextMeter'
-import { TerminalPalettePicker } from '../components/chat/TerminalPalettePicker'
+import { TerminalPaletteMenuItems } from '../components/chat/TerminalPalettePicker'
 import { useChatTheme } from '../components/chat/ChatThemeProvider'
 import { DiffPanel } from '../components/DiffPanel'
 import { EmptyState, Modal } from '../components/ui'
@@ -124,8 +124,8 @@ function RunDetail() {
   const layoutChosenRef = useRef(hasStoredLayout(runId))
   const [newBranchOpen, setNewBranchOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
-  const [newRunMenuOpen, setNewRunMenuOpen] = useState(false)
-  const newRunMenuRef = useRef<HTMLDivElement>(null)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
   const listRow = peekCachedRunSummary(qc, runId)
   const navigate = useNavigate()
@@ -172,12 +172,12 @@ function RunDetail() {
   }, [runId])
 
   useEffect(() => {
-    if (!newRunMenuOpen) return
+    if (!moreMenuOpen) return
     const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!newRunMenuRef.current?.contains(event.target as Node)) setNewRunMenuOpen(false)
+      if (!moreMenuRef.current?.contains(event.target as Node)) setMoreMenuOpen(false)
     }
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setNewRunMenuOpen(false)
+      if (event.key === 'Escape') setMoreMenuOpen(false)
     }
     document.addEventListener('mousedown', closeOnOutsideClick)
     document.addEventListener('keydown', closeOnEscape)
@@ -185,7 +185,7 @@ function RunDetail() {
       document.removeEventListener('mousedown', closeOnOutsideClick)
       document.removeEventListener('keydown', closeOnEscape)
     }
-  }, [newRunMenuOpen])
+  }, [moreMenuOpen])
 
   const patchLayout = useCallback((partial: Partial<LayoutState>) => {
     layoutChosenRef.current = true
@@ -330,7 +330,7 @@ function RunDetail() {
 
   const followUpReason =
     (run?.status ?? listRow?.status) === 'running'
-      ? 'The agent is still working — wait for this turn to finish.'
+      ? 'The agent is still working — your message is queued until it finishes.'
       : 'This runtime has no resumable session, so follow-ups are unavailable.'
 
   const showChat = !layout.maximized
@@ -370,7 +370,7 @@ function RunDetail() {
           void navigate({ to: '/runs/$runId', params: { runId: newRunId } }),
       },
     )
-    setNewRunMenuOpen(false)
+    setMoreMenuOpen(false)
   }
 
   const submitNewBranch = async () => {
@@ -408,7 +408,7 @@ function RunDetail() {
               The top bar lives inside the chat column (t3code layout) so the
               right panel is a full-height sibling rather than sitting below it.
             */}
-            <header className="flex h-[var(--workspace-topbar-height,44px)] shrink-0 items-center gap-2 border-b border-border px-3">
+            <header className="flex h-[var(--workspace-topbar-height,44px)] shrink-0 items-center gap-1.5 border-b border-border px-3">
               {!sidebarOpen ? <SidebarToggle /> : null}
               <Link
                 to="/runs"
@@ -428,47 +428,51 @@ function RunDetail() {
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
               />
 
-              <ContextMeter usage={contextUsage} />
-
-              <div className="flex shrink-0 items-center gap-2">
-                <div ref={newRunMenuRef} className="relative flex">
-                  <Button
-                    variant="primary"
-                    onClick={onNewChat}
-                    disabled={!run}
-                    title="Start an empty chat with the same settings"
-                    className="rounded-r-none pr-2.5"
+              <div className="flex shrink-0 items-center gap-0.5">
+                <ContextMeter usage={contextUsage} />
+                {run?.status === 'running' ? (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    aria-label="Cancel run"
+                    title="Cancel run"
+                    className="inline-flex size-7 items-center justify-center rounded-md text-danger transition-colors hover:bg-danger/10"
                   >
-                    <Plus className="h-4 w-4" />
-                    New chat
-                  </Button>
-                  <Button
-                    variant="primary"
+                    <Ban className="size-3.5" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onNewChat}
+                  disabled={!run}
+                  aria-label="New chat"
+                  title="Start an empty chat with the same settings"
+                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+                <div ref={moreMenuRef} className="relative">
+                  <button
+                    type="button"
                     disabled={!run}
-                    aria-label="New run options"
+                    aria-label="More"
                     aria-haspopup="menu"
-                    aria-expanded={newRunMenuOpen}
-                    onClick={() => setNewRunMenuOpen((open) => !open)}
-                    className="rounded-l-none border-l border-l-black/15 px-1.5"
+                    aria-expanded={moreMenuOpen}
+                    title="More"
+                    onClick={() => setMoreMenuOpen((open) => !open)}
+                    className={`inline-flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${
+                      moreMenuOpen
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                    }`}
                   >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </Button>
-                  {newRunMenuOpen ? (
+                    <MoreHorizontal className="size-3.5" />
+                  </button>
+                  {moreMenuOpen ? (
                     <div
                       role="menu"
-                      className="absolute right-0 top-full z-50 mt-1.5 min-w-48 rounded-xl border border-border bg-elevated p-1.5 shadow-2xl shadow-[var(--shadow-primary)]"
+                      className="absolute right-0 top-full z-50 mt-1.5 max-h-[min(24rem,70vh)] min-w-48 overflow-y-auto rounded-xl border border-border bg-elevated p-1.5 shadow-2xl shadow-[var(--shadow-primary)]"
                     >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-foreground transition-colors hover:bg-hover"
-                        onClick={() => {
-                          setNewRunMenuOpen(false)
-                          onNewChat()
-                        }}
-                      >
-                        <Plus className="h-3.5 w-3.5" /> New chat
-                      </button>
                       <button
                         type="button"
                         role="menuitem"
@@ -482,6 +486,8 @@ function RunDetail() {
                         <RotateCcw className="h-3.5 w-3.5" />
                         {startNewRun.isPending ? 'Starting…' : 'Repeat run'}
                       </button>
+                      <ChatDebugMenuItem />
+                      {debug ? <TerminalPaletteMenuItems /> : null}
                     </div>
                   ) : null}
                 </div>
@@ -498,26 +504,11 @@ function RunDetail() {
                     Could not start run
                   </span>
                 ) : null}
-                {run?.status === 'running' ? (
-                  <Button variant="danger" onClick={onStop}>
-                    <Ban className="h-4 w-4" /> Cancel
-                  </Button>
-                ) : null}
-
-                {debug ? <TerminalPalettePicker /> : null}
-                <ChatDebugToggle />
-
-                {/*
-                  The layout controls live in the right panel. Only the reopen
-                  affordance falls back here, so the panel is never stranded shut.
-                */}
                 {!showRight ? (
-                  <div className="flex items-center gap-0.5 border-l border-border pl-2">
-                    <RightPanelToggleControl
-                      rightPanelOpen={false}
-                      onToggle={() => patchLayout({ rightPanelOpen: true, maximized: false })}
-                    />
-                  </div>
+                  <RightPanelToggleControl
+                    rightPanelOpen={false}
+                    onToggle={() => patchLayout({ rightPanelOpen: true, maximized: false })}
+                  />
                 ) : null}
               </div>
             </header>
