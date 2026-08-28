@@ -56,8 +56,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
   }),
   component: AppLayout,
+  notFoundComponent: NotFound,
   shellComponent: RootDocument,
 })
+
+function NotFound() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+      <p className="text-ui-sm text-tier-secondary">This page does not exist.</p>
+      <Link
+        to="/tasks"
+        className="rounded-md border border-border px-2.5 py-1.5 text-ui-sm text-tier-secondary transition-colors hover:bg-hover hover:text-foreground"
+      >
+        Back to Automations
+      </Link>
+    </div>
+  )
+}
 
 const NAV = [
   { to: '/tasks', label: 'Automations', icon: ListChecks },
