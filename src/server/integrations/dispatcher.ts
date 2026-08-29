@@ -15,7 +15,7 @@ import { renderWebhookPrompt, webhookSourceLink } from '../../lib/integrations/p
 import type { CanonicalWebhookEvent } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow, type TaskRow } from '../db.ts'
 import { startRun } from '../executor.ts'
-import { enqueueRun } from '../runQueue.ts'
+import { enqueueRun, workspaceBusy, WORKSPACE_BUSY_MESSAGE } from '../runQueue.ts'
 import { unattendedRefusal } from '../unattendedPreflight.ts'
 import { getIntegration } from './connections.ts'
 import { getWorkspace } from '../workspaces.ts'
@@ -107,6 +107,11 @@ function webhookRefusal(task: TaskRow): string | null {
     | undefined
   if (!runtime) return `Runtime not found: ${task.runtimeId}`
   if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
+  // A live run is expected to make the worktree dirty or switch branches.
+  // Queue that explicit busy condition before health inspection; all other
+  // failures are permanent delivery failures and must not be hidden in the
+  // queue.
+  if (workspaceBusy(task.workspaceId)) return null
   return unattendedRefusal(task, runtime)
 }
 
@@ -188,6 +193,12 @@ function ingestCanonicalEvents(
         runIds.push(runId)
         started.push({ eventType: event.eventType, runId, taskId: task.id })
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (message !== WORKSPACE_BUSY_MESSAGE) {
+          errors.push(`${task.id}: ${message}`)
+          console.error(`[webhook] failed to start task ${task.id}:`, err)
+          continue
+        }
         const queued = enqueueRun({
           taskId: task.id,
           workspaceId: task.workspaceId,
@@ -199,7 +210,6 @@ function ingestCanonicalEvents(
           queuedTaskIds.push(task.id)
           continue
         }
-        const message = err instanceof Error ? err.message : String(err)
         errors.push(`${task.id}: ${message} (not queued: ${queued.reason})`)
         console.error(`[webhook] failed to start task ${task.id}:`, err)
       }

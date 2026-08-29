@@ -10,11 +10,22 @@
  * The rules themselves live in `lib/unattendedGate.ts`; this module only does
  * the lookups those rules need.
  */
-import { requiresGhAuth, unattendedBlockedReason } from '../lib/unattendedGate.ts'
+import {
+  requiresGhAuth,
+  unattendedBlockedReason,
+  workspaceOwnerMessage,
+} from '../lib/unattendedGate.ts'
+import { hasTaskPrompt } from '../lib/taskPrompt.ts'
+import { hasWorkspaceId } from '../lib/workspaceRef.ts'
+import { isWorkspaceReady } from '../lib/workspaceReady.ts'
+import { missingNativeSessionMessage, nativeResumeKindFor } from '../lib/nativeSessions.ts'
 import type { WorkspaceHealth } from '../lib/workspaceHealth.ts'
 import type { RuntimeRow, TaskRow, WorkspaceRow } from './db'
 import { ghStatus } from './git'
+import { checkRuntimeInstalled } from './runtimePath.ts'
+import { nativeSessionExists } from './nativeSessions.ts'
 import { checkWorkspace } from './workspaceHealth'
+import { getUnattendedWorkspaceOwner } from './workspaces.ts'
 
 /** The two automation columns the AFK rules read. */
 export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth'>
@@ -46,8 +57,25 @@ export function unattendedRefusalFor(input: {
  * refuse, or `null` to proceed.
  */
 export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | null {
+  if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
   const checked = checkWorkspace(task.workspaceId)
   if (!checked) return 'Automation workspace is not ready.'
+  if (!isWorkspaceReady(checked.workspace.status)) return 'Automation workspace is not ready.'
+  if (!checkRuntimeInstalled(runtime.bin).installed) return 'Automation runtime is not on PATH.'
+  if (!hasTaskPrompt(task.prompt)) return 'Automation has empty agent instructions.'
+
+  const sessionId = task.resumeSessionId.trim()
+  if (sessionId) {
+    const kind = nativeResumeKindFor(runtime)
+    if (!kind) return 'The selected runtime does not support resuming a conversation.'
+    if (!nativeSessionExists(checked.workspace.path, kind, sessionId)) {
+      return missingNativeSessionMessage(kind)
+    }
+  }
+
+  const owner = getUnattendedWorkspaceOwner(task.workspaceId, task.id)
+  if (owner) return workspaceOwnerMessage(owner.name)
+
   return unattendedRefusalFor({
     task,
     runtime,

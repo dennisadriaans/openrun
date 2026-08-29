@@ -14,7 +14,11 @@ import { assertRunTimeoutMinutes, resolveRunTimeoutMs } from '../lib/runBudget'
 import { assertTaskPrompt, hasTaskPrompt } from '../lib/taskPrompt'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
-import { requiresGhAuth, unattendedBlockedReason } from '../lib/unattendedGate.ts'
+import {
+  requiresGhAuth,
+  unattendedBlockedReason,
+  workspaceOwnerMessage,
+} from '../lib/unattendedGate.ts'
 import { workspaceHealthBlockedReason, type WorkspaceHealth } from '../lib/workspaceHealth.ts'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
@@ -79,7 +83,7 @@ import * as git from './git'
 import { isPullRequestLive, type RunPullRequest } from '../lib/pullRequest'
 import { supportsResume, runtimeKind } from './resume'
 import { bootScheduler, syncTask, unscheduleTask } from './scheduler'
-import { unattendedRefusalFor } from './unattendedPreflight'
+import { unattendedRefusal, unattendedRefusalFor } from './unattendedPreflight'
 import type { TurnEventRow } from '../lib/turnEvents'
 import { parseTurnUsage, type TurnUsage } from '../lib/turnUsage'
 import { assistantTextFromEvents } from './turnEvents'
@@ -94,6 +98,7 @@ import {
   createWorkspace,
   getProject,
   getWorkspace,
+  getUnattendedWorkspaceOwner,
   listWorkspaces,
   resolveWorkspacePath,
 } from './workspaces'
@@ -350,6 +355,15 @@ function assertTaskRuntimeOnPath(runtimeId: string): void {
   const runtime = getRuntime(runtimeId)
   if (!runtime) throw new Error('Runtime not found for task')
   assertRuntimeOnPath(runtime.bin)
+}
+
+/** Unattended verification needs at least one configured check to be meaningful. */
+function assertUnattendedVerificationConfigured(workspaceId: string): void {
+  if (checksForWorkspace(workspaceId).length === 0) {
+    throw new Error(
+      'Cannot enable unattended automation without verification checks. Add a green project check or keep this automation paused; unverified outcomes require an explicit restore or clear.',
+    )
+  }
 }
 
 function nativeSessionValidForTask(task: {
@@ -955,6 +969,13 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
 
   if (input.enabled) assertNativeResume({ resumeSessionId, runtimeId: input.runtimeId, cwd })
 
+  const unattendedTask = Boolean(cron.trim() || webhookIntegrationId)
+  if (input.enabled && unattendedTask) {
+    assertUnattendedVerificationConfigured(workspaceId)
+    const owner = getUnattendedWorkspaceOwner(workspaceId, tid)
+    if (owner) throw new Error(workspaceOwnerMessage(owner.name))
+  }
+
   // Saving as enabled arms the schedule, so it answers to the same AFK rules
   // as the Enable toggle — otherwise the form is a way around them.
   if (input.enabled) {
@@ -1041,6 +1062,19 @@ export function updateTaskWebhook(input: {
     if (!integ) throw new Error('Webhook integration not found')
   }
 
+  // Adding a webhook to an already-enabled automation is also an enable
+  // operation. Do not let this narrow update bypass ownership or the AFK
+  // preflight enforced by the full task form and Enable button.
+  if (row.enabled === 1 && webhookIntegrationId) {
+    assertUnattendedVerificationConfigured(row.workspaceId)
+    const owner = getUnattendedWorkspaceOwner(row.workspaceId, row.id)
+    if (owner) throw new Error(workspaceOwnerMessage(owner.name))
+    const runtime = getRuntime(row.runtimeId)
+    if (!runtime) throw new Error('Runtime not found for automation.')
+    const refused = unattendedRefusal({ ...row, webhookIntegrationId }, runtime)
+    if (refused) throw new Error(refused)
+  }
+
   db.prepare(
     `UPDATE tasks SET webhookIntegrationId = ?, webhookEvents = ?, webhookFilters = ?, updatedAt = ? WHERE id = ?`,
   ).run(
@@ -1063,6 +1097,9 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
   if (enabled) {
     assertSchedulableCron(task.cron)
     assertWorkspaceId(task.workspaceId)
+    if (task.cron.trim() || task.webhookIntegrationId.trim()) {
+      assertUnattendedVerificationConfigured(task.workspaceId)
+    }
     // Inspect the worktree, not just the row: arming an automation against a
     // workspace whose directory is gone used to succeed, and every fire after
     // it recorded an unexplained crash instead of one visible refusal.
@@ -1076,6 +1113,8 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
       runtimeId: task.runtimeId,
       cwd: task.cwd,
     })
+    const owner = getUnattendedWorkspaceOwner(task.workspaceId, task.id)
+    if (owner) throw new Error(workspaceOwnerMessage(owner.name))
     // Arming means "run this while nobody is watching" — hold it to the AFK
     // rules now rather than at 03:20 tomorrow morning.
     if (checked) {
@@ -1182,9 +1221,25 @@ export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
   if (!task) throw new Error('Task not found')
 
+  const active = db
+    .prepare("SELECT id FROM runs WHERE taskId = ? AND status = 'running' LIMIT 1")
+    .get(taskId) as { id: string } | undefined
+  if (active) {
+    throw new Error('Cannot isolate an automation while a run is in progress. Stop it first.')
+  }
+  const queued = db.prepare('SELECT id FROM run_queue WHERE taskId = ? LIMIT 1').get(taskId) as
+    | { id: string }
+    | undefined
+  if (queued) {
+    throw new Error(
+      'Cannot isolate an automation while a run is queued. Let it drain or remove it first.',
+    )
+  }
+
   const current = getWorkspace(assertWorkspaceId(task.workspaceId))
   if (!current) throw new Error('Workspace not found')
-  if (current.kind === 'worktree') {
+  const owner = getUnattendedWorkspaceOwner(current.id, task.id)
+  if (current.kind === 'worktree' && !owner) {
     throw new Error('This automation already has its own worktree.')
   }
   const project = getProject(current.projectId)
