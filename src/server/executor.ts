@@ -224,7 +224,6 @@ function namedBranch(cwd: string): string {
   return branch && branch !== 'HEAD' ? branch : ''
 }
 
-
 function persistRunHeadBranch(runId: string, cwd: string): void {
   const db = getDb()
   const run = db.prepare('SELECT headBranch FROM runs WHERE id = ?').get(runId) as
@@ -2400,7 +2399,9 @@ function releaseOrphanReservationAfterExit(
 export function reconcileOrphanRuns(): { marked: number; killed: number } {
   const db = getDb()
   const orphans = db
-    .prepare("SELECT id, pid, cwd, workspaceId, trigger, taskName FROM runs WHERE status = 'running'")
+    .prepare(
+      "SELECT id, pid, cwd, workspaceId, trigger, taskName FROM runs WHERE status = 'running'",
+    )
     .all() as OrphanRow[]
 
   let killed = 0

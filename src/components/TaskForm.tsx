@@ -1569,8 +1569,7 @@ export function TaskForm({
           <StepLabel n={2}>When it should run</StepLabel>
           <div className="space-y-1.5">
             {v.cron ? (
-              <>
-                <ScheduleTriggerRow
+              <ScheduleTriggerRow
                   cron={v.cron}
                   fireOnce={Boolean(v.fireOnce)}
                   scheduledAt={v.scheduledAt}
@@ -1589,7 +1588,6 @@ export function TaskForm({
                     setTriggerError(null)
                   }}
                 />
-              </>
             ) : null}
 
             {runOnce && !v.cron ? (
