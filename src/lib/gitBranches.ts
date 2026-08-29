@@ -107,6 +107,18 @@ export type WorkspaceBranchSeed = {
   activeRunId?: string | null
 }
 
+/**
+ * Several workspaces can carry the same branch — the main checkout plus a
+ * worktree someone deleted from disk. Rank so a usable row wins the picker
+ * slot; a dead worktree must not shadow a branch that is fine to run on.
+ */
+function branchSeedRank(ws: WorkspaceBranchSeed): number {
+  if (ws.status === 'error') return 3
+  if (ws.status === 'creating') return 2
+  if (ws.kind === 'main') return 0
+  return 1
+}
+
 function workspaceHint(ws: WorkspaceBranchSeed): string | undefined {
   if (ws.kind === 'main') return 'main checkout'
   if (ws.status === 'creating') return 'setting up'
@@ -134,7 +146,8 @@ export function projectBranchChoices(input: {
   const active = input.workspaces.filter((w) => w.status !== 'archived')
   const byBranch = new Map<string, WorkspaceBranchSeed>()
   for (const ws of active) {
-    if (!byBranch.has(ws.branch)) byBranch.set(ws.branch, ws)
+    const existing = byBranch.get(ws.branch)
+    if (!existing || branchSeedRank(ws) < branchSeedRank(existing)) byBranch.set(ws.branch, ws)
   }
 
   const seen = new Set<string>()

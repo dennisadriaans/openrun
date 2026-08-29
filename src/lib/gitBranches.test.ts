@@ -64,6 +64,30 @@ describe('projectBranchChoices', () => {
     assert.equal(rows[0]?.blockedReason, 'setting up')
   })
 
+  it('prefers a usable workspace when duplicate branch rows are stale', () => {
+    const rows = projectBranchChoices({
+      gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
+      workspaces: [
+        { id: 'ws-deleted', branch: 'feat', kind: 'worktree', status: 'error' },
+        { id: 'ws-main', branch: 'feat', kind: 'main', status: 'ready' },
+      ],
+    })
+    assert.equal(rows[0]?.id, 'ws-main')
+    assert.equal(rows[0]?.blockedReason, null)
+  })
+
+  it('does not let a creating duplicate shadow a ready worktree', () => {
+    const rows = projectBranchChoices({
+      gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
+      workspaces: [
+        { id: 'ws-creating', branch: 'feat', kind: 'worktree', status: 'creating' },
+        { id: 'ws-ready', branch: 'feat', kind: 'worktree', status: 'ready' },
+      ],
+    })
+    assert.equal(rows[0]?.id, 'ws-ready')
+    assert.equal(rows[0]?.blockedReason, null)
+  })
+
   it('blocks workspaces that already have an active run', () => {
     const rows = projectBranchChoices({
       gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
