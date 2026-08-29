@@ -295,14 +295,18 @@ function walkFiles(dir: string, acc: string[]): void {
   }
   for (const name of names) {
     const file = join(dir, name)
-    let st: ReturnType<typeof statSync>
+    let st: ReturnType<typeof lstatSync>
     try {
-      st = statSync(file)
+      st = lstatSync(file)
     } catch {
       continue
     }
+    // Codex's store is user-controlled. Do not follow a directory symlink
+    // into another tree (or back into this one), and do not collect a linked
+    // file for a later containment check to discover.
+    if (st.isSymbolicLink()) continue
     if (st.isDirectory()) walkFiles(file, acc)
-    else acc.push(file)
+    else if (st.isFile()) acc.push(file)
   }
 }
 

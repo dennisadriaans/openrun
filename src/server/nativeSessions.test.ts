@@ -6,22 +6,33 @@ import { after, before, describe, it } from 'node:test'
 import { encodeClaudeProjectDir } from '../lib/nativeSessions.ts'
 import { importNativeTranscript } from './nativeImport.ts'
 import { readNativeTranscript } from './nativeTranscript.ts'
-import { claudeSessionFile, nativeSessionExists, safeNativeSessionFile } from './nativeSessions.ts'
+import {
+  claudeSessionFile,
+  listNativeSessionsForKind,
+  nativeSessionExists,
+  safeNativeSessionFile,
+} from './nativeSessions.ts'
 
 const home = mkdtempSync(join(tmpdir(), 'openrun-native-home-'))
 const workspace = mkdtempSync(join(home, 'workspace-'))
 const previousHome = process.env.HOME
 const previousOpenrunHome = process.env.OPENRUN_HOME
+const previousCodexHome = process.env.CODEX_HOME
 process.env.HOME = home
 process.env.OPENRUN_HOME = join(home, '.openrun')
+process.env.CODEX_HOME = join(home, '.codex')
 
 const claudeDir = join(home, '.claude', 'projects', encodeClaudeProjectDir(workspace))
 const outsideDir = join(home, '.claude', 'projects', `${basename(claudeDir)}-evil`)
+const codexSessions = join(home, '.codex', 'sessions')
+const codexOutsideDir = join(home, 'codex-outside')
 const validId = '11111111-1111-4111-8111-111111111111'
 
 before(() => {
   mkdirSync(claudeDir, { recursive: true })
   mkdirSync(outsideDir, { recursive: true })
+  mkdirSync(codexSessions, { recursive: true })
+  mkdirSync(codexOutsideDir, { recursive: true })
 })
 
 after(() => {
@@ -29,6 +40,8 @@ after(() => {
   else process.env.HOME = previousHome
   if (previousOpenrunHome === undefined) delete process.env.OPENRUN_HOME
   else process.env.OPENRUN_HOME = previousOpenrunHome
+  if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+  else process.env.CODEX_HOME = previousCodexHome
   rmSync(home, { recursive: true, force: true })
 })
 
@@ -125,5 +138,32 @@ describe('Claude native session path safety', () => {
         }),
       /not a regular file inside the expected session directory/,
     )
+  })
+})
+
+describe('Codex native session discovery path safety', () => {
+  it('skips outside and cyclic symlink entries during listing and probing', () => {
+    const sessionId = '55555555-5555-4555-8555-555555555555'
+    const filename = `rollout-2026-08-29T10-00-00-${sessionId}.jsonl`
+    const outsideFile = join(codexOutsideDir, filename)
+    writeFileSync(
+      outsideFile,
+      [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: { id: sessionId, cwd: workspace, timestamp: '2026-08-29T10:00:00.000Z' },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: { type: 'user_message', message: 'Outside chat' },
+        }),
+      ].join('\n'),
+    )
+    symlinkSync(codexOutsideDir, join(codexSessions, 'outside-dir'))
+    symlinkSync(outsideFile, join(codexSessions, `direct-${sessionId}.jsonl`))
+    symlinkSync(codexSessions, join(codexSessions, 'loop'))
+
+    assert.deepEqual(listNativeSessionsForKind(workspace, 'codex'), [])
+    assert.equal(nativeSessionExists(workspace, 'codex', sessionId), false)
   })
 })

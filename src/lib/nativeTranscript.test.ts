@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import type { ParsedTurnEvent } from './agentEvents/types.ts'
 import {
   MAX_IMPORT_EVENTS,
+  omittedTurnsNote,
   parseClaudeTranscript,
   trimTranscript,
   type TranscriptTurn,
@@ -72,34 +73,49 @@ describe('parseClaudeTranscript', () => {
     assert.equal(turns[0]?.events[0]?.kind, 'assistant')
   })
 
-  it('does not allow one oversized turn to exceed the event cap', () => {
+  it('omits an oversized turn instead of orphaning its tool events', () => {
     const turns: TranscriptTurn[] = [
       {
         prompt: 'old',
         promptAt: 1,
-        events: Array.from({ length: 3 }, (_, i) => event(`old-${i}`)),
+        events: [event('old')],
         usage: null,
         endedAt: 2,
       },
       {
         prompt: 'new',
         promptAt: 3,
-        events: Array.from({ length: MAX_IMPORT_EVENTS + 1 }, (_, i) => event(`new-${i}`)),
+        events: [
+          {
+            kind: 'tool_start',
+            payload: { toolCallId: 'tool-1', name: 'Read', status: 'in_progress' },
+          },
+          {
+            kind: 'tool_result',
+            payload: { toolCallId: 'tool-1', status: 'completed', content: 'ok' },
+          },
+          { kind: 'turn_done', payload: { stopReason: 'end_turn' } },
+          event('more history'),
+        ],
         usage: null,
         endedAt: 4,
       },
     ]
 
-    const trimmed = trimTranscript(turns)
-    assert.equal(trimmed.turns.length, 1)
-    assert.equal(trimmed.turns[0]?.prompt, 'new')
-    assert.equal(trimmed.turns[0]?.events.length, MAX_IMPORT_EVENTS)
-    assert.equal(trimmed.dropped, 1)
+    const trimmed = trimTranscript(turns, { maxEvents: 3 })
+    assert.equal(trimmed.turns.length, 0)
+    assert.equal(trimmed.dropped, 2)
+    assert.equal(trimmed.droppedEvents, 5)
+    assert.match(
+      omittedTurnsNote(trimmed.dropped, trimmed.droppedEvents),
+      /2 earlier turns and 5 events/,
+    )
+    assert.ok(trimmed.turns.every((turn) => turn.events.length <= 3))
 
-    const small = trimTranscript(turns, { maxTurns: 1, maxEvents: 2 })
+    const small = trimTranscript(turns, { maxTurns: 1, maxEvents: MAX_IMPORT_EVENTS })
     assert.equal(small.turns.length, 1)
-    assert.equal(small.turns[0]?.events.length, 2)
-    assert.equal(small.turns[0]?.events[0]?.payload.text, `new-${MAX_IMPORT_EVENTS - 1}`)
-    assert.equal(small.turns[0]?.events[1]?.payload.text, `new-${MAX_IMPORT_EVENTS}`)
+    assert.equal(small.turns[0]?.prompt, 'new')
+    assert.equal(small.dropped, 1)
+    assert.equal(small.droppedEvents, 1)
   })
 })

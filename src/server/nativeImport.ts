@@ -92,7 +92,7 @@ export function importNativeTranscript(input: {
   label: string
   before: number
 }): NativeImportResult {
-  const { turns, dropped } = trimTranscript(
+  const { turns, dropped, droppedEvents } = trimTranscript(
     readNativeTranscript(input.cwd, input.kind, input.sessionId),
   )
 
@@ -108,7 +108,7 @@ export function importNativeTranscript(input: {
 
   const timestampRows: ImportTimestampInput[] = []
   timestampRows.push({})
-  if (dropped > 0) timestampRows.push({})
+  if (dropped > 0 || droppedEvents > 0) timestampRows.push({})
   for (const turn of turns) {
     if (turn.prompt) timestampRows.push({ sourceAt: turn.promptAt })
     if (turn.events.length > 0) {
@@ -144,7 +144,7 @@ export function importNativeTranscript(input: {
 
   const write = db.transaction(() => {
     note(resumedNativeChatStub(input.kind, input.label))
-    if (dropped > 0) note(omittedTurnsNote(dropped))
+    if (dropped > 0 || droppedEvents > 0) note(omittedTurnsNote(dropped, droppedEvents))
 
     for (const turn of turns) {
       if (turn.prompt) {

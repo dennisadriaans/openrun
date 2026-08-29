@@ -128,11 +128,18 @@ export function parseClaudeTranscript(text: string): TranscriptTurn[] {
   return turns.filter((turn) => turn.prompt.length > 0 || turn.events.length > 0)
 }
 
-/** Drop the oldest turns until the transcript fits the import caps. */
+/**
+ * Drop the oldest turns until the transcript fits the import caps.
+ *
+ * Turns are atomic for the event cap: an oversized turn is omitted along with
+ * every older turn instead of being sliced through a tool_start/tool_result
+ * pair or its final turn_done. This keeps the imported ACP event stream
+ * structurally coherent while still respecting the global cap.
+ */
 export function trimTranscript(
   turns: readonly TranscriptTurn[],
   limits?: { maxTurns?: number; maxEvents?: number },
-): { turns: TranscriptTurn[]; dropped: number } {
+): { turns: TranscriptTurn[]; dropped: number; droppedEvents: number } {
   const maxTurns = limits?.maxTurns ?? MAX_IMPORT_TURNS
   const maxEvents = limits?.maxEvents ?? MAX_IMPORT_EVENTS
   const kept: TranscriptTurn[] = []
@@ -143,19 +150,28 @@ export function trimTranscript(
     const remaining = maxEvents - events
     if (remaining <= 0) break
     if (turn.events.length > remaining) {
-      // Keep the newest part of an oversized turn, including its final event
-      // when possible. A single turn must not defeat the global event cap.
-      kept.unshift({ ...turn, events: turn.events.slice(-remaining) })
-      events += remaining
+      // A partial turn can orphan a tool result or turn_done. Omit this turn
+      // and all older history; the result remains a contiguous newest suffix.
       break
     }
     kept.unshift(turn)
     events += turn.events.length
   }
-  return { turns: kept, dropped: turns.length - kept.length }
+  const dropped = turns.length - kept.length
+  const droppedEvents = turns
+    .slice(0, dropped)
+    .reduce((count, turn) => count + turn.events.length, 0)
+  return { turns: kept, dropped, droppedEvents }
 }
 
 /** System-message note for the turns that did not fit. */
-export function omittedTurnsNote(dropped: number): string {
-  return `${dropped} earlier turn${dropped === 1 ? '' : 's'} not shown — open the chat in the CLI for the full history.`
+export function omittedTurnsNote(dropped: number, droppedEvents = 0): string {
+  const turns = `${dropped} earlier turn${dropped === 1 ? '' : 's'}`
+  if (droppedEvents <= 0) {
+    return `${turns} not shown — open the chat in the CLI for the full history.`
+  }
+  if (dropped <= 0) {
+    return `${droppedEvents} event${droppedEvents === 1 ? '' : 's'} not shown — open the chat in the CLI for the full history.`
+  }
+  return `${turns} and ${droppedEvents} event${droppedEvents === 1 ? '' : 's'} not shown — open the chat in the CLI for the full history.`
 }
