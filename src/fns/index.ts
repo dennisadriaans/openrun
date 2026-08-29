@@ -271,6 +271,13 @@ export const removeRun = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+export const deleteRuns = createServerFn({ method: 'POST' })
+  .validator((d: { ids: string[] }) => d)
+  .handler(async ({ data }) => {
+    ;(await core()).deleteRuns(data.ids)
+    return { ok: true }
+  })
+
 export const getLatestRunForWorkspace = createServerFn({ method: 'GET' })
   .validator((d: { workspaceId: string }) => d)
   .handler(async ({ data }) => (await core()).getLatestRunForWorkspace(data.workspaceId))

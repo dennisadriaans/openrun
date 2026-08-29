@@ -5,7 +5,7 @@
  * Panel chrome adapted from t3code ChatView (MIT, T3 Tools Inc.).
  */
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowLeft, Ban, ChevronRight, MoreHorizontal, Plus, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Ban, ChevronRight, MoreHorizontal, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
@@ -178,7 +178,9 @@ function RunDetail() {
     setSelectedPath(null)
     setReviewPath(null)
     setConfirmUndoAll(false)
-  }, [runId])
+    setConfirmDelete(false)
+    remove.reset()
+  }, [remove.reset, runId])
 
   useEffect(() => {
     if (!moreMenuOpen) return
@@ -405,6 +407,27 @@ function RunDetail() {
     setMoreMenuOpen(false)
   }
 
+  const closeDelete = () => {
+    remove.reset()
+    setConfirmDelete(false)
+  }
+
+  const openDelete = () => {
+    remove.reset()
+    setMoreMenuOpen(false)
+    setConfirmDelete(true)
+  }
+
+  const confirmRunDelete = async () => {
+    if (!run || runBusy) return
+    try {
+      await remove.mutateAsync(run.id)
+      navigate({ to: '/runs' })
+    } catch {
+      // Keep the modal open so the accessible error can be retried.
+    }
+  }
+
   const submitNewBranch = async () => {
     if (!project || !newBranchName.trim()) return
     try {
@@ -518,6 +541,25 @@ function RunDetail() {
                         <RotateCcw className="h-3.5 w-3.5" />
                         {startNewRun.isPending ? 'Starting…' : 'Repeat run'}
                       </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={runBusy}
+                        title={
+                          runBusy ? 'Cancel the run before deleting' : 'Permanently delete this run'
+                        }
+                        aria-label={runBusy ? 'Cancel the run before deleting' : 'Delete run'}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                        onClick={openDelete}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete run
+                      </button>
+                      {runBusy ? (
+                        <p className="px-2 py-1 text-ui-xs text-danger">
+                          Cancel the run before deleting
+                        </p>
+                      ) : null}
                       <ChatDebugMenuItem />
                       {debug ? <TerminalPaletteMenuItems /> : null}
                     </div>
@@ -830,28 +872,28 @@ function RunDetail() {
       ) : null}
 
       {confirmDelete && run ? (
-        <Modal title="Delete run" onClose={() => setConfirmDelete(false)}>
+        <Modal title="Delete run" onClose={closeDelete}>
           <div className="space-y-4">
             <p className="text-ui-base text-tier-secondary">
               Permanently delete <span className="text-foreground">{run.taskName}</span>? This
               cannot be undone.
             </p>
             {remove.isError ? (
-              <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">
+              <p
+                role="alert"
+                className="rounded-md border border-danger px-3 py-2 text-ui-base text-danger"
+              >
                 {remove.error instanceof Error ? remove.error.message : String(remove.error)}
               </p>
             ) : null}
             <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+              <Button variant="ghost" onClick={closeDelete}>
                 Cancel
               </Button>
               <Button
                 variant="danger"
-                disabled={remove.isPending}
-                onClick={async () => {
-                  await remove.mutateAsync(run.id)
-                  navigate({ to: '/runs' })
-                }}
+                disabled={remove.isPending || runBusy}
+                onClick={() => void confirmRunDelete()}
               >
                 {remove.isPending ? 'Deleting…' : 'Delete run'}
               </Button>
