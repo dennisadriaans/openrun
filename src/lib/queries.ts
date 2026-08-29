@@ -822,7 +822,8 @@ export function useIsolateTaskWorkspace() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => fns.isolateTaskWorkspace({ data: { id } }),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['task', id] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['workspaces'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
@@ -835,7 +836,8 @@ export function useRestoreTaskWorkspace() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => fns.restoreTaskWorkspace({ data: { id } }),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['task', id] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['workspaces'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
@@ -848,7 +850,8 @@ export function useClearWorkspaceQuarantine() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => fns.clearTaskWorkspaceQuarantine({ data: { id } }),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['task', id] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['workspaces'] })
     },
@@ -856,11 +859,12 @@ export function useClearWorkspaceQuarantine() {
 }
 
 /** Run the project's checks against a workspace before anything is armed on it. */
-export function useRunWorkspaceBaseline() {
+export function useRunWorkspaceBaseline(taskId?: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (workspaceId: string) => fns.runWorkspaceBaseline({ data: { workspaceId } }),
-    onSuccess: () => {
+    onSuccess: (_data, workspaceId) => {
+      if (taskId) qc.invalidateQueries({ queryKey: ['task', taskId] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['workspaces'] })
     },

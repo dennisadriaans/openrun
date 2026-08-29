@@ -13,6 +13,8 @@
  * browser can render it and `node:test` can cover it without a spawn.
  */
 import { missingRuntimeBinaryMessage, normalizeBin } from './runtimeBinary.ts'
+import { parseRuntimeMode, type RuntimeMode } from './runtimeMode.ts'
+import { parseTransport, type RuntimeTransport } from './acpTransport.ts'
 
 /** Stand-in for the real prompt, so a preview never dumps prompt text in argv. */
 export const PREVIEW_PROMPT = '<prompt>'
@@ -29,7 +31,7 @@ export type ArgOrigin = 'template' | 'agentops'
 export type PreviewArg = { value: string; origin: ArgOrigin }
 
 /** How the prompt reaches the child process. */
-export type PromptChannel = 'stdin' | 'promptFile' | 'argv'
+export type PromptChannel = 'stdin' | 'promptFile' | 'argv' | 'acp'
 
 export type CommandPreviewWarningCode =
   | 'prompt-not-delivered'
@@ -45,6 +47,10 @@ export type CommandPreviewWarning = {
 
 export type CommandPreview = {
   bin: string
+  /** Normalized transport used for this launch. */
+  transport: RuntimeTransport
+  /** Normalized access mode used for this launch. */
+  runtimeMode: RuntimeMode
   /** Final argv, each token tagged with where it came from. */
   args: PreviewArg[]
   /** Copy-pasteable command line (same quoting as the run's stored command). */
@@ -134,7 +140,9 @@ export function promptChannels(input: {
   stdinText: string | null
   promptFileContents: string | null
   promptToken?: string
+  transport?: string | null
 }): PromptChannel[] {
+  if (parseTransport(input.transport) === 'acp') return ['acp']
   const token = input.promptToken ?? PREVIEW_PROMPT
   const channels: PromptChannel[] = []
   if (input.stdinText !== null) channels.push('stdin')
@@ -149,6 +157,7 @@ const CHANNEL_LABELS: Record<PromptChannel, string> = {
   stdin: 'stdin',
   promptFile: 'a temp prompt file',
   argv: 'a command-line argument',
+  acp: 'an ACP session/prompt message',
 }
 
 /** e.g. `Prompt is sent on stdin` / `Prompt is never sent`. */
@@ -223,18 +232,25 @@ export function buildCommandPreview(input: {
   installed: boolean
   binaryPath?: string
   promptToken?: string
+  transport?: string | null
+  runtimeMode?: string | null
 }): CommandPreview {
   const bin = normalizeBin(input.bin)
+  const transport = parseTransport(input.transport)
+  const runtimeMode = parseRuntimeMode(input.runtimeMode)
   const { args, droppedTemplateArgs } = alignArgs(input.templateArgs, input.finalArgs)
   const channels = promptChannels({
     args: input.finalArgs,
     stdinText: input.stdinText,
     promptFileContents: input.promptFileContents,
     promptToken: input.promptToken,
+    transport,
   })
 
   return {
     bin,
+    transport,
+    runtimeMode,
     args,
     commandLine: formatCommandLine(bin, input.finalArgs),
     channels,

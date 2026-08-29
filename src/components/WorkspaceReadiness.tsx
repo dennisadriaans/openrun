@@ -9,6 +9,11 @@
  */
 import { AlertTriangle, CheckCircle2, GitBranch, Loader2, RotateCcw, Split } from 'lucide-react'
 import type { TaskWithMeta } from '../fns'
+import { hasUnattendedTrigger } from '../lib/taskReadiness'
+import { taskWorkspaceChangeBlockedReason } from '../lib/taskIsolationGate'
+import { missingWorkspaceMessage } from '../lib/workspaceRef'
+import { workspaceHealthMessage } from '../lib/workspaceHealth'
+import { workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { Button, Card } from './ui'
 import {
   useClearWorkspaceQuarantine,
@@ -33,14 +38,23 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
   const isolate = useIsolateTaskWorkspace()
   const restore = useRestoreTaskWorkspace()
-  const baseline = useRunWorkspaceBaseline()
+  const baseline = useRunWorkspaceBaseline(task.id)
   const clearQuarantine = useClearWorkspaceQuarantine()
 
   const health = task.workspaceHealth
-  const blocked = task.unattendedBlockedReason
+  const blockers = task.readinessBlockers ?? []
+  const blocked = blockers.length > 0
   const sharedCheckout = task.workspaceKind === 'main' && task.requireIsolation === 1
   const canRestore = task.workspaceKind === 'worktree'
   const quarantined = health?.code === 'blocked'
+  const activityBlocked = taskWorkspaceChangeBlockedReason(task)
+  const baselineBlocked = !task.workspaceValid
+    ? missingWorkspaceMessage()
+    : !task.workspaceReady
+      ? workspaceNotReadyMessage(task.workspaceStatus)
+      : health && health.code !== 'ok'
+        ? workspaceHealthMessage(health)
+        : null
   const pending =
     isolate.isPending || restore.isPending || baseline.isPending || clearQuarantine.isPending
 
@@ -55,12 +69,25 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
           <CheckCircle2 className="h-4 w-4 text-success" />
         )}
         <h2 className="text-ui-sm font-medium text-tier-secondary">
-          {blocked ? 'Not safe to run unattended' : 'Ready for unattended runs'}
+          {blocked
+            ? 'Not ready for unattended runs'
+            : hasUnattendedTrigger(task)
+              ? 'Ready for unattended runs'
+              : 'Ready to run'}
         </h2>
       </div>
 
       {blocked ? (
-        <p className="mb-3 text-ui-sm leading-relaxed text-tier-secondary">{blocked}</p>
+        <ul className="mb-3 space-y-1 text-ui-sm leading-relaxed text-tier-secondary">
+          {blockers.map((blocker, index) => (
+            <li key={`${blocker.id}-${index}`} className="flex gap-2">
+              <span aria-hidden className="text-danger">
+                •
+              </span>
+              <span>{blocker.message}</span>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       <div className="space-y-1">
@@ -100,9 +127,9 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
         {sharedCheckout ? (
           <Button
             variant="primary"
-            disabled={pending}
+            disabled={pending || activityBlocked !== null}
             onClick={() => isolate.mutate(task.id, { onError })}
-            title="Create a worktree and branch for this automation alone"
+            title={activityBlocked ?? 'Create a worktree and branch for this automation alone'}
           >
             {isolate.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -116,7 +143,7 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
         {canRestore ? (
           <Button
             variant="ghost"
-            disabled={pending}
+            disabled={pending || activityBlocked !== null}
             onClick={() => {
               if (
                 !confirm(
@@ -127,7 +154,7 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
               }
               restore.mutate(task.id, { onError })
             }}
-            title="Reset the worktree and lift any quarantine"
+            title={activityBlocked ?? 'Reset the worktree and lift any quarantine'}
           >
             {restore.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -141,9 +168,9 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
         {quarantined ? (
           <Button
             variant="ghost"
-            disabled={pending}
+            disabled={pending || activityBlocked !== null}
             onClick={() => clearQuarantine.mutate(task.id, { onError })}
-            title="Keep the files, but stop refusing unattended runs here"
+            title={activityBlocked ?? 'Keep the files, but stop refusing unattended runs here'}
           >
             {clearQuarantine.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -156,7 +183,7 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
 
         <Button
           variant="ghost"
-          disabled={pending || !task.workspaceValid}
+          disabled={pending || activityBlocked !== null || baselineBlocked !== null}
           onClick={() =>
             baseline.mutate(task.workspaceId, {
               onError,
@@ -167,7 +194,11 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
               },
             })
           }
-          title="Run the project's checks here before arming anything against it"
+          title={
+            activityBlocked ??
+            baselineBlocked ??
+            "Run the project's checks here before arming anything against it"
+          }
         >
           {baseline.isPending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

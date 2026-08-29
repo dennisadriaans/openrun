@@ -265,8 +265,9 @@ function RuntimeModal({
         bin: value.bin,
         argsTemplate: value.argsTemplate,
         promptViaStdin: value.promptViaStdin,
+        transport: value.transport,
       }),
-      [value.bin, value.argsTemplate, value.promptViaStdin],
+      [value.bin, value.argsTemplate, value.promptViaStdin, value.transport],
     ),
   )
   const { data: preview, isFetching } = useCommandPreview(draft)
@@ -372,11 +373,6 @@ function RuntimeModal({
                 </span>
               </span>
             </label>
-            <CommandPreview
-              preview={preview?.preview}
-              error={preview?.error}
-              isLoading={isFetching}
-            />
           </>
         ) : (
           <div className="rounded-lg border border-border bg-chrome/60 px-3 py-2 text-ui-sm text-tier-tertiary">
@@ -385,6 +381,11 @@ function RuntimeModal({
             launch the agent.
           </div>
         )}
+        <CommandPreview
+          preview={preview?.preview}
+          error={preview?.error}
+          isLoading={isFetching}
+        />
         <label className="flex items-center gap-2.5">
           <input
             type="checkbox"
