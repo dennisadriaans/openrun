@@ -4,7 +4,7 @@
  * Safe to boot when unsigned — startCloudRelay no-ops without a session.
  */
 import { restartCloudRelay, startCloudRelay, stopCloudRelay } from './relay.ts'
-import { signOutCloud } from './login.ts'
+import { disconnectCloud } from './login.ts'
 import { forgetCloudProviders } from './providers.ts'
 
 export { getCloudStatus } from './status.ts'
@@ -35,7 +35,7 @@ export function bootCloud(): void {
 
 export async function signOutAndDisconnect(): Promise<void> {
   stopCloudRelay()
-  signOutCloud()
+  await disconnectCloud()
   forgetCloudProviders()
 }
 
