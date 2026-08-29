@@ -1,41 +1,31 @@
 <!--
 Thanks for contributing. Read AGENTS.md first if you haven't — it holds the
 module boundaries and hard rules that most review comments come from.
+
+The PR title becomes the commit on main (squash). Make it a conventional commit:
+`type(scope): summary`, lowercase imperative, no trailing period, ≤ 60 chars.
+
+Keep these three sections and this order. Don't add others, and don't credit an
+agent anywhere — no assistant co-author trailers, no "Generated with" footers.
 -->
 
-## What this changes
+## Summary
 
-<!-- One or two sentences, from a user's point of view. -->
+<!-- Two to four bullets, from a user's point of view. What the change does,
+     not which files moved. Then the issues it closes, one bare line each
+     (`Closes #12`) — or `Refs #12` if it only advances them. Delete the line
+     if there is no issue. -->
 
-## Why
-
-<!-- The problem. Link the GitHub issue if there is one. -->
+-
 
 Closes #
 
-## How it works
+## Test plan
 
-<!-- Only if the approach isn't obvious from the diff. Note anything you
-     considered and rejected. -->
+<!-- Unchecked boxes a reviewer can actually perform: which page, which runtime,
+     which action, what you expect to see, plus the edge case you fixed.
+     Screenshots for UI. Not the CI list — CI already runs `pnpm test`,
+     `pnpm typecheck` and `pnpm build`. Tick a box only once you have
+     performed it. -->
 
-## Checks
-
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm test` passes
-- [ ] `pnpm build` passes (catches server code leaking into the client bundle)
-- [ ] Added a `changelog.d/` entry in the existing negative-relief voice
-      ("You no longer …"), or this change is not user-facing
-- [ ] New rule module in `src/lib/` has a colocated `*.test.ts`
-- [ ] New refuse condition is mirrored in the matching gate module, so the UI
-      disables and explains instead of failing after the click
-- [ ] `src/routeTree.gen.ts` was regenerated with `pnpm generate-routes`, not
-      hand-edited (or is untouched)
-
-## Scope
-
-- [ ] This runs entirely on the user's machine (no new hosted dependency, no
-      model API key, no multi-tenant state)
-
-## Testing
-
-<!-- What you actually ran. Which runtime, which OS. Screenshots for UI. -->
+- [ ]
