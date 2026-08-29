@@ -1120,10 +1120,20 @@ export function createPullRequest(input: {
 
 export type WorktreeEntry = { path: string; branch: string; head: string; bare: boolean }
 
+export type WorktreeListResult = {
+  ok: boolean
+  entries: WorktreeEntry[]
+}
+
 /** Parse `git worktree list --porcelain`; empty when the command fails (e.g. path not a repo). */
 export function listWorktrees(repoPath: string): WorktreeEntry[] {
+  return inspectWorktrees(repoPath).entries
+}
+
+/** Preserve command failure so reconciliation never treats it as an empty inventory. */
+export function inspectWorktrees(repoPath: string): WorktreeListResult {
   const res = git(repoPath, ['worktree', 'list', '--porcelain'])
-  if (!res.ok) return []
+  if (!res.ok) return { ok: false, entries: [] }
 
   const entries: WorktreeEntry[] = []
   // Records are blank-line separated; each line is `<key>[ <value>]`.
@@ -1157,7 +1167,7 @@ export function listWorktrees(repoPath: string): WorktreeEntry[] {
     }
   }
   flush()
-  return entries
+  return { ok: true, entries }
 }
 
 /**

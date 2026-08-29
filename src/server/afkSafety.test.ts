@@ -238,6 +238,10 @@ describe('AFK safety core boundaries', () => {
         webhookIntegrationId: 'afk-integration',
       }),
     )
+    assert.match(
+      second.readinessBlockers.find((blocker) => blocker.id === 'unattended')?.message ?? '',
+      /already assigned.*First owner/i,
+    )
     assert.throws(() => core.setTaskEnabled(second.id, true), /already assigned.*First owner/i)
     assert.throws(
       () =>
@@ -306,25 +310,36 @@ describe('AFK safety core boundaries', () => {
     )
   })
 
-  it('rejects isolation while the task has either a running or queued row', () => {
+  it('rejects the primary checkout as an agent workspace', () => {
     seed({ kind: 'main' })
-    const task = core.upsertTask(taskInput({ name: 'Isolation task' }))
+    assert.throws(
+      () => core.upsertTask(taskInput({ name: 'Primary checkout task' })),
+      /isolated worktree/i,
+    )
+  })
+
+  it('rejects changing the saved workspace while the task is active', () => {
+    const task = core.upsertTask(taskInput({ name: 'Moving task' }))
     const db = getDb()
+    db.prepare(
+      `INSERT INTO workspaces
+       (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, baseCommit, createdAt, archivedAt)
+       VALUES ('afk-workspace-2', 'afk-project', 'Second workspace', 'main', ?, 'main', 'ready', '', NULL, '', 2, NULL)`,
+    ).run(repo)
     db.prepare(
       `INSERT INTO runs
        (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid,
         exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot)
-       VALUES ('isolation-running', ?, 'Isolation', 'afk-runtime', 'manual', 'running', '', ?, 'afk-workspace', NULL,
+       VALUES ('moving-running', ?, 'Moving task', 'afk-runtime', 'manual', 'running', '', ?, 'afk-workspace', NULL,
                NULL, '', '', 1, NULL, '', 'main', '')`,
-    ).run(task.id, repo)
-    assert.throws(() => core.isolateTaskWorkspace(task.id), /run is in progress/i)
+    ).run(task.id, worktree)
 
-    db.prepare("DELETE FROM runs WHERE id = 'isolation-running'").run()
-    db.prepare(
-      `INSERT INTO run_queue
-       (id, taskId, workspaceId, trigger, prompt, sourceProvider, sourceUrl, sourceLabel, scheduleFireId, queuedAt)
-       VALUES ('isolation-queued', ?, 'afk-workspace', 'schedule', '', '', '', '', '', 1)`,
-    ).run(task.id)
-    assert.throws(() => core.isolateTaskWorkspace(task.id), /run is queued/i)
+    assert.throws(
+      () =>
+        core.upsertTask(
+          taskInput({ id: task.id, name: task.name, workspaceId: 'afk-workspace-2' }),
+        ),
+      /run is in progress/i,
+    )
   })
 })

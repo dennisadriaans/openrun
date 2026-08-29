@@ -9,6 +9,7 @@ import { duration, relativeTime } from '../lib/format'
 import { useDeleteTask, useRunNow, useRuns, useTask } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
 import { taskFormInitial } from '../lib/taskFormInitial'
+import { taskWorkspaceChangeBlockedReason } from '../lib/taskIsolationGate'
 
 export const Route = createFileRoute('/tasks/$taskId')({
   component: TaskDetail,
@@ -93,14 +94,14 @@ function TaskDetail() {
       <TaskForm
         key={task.id}
         initial={taskFormInitial(task)}
+        readiness={<WorkspaceReadiness task={task} />}
+        workspaceChangeBlockedReason={taskWorkspaceChangeBlockedReason(task)}
         onCancel={() => navigate({ to: '/tasks' })}
         onSaved={() => {
           qc.invalidateQueries({ queryKey: ['task', taskId] })
           qc.invalidateQueries({ queryKey: ['tasks'] })
         }}
       />
-
-      <WorkspaceReadiness task={task} />
 
       {runs && runs.length > 0 ? (
         <section className="mx-auto mt-10 max-w-3xl border-t border-[var(--border-quaternary)] pt-6">

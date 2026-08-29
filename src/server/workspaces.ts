@@ -14,14 +14,19 @@
  * the user's primary checkout clean, and means archiving a workspace can never
  * accidentally remove something the user placed inside their repo.
  *
- * A registered project's primary checkout is also modeled as a workspace, with
- * `kind='main'` — that's the one shared with the user's own editor, so its
- * diffs include their in-progress edits. A managed (app-cloned) project has no
- * such checkout to share, so it never gets a `kind='main'` row; every unit of
- * work against it gets its own worktree from the start.
+ * The primary checkout is project metadata, never an agent workspace. Every
+ * run executes in a separate Git worktree.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
@@ -76,6 +81,14 @@ function id(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 }
 
+function canonicalPath(value: string): string {
+  try {
+    return realpathSync(value)
+  } catch {
+    return path.resolve(value)
+  }
+}
+
 export type ProjectWithMeta = ProjectRow & {
   /** Count of this project's workspaces excluding archived ones. */
   workspaceCount: number
@@ -85,10 +98,123 @@ export type ProjectWithMeta = ProjectRow & {
 
 export type WorkspaceWithMeta = WorkspaceRow & {
   projectName: string
+  /** Branch stored when the workspace was created, before any manual drift. */
+  configuredBranch: string
+  /** Branch currently checked out on disk; empty when it cannot be inspected. */
+  actualBranch: string
+  /** Whether the recorded workspace directory still exists on disk. */
+  exists: boolean
   dirty: boolean
   ahead: number
   /** id of a run with status='running' in this workspace, or null when free. */
   activeRunId: string | null
+}
+
+/**
+ * Make Git's registered worktrees the workspace inventory source of truth.
+ * Database rows only add setup, quarantine, and history metadata.
+ */
+export function reconcileWorkspaces(projectId?: string): void {
+  const db = getDb()
+  const projects = (
+    projectId
+      ? db.prepare('SELECT * FROM projects WHERE id = ?').all(projectId)
+      : db.prepare('SELECT * FROM projects').all()
+  ) as ProjectRow[]
+  const insert = db.prepare(
+    `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
+     VALUES (@id, @projectId, @name, @branch, @path, 'worktree', 'ready', '', NULL, '', '', 0, @baseCommit, @createdAt, NULL)`,
+  )
+  const revive = db.prepare(
+    `UPDATE workspaces
+     SET name = ?, branch = ?, status = 'ready', setupLog = '', setupExitCode = NULL,
+         blockedKind = '', blockedReason = '', blockedAt = 0, baseCommit = ?, archivedAt = NULL
+     WHERE id = ?`,
+  )
+  const references = db.prepare(
+    `SELECT
+       EXISTS(SELECT 1 FROM tasks WHERE workspaceId = ?) AS hasTask,
+       EXISTS(SELECT 1 FROM runs WHERE workspaceId = ?) AS hasRun`,
+  )
+  const archive = db.prepare(
+    "UPDATE workspaces SET status = 'archived', archivedAt = ? WHERE id = ?",
+  )
+  const remove = db.prepare('DELETE FROM workspaces WHERE id = ?')
+
+  for (const project of projects) {
+    if (!existsSync(project.path) || !git.isRepo(project.path)) continue
+    const inventory = git.inspectWorktrees(project.path)
+    if (!inventory.ok) continue
+
+    const primaryPath = canonicalPath(project.path)
+    const primaryBranch = git.currentBranch(project.path)
+    const registered = inventory.entries.filter(
+      (entry) =>
+        !entry.bare &&
+        canonicalPath(entry.path) !== primaryPath &&
+        // Some repository layouts (notably submodules with core.worktree)
+        // report the primary entry using the common Git-directory path. The
+        // branch checked out at project.path is still authoritative, and Git
+        // cannot have that branch checked out in a second worktree anyway.
+        entry.branch !== primaryBranch,
+    )
+    const registeredPaths = new Set(registered.map((entry) => canonicalPath(entry.path)))
+    const recorded = db
+      .prepare("SELECT * FROM workspaces WHERE projectId = ? AND kind = 'worktree'")
+      .all(project.id) as WorkspaceRow[]
+    const recordedByPath = new Map(
+      recorded.map((workspace) => [canonicalPath(workspace.path), workspace]),
+    )
+
+    // Old versions modeled the primary checkout as a workspace. Keep only a
+    // tombstone when task/run history still points at it.
+    const legacyMainRows = db
+      .prepare("SELECT * FROM workspaces WHERE projectId = ? AND kind = 'main'")
+      .all(project.id) as WorkspaceRow[]
+    for (const workspace of legacyMainRows) {
+      const refs = references.get(workspace.id, workspace.id) as {
+        hasTask: number
+        hasRun: number
+      }
+      if (refs.hasTask || refs.hasRun) {
+        if (workspace.status !== 'archived') archive.run(Date.now(), workspace.id)
+      } else {
+        remove.run(workspace.id)
+      }
+    }
+
+    for (const entry of registered) {
+      const workspacePath = canonicalPath(entry.path)
+      const branch = entry.branch.trim() || path.basename(workspacePath)
+      const existing = recordedByPath.get(workspacePath)
+      if (!existing) {
+        insert.run({
+          id: id('ws'),
+          projectId: project.id,
+          name: branch,
+          branch,
+          path: workspacePath,
+          baseCommit: entry.head,
+          createdAt: Date.now(),
+        })
+      } else if (existing.status === 'archived') {
+        revive.run(branch, branch, entry.head, existing.id)
+      }
+    }
+
+    for (const workspace of recorded) {
+      if (registeredPaths.has(canonicalPath(workspace.path))) continue
+      const refs = references.get(workspace.id, workspace.id) as {
+        hasTask: number
+        hasRun: number
+      }
+      if (refs.hasTask || refs.hasRun) {
+        if (workspace.status !== 'archived') archive.run(Date.now(), workspace.id)
+      } else {
+        remove.run(workspace.id)
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -285,30 +411,6 @@ export function addProject(input: AddProjectInput): ProjectRow {
        VALUES (@id, @name, @slug, @path, @defaultBranch, @remoteUrl, @managed, @setupCommand, @checks, @createdAt)`,
     ).run(project)
 
-    // The user's own checkout — shared with their editor, so its diffs
-    // include whatever they're already working on outside of this app.
-    const workspace: WorkspaceRow = {
-      id: id('ws'),
-      projectId: project.id,
-      name: 'main checkout',
-      branch: defaultBranch,
-      path: resolvedPath,
-      kind: 'main',
-      status: 'ready',
-      setupLog: '',
-      setupExitCode: null,
-      blockedKind: '',
-      blockedReason: '',
-      blockedAt: 0,
-      baseCommit: git.resolveCommit(resolvedPath, defaultBranch),
-      createdAt: now,
-      archivedAt: null,
-    }
-    db.prepare(
-      `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
-       VALUES (@id, @projectId, @name, @branch, @path, @kind, @status, @setupLog, @setupExitCode, @blockedKind, @blockedReason, @blockedAt, @baseCommit, @createdAt, @archivedAt)`,
-    ).run(workspace)
-
     return project
   }
 
@@ -344,8 +446,6 @@ export function addProject(input: AddProjectInput): ProjectRow {
      VALUES (@id, @name, @slug, @path, @defaultBranch, @remoteUrl, @managed, @setupCommand, @checks, @createdAt)`,
   ).run(project)
 
-  // No kind='main' workspace here — a managed clone has no user checkout to
-  // share; every unit of work against it gets its own worktree.
   return project
 }
 
@@ -448,8 +548,9 @@ function toWorkspaceWithMeta(db: ReturnType<typeof getDb>, ws: WorkspaceRow): Wo
 
   // Archived/missing worktrees have nothing to inspect on disk; avoid
   // shelling out to git for a path that no longer exists.
+  const exists = existsSync(ws.path)
   const info =
-    ws.status === 'archived' || !existsSync(ws.path)
+    ws.status === 'archived' || !exists
       ? { dirty: false, ahead: 0, branch: '' }
       : git.hasUnpushedWork(ws.path)
 
@@ -460,6 +561,9 @@ function toWorkspaceWithMeta(db: ReturnType<typeof getDb>, ws: WorkspaceRow): Wo
   return {
     ...ws,
     branch: liveBranch,
+    configuredBranch: ws.branch,
+    actualBranch: info.branch,
+    exists,
     projectName: project?.name ?? '(deleted project)',
     dirty: info.dirty,
     ahead: info.ahead,
@@ -468,6 +572,7 @@ function toWorkspaceWithMeta(db: ReturnType<typeof getDb>, ws: WorkspaceRow): Wo
 }
 
 export function listWorkspaces(projectId?: string): WorkspaceWithMeta[] {
+  reconcileWorkspaces(projectId)
   const db = getDb()
   const rows = (
     projectId
@@ -678,6 +783,10 @@ export function archiveWorkspace(
 export function resolveWorkspacePath(workspaceId: string): string {
   const workspace = getWorkspace(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
+  const project = getProject(workspace.projectId)
+  if (workspace.kind !== 'worktree') {
+    throw new Error('Pick an isolated worktree. Agents cannot run in the primary checkout.')
+  }
   // Chat already refused non-ready workspaces; automations used to only check
   // that an id was present and then spawn into a half-baked creating/error tree.
   assertWorkspaceReady(workspace.status)
@@ -691,6 +800,19 @@ export function resolveWorkspacePath(workspaceId: string): string {
       .prepare("UPDATE workspaces SET status = 'error', setupLog = ? WHERE id = ?")
       .run(message, workspace.id)
     throw new Error(message)
+  }
+  if (project && git.isRepo(project.path)) {
+    const inventory = git.inspectWorktrees(project.path)
+    const registered = inventory.entries.some(
+      (entry) => !entry.bare && canonicalPath(entry.path) === canonicalPath(workspace.path),
+    )
+    if (inventory.ok && !registered) {
+      const message = missingWorkspaceDirMessage(workspace.path)
+      getDb()
+        .prepare("UPDATE workspaces SET status = 'archived', archivedAt = ? WHERE id = ?")
+        .run(Date.now(), workspace.id)
+      throw new Error(message)
+    }
   }
   return workspace.path
 }

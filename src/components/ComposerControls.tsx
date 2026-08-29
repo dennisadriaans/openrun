@@ -537,6 +537,7 @@ export function ProjectPicker({
 export type BranchOption = {
   id: string
   branch: string
+  action?: 'select-workspace' | 'create-workspace'
   kind?: string
   status?: string
   /** Disables the entry and shows as the hint — e.g. a workspace still cloning. */
@@ -550,6 +551,10 @@ export function BranchPicker({
   workspaces,
   workspaceId,
   disabled,
+  disabledReason,
+  busyLabel,
+  invalid,
+  'aria-describedby': ariaDescribedBy,
   placeholder = 'Select branch',
   newBranchLabel = 'New branch',
   onChange,
@@ -558,61 +563,103 @@ export function BranchPicker({
   workspaces: BranchOption[]
   workspaceId: string
   disabled?: boolean
+  disabledReason?: string
+  busyLabel?: string
+  invalid?: boolean
+  'aria-describedby'?: string
   placeholder?: string
   newBranchLabel?: string
   onChange: (id: string) => void
   onRequestNewBranch?: () => void
 }) {
   const selected = workspaces.find((w) => w.id === workspaceId)
-  const [visibleCount, setVisibleCount] = useState(BRANCH_PAGE_SIZE)
-  const visibleWorkspaces = workspaces.slice(0, visibleCount)
-  const hasMore = visibleWorkspaces.length < workspaces.length
+  const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(BRANCH_PAGE_SIZE)
+  const [visibleBranchCount, setVisibleBranchCount] = useState(BRANCH_PAGE_SIZE)
+  const existing = workspaces.filter((w) => w.action !== 'create-workspace')
+  const unopened = workspaces.filter((w) => w.action === 'create-workspace')
+  const visibleWorkspaces = existing.slice(0, visibleWorkspaceCount)
+  const visibleBranches = unopened.slice(0, visibleBranchCount)
 
   return (
     <FooterMenu
-      label={selected?.branch ?? placeholder}
-      title={selected?.branch ?? placeholder}
-      tooltip="Branch to check out"
+      label={busyLabel ?? selected?.branch ?? placeholder}
+      title={selected?.blockedReason ?? selected?.branch ?? placeholder}
+      tooltip={selected?.blockedReason ?? disabledReason ?? 'Workspace and branch'}
       disabled={disabled}
-      leading={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
-      onOpen={() => setVisibleCount(BRANCH_PAGE_SIZE)}
+      invalid={invalid || Boolean(selected?.blockedReason)}
+      aria-describedby={ariaDescribedBy}
+      leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+      onOpen={() => {
+        setVisibleWorkspaceCount(BRANCH_PAGE_SIZE)
+        setVisibleBranchCount(BRANCH_PAGE_SIZE)
+      }}
     >
       {(close) => (
         <>
-          {workspaces.length === 0 ? (
+          {existing.length === 0 && unopened.length === 0 ? (
             <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">No branches yet</div>
-          ) : (
-            visibleWorkspaces.map((w) => (
-              <MenuItem
-                key={w.id}
-                active={w.id === workspaceId}
-                disabled={Boolean(w.blockedReason)}
-                label={w.branch}
-                hint={
-                  w.blockedReason ?? w.hint ?? (w.kind === 'main' ? 'main checkout' : undefined)
-                }
-                leading={<GitBranch className="h-3.5 w-3.5 shrink-0" />}
-                onSelect={() => {
-                  onChange(w.id)
-                  close()
-                }}
-              />
-            ))
-          )}
-          {hasMore ? (
+          ) : null}
+          {existing.length > 0 ? (
+            <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-tier-quaternary">
+              Workspaces
+            </div>
+          ) : null}
+          {visibleWorkspaces.map((w) => (
+            <MenuItem
+              key={w.id}
+              active={w.id === workspaceId}
+              disabled={Boolean(w.blockedReason)}
+              label={w.branch}
+              hint={w.blockedReason ?? w.hint}
+              leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+              onSelect={() => {
+                onChange(w.id)
+                close()
+              }}
+            />
+          ))}
+          {visibleWorkspaces.length < existing.length ? (
             <button
               type="button"
               role="menuitem"
-              onClick={() => setVisibleCount((count) => count + BRANCH_PAGE_SIZE)}
+              onClick={() => setVisibleWorkspaceCount((count) => count + BRANCH_PAGE_SIZE)}
               className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground"
             >
-              Load more
+              More workspaces
+            </button>
+          ) : null}
+          {unopened.length > 0 ? (
+            <div className="mt-1 border-t border-border px-2.5 pt-2 pb-1.5 text-[10px] uppercase tracking-wide text-tier-quaternary">
+              Open Branch in New Workspace
+            </div>
+          ) : null}
+          {visibleBranches.map((w) => (
+            <MenuItem
+              key={w.id}
+              label={w.branch}
+              hint={w.hint}
+              leading={<Plus aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+              onSelect={() => {
+                onChange(w.id)
+                close()
+              }}
+            />
+          ))}
+          {visibleBranches.length < unopened.length ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setVisibleBranchCount((count) => count + BRANCH_PAGE_SIZE)}
+              className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground"
+            >
+              More branches
             </button>
           ) : null}
           {onRequestNewBranch ? (
             <MenuItem
               label={newBranchLabel}
-              leading={<Plus className="h-3.5 w-3.5 shrink-0" />}
+              hint="Create a new branch in its own isolated workspace"
+              leading={<Plus aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
               onSelect={() => {
                 close()
                 onRequestNewBranch()

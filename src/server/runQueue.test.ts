@@ -8,14 +8,22 @@ import { createServer } from 'vite'
 
 const appRoot = process.cwd()
 const root = mkdtempSync(join(tmpdir(), 'openrun-queue-'))
+const oldProject = join(root, 'project-old')
+const newProject = join(root, 'project-new')
 const oldRepo = join(root, 'old')
 const newRepo = join(root, 'new')
-for (const repo of [oldRepo, newRepo]) {
-  mkdirSync(repo)
-  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
-  execFileSync('git', ['config', 'user.email', 'queue@example.test'], { cwd: repo })
-  execFileSync('git', ['config', 'user.name', 'Queue Test'], { cwd: repo })
-  execFileSync('git', ['commit', '--allow-empty', '-qm', 'initial'], { cwd: repo })
+for (const [project, workspace, branch] of [
+  [oldProject, oldRepo, 'openrun/old'],
+  [newProject, newRepo, 'openrun/new'],
+] as const) {
+  mkdirSync(project)
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: project })
+  execFileSync('git', ['config', 'user.email', 'queue@example.test'], { cwd: project })
+  execFileSync('git', ['config', 'user.name', 'Queue Test'], { cwd: project })
+  execFileSync('git', ['commit', '--allow-empty', '-qm', 'initial'], { cwd: project })
+  execFileSync('git', ['worktree', 'add', '-q', '-b', branch, workspace, 'main'], {
+    cwd: project,
+  })
 }
 
 const cwdBefore = process.cwd()
@@ -52,9 +60,9 @@ function seed() {
        (id, label, bin, argsTemplate, promptViaStdin, description, enabled, canOpenPrs, transport, createdAt)
      VALUES ('queue-runtime', 'Queue runtime', ?, ?, 0, '', 1, 0, 'cli', 1)`,
   ).run(process.execPath, JSON.stringify(['-e', 'process.exit(0)']))
-  for (const [id, path] of [
-    ['project-old', oldRepo],
-    ['project-new', newRepo],
+  for (const [id, projectPath] of [
+    ['project-old', oldProject],
+    ['project-new', newProject],
   ] as const) {
     db.prepare(
       `INSERT INTO projects
@@ -64,7 +72,7 @@ function seed() {
       id,
       id,
       id,
-      path,
+      projectPath,
       JSON.stringify([
         {
           id: 'queue-check',
@@ -77,19 +85,19 @@ function seed() {
   db.prepare(
     `INSERT INTO workspaces
        (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
-     VALUES ('workspace-old', 'project-old', 'Old', 'main', ?, 'main', 'ready', '', NULL, 1, NULL)`,
+     VALUES ('workspace-old', 'project-old', 'Old', 'openrun/old', ?, 'worktree', 'ready', '', NULL, 1, NULL)`,
   ).run(oldRepo)
   for (const id of ['workspace-cancel', 'workspace-orphan']) {
     db.prepare(
       `INSERT INTO workspaces
          (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
-       VALUES (?, 'project-old', 'Managed', 'openrun/feature', ?, 'worktree', 'ready', '', NULL, 1, NULL)`,
+       VALUES (?, 'project-old', 'Managed', 'openrun/old', ?, 'worktree', 'ready', '', NULL, 1, NULL)`,
     ).run(id, oldRepo)
   }
   db.prepare(
     `INSERT INTO workspaces
        (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
-     VALUES ('workspace-new', 'project-new', 'New', 'main', ?, 'main', 'ready', '', NULL, 1, NULL)`,
+     VALUES ('workspace-new', 'project-new', 'New', 'openrun/new', ?, 'worktree', 'ready', '', NULL, 1, NULL)`,
   ).run(newRepo)
   db.prepare(
     `INSERT INTO tasks

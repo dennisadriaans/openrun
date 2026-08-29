@@ -15,7 +15,8 @@ import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
 import { WorkingIndicator } from '../components/chat/WorkingIndicator'
 import { NativeSessionMenu } from '../components/NativeSessionMenu'
-import { Button, Field, inputClass, Modal } from '../components/ui'
+import { NewWorkspaceModal } from '../components/NewWorkspaceModal'
+import { Button } from '../components/ui'
 import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
 import {
   defaultEffort,
@@ -106,31 +107,32 @@ function NewRun() {
   const [sent, setSent] = useState<{ prompt: string; startedAt: number } | null>(null)
   const [addingProject, setAddingProject] = useState(false)
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
-  const [newBranchName, setNewBranchName] = useState('')
-  const [baseBranch, setBaseBranch] = useState('')
+  const [openingBranch, setOpeningBranch] = useState('')
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
   const { data: gitBranches } = useProjectBranches(projectId || undefined)
   const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
+  const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
-    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
+    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived' && w.kind === 'worktree'),
     [allWorkspaces],
   )
-  const project = projects?.find((row) => row.id === projectId)
   const branchChoices = useMemo(
     () =>
       projectBranchChoices({
         gitBranches: gitBranches ?? [],
         workspaces: workspaces.map((w) => ({
           id: w.id,
-          branch: w.branch,
+          branch: w.configuredBranch,
           kind: w.kind,
           status: w.status,
           activeRunId: w.activeRunId,
+          exists: w.exists,
         })),
+        selectedWorkspaceId: workspaceId,
       }),
-    [gitBranches, workspaces],
+    [gitBranches, workspaces, workspaceId],
   )
 
   useEffect(() => {
@@ -206,6 +208,7 @@ function NewRun() {
     }
     if (!projectId) return
     const gitRow = (gitBranches ?? []).find((row) => row.name === pending)
+    setOpeningBranch(pending)
     try {
       const created = await createWorkspace.mutateAsync({
         projectId,
@@ -216,31 +219,14 @@ function NewRun() {
       setWorkspaceId(created.id)
     } catch (err) {
       setWorkspaceError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpeningBranch('')
     }
   }
 
   const openNewWorkspace = () => {
     setWorkspaceError(null)
-    setNewBranchName('')
-    setBaseBranch(workspace?.branch || project?.defaultBranch || '')
     setNewWorkspaceOpen(true)
-  }
-
-  const submitNewWorkspace = async () => {
-    if (!projectId || !newBranchName.trim()) return
-    setWorkspaceError(null)
-    try {
-      const created = await createWorkspace.mutateAsync({
-        projectId,
-        branch: newBranchName.trim(),
-        fromBranch: baseBranch.trim() || undefined,
-      })
-      setWorkspaceId(created.id)
-      setNewWorkspaceOpen(false)
-      setNewBranchName('')
-    } catch (err) {
-      setWorkspaceError(err instanceof Error ? err.message : String(err))
-    }
   }
 
   /**
@@ -331,6 +317,7 @@ function NewRun() {
             workspaces={branchChoices}
             workspaceId={workspaceId}
             disabled={startChat.isPending || createWorkspace.isPending}
+            busyLabel={openingBranch ? `Opening ${openingBranch}…` : undefined}
             newBranchLabel="New branch and workspace"
             onChange={(id) => void selectBranch(id)}
             onRequestNewBranch={projectId ? openNewWorkspace : undefined}
@@ -489,45 +476,17 @@ function NewRun() {
       ) : null}
 
       {newWorkspaceOpen && project ? (
-        <Modal title={`New workspace — ${project.name}`} onClose={() => setNewWorkspaceOpen(false)}>
-          <div className="space-y-4">
-            <p className="text-ui-base text-tier-secondary">
-              Creates a separate Git worktree so this run can work in parallel with other sessions.
-            </p>
-            <Field label="New branch">
-              <input
-                autoFocus
-                className={`${inputClass} mono text-[13px]`}
-                value={newBranchName}
-                onChange={(event) => setNewBranchName(event.target.value)}
-                placeholder="feature/my-change"
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void submitNewWorkspace()
-                }}
-              />
-            </Field>
-            <Field label="Base branch" hint="only committed Git state is copied">
-              <input
-                className={`${inputClass} mono text-[13px]`}
-                value={baseBranch}
-                onChange={(event) => setBaseBranch(event.target.value)}
-              />
-            </Field>
-            {workspaceError ? <p className="text-ui-base text-danger">{workspaceError}</p> : null}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setNewWorkspaceOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!newBranchName.trim() || createWorkspace.isPending}
-                onClick={() => void submitNewWorkspace()}
-              >
-                {createWorkspace.isPending ? 'Creating…' : 'Create workspace'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
+        <NewWorkspaceModal
+          projectName={project.name}
+          defaultBaseBranch={workspace?.branch || project.defaultBranch || ''}
+          pending={createWorkspace.isPending}
+          onClose={() => setNewWorkspaceOpen(false)}
+          onCreate={async (input) => {
+            const created = await createWorkspace.mutateAsync({ projectId, ...input })
+            setWorkspaceId(created.id)
+            setNewWorkspaceOpen(false)
+          }}
+        />
       ) : null}
     </div>
   )

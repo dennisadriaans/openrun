@@ -39,6 +39,7 @@ import {
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import {
   useProjects,
+  useTasks,
   useRuntimes,
   useSaveTask,
   useSaveTaskWebhook,
@@ -86,6 +87,7 @@ import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { isMainCheckout, pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
+import { hasUnattendedTrigger } from '../lib/taskReadiness'
 import { workspaceBlockedReason } from '../lib/runPrereqGate'
 import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
@@ -102,7 +104,8 @@ import {
   BranchPicker,
 } from './ComposerControls'
 import { NativeSessionMenu } from './NativeSessionMenu'
-import { ActiveToggle, Button, inputClass } from './ui'
+import { NewWorkspaceModal } from './NewWorkspaceModal'
+import { ActiveToggle, Button, Card, inputClass } from './ui'
 
 const SCHEDULE_OPTIONS: Array<{
   label: string
@@ -934,13 +937,18 @@ export function TaskForm({
   initial,
   onSaved,
   onCancel,
+  readiness,
+  workspaceChangeBlockedReason,
 }: {
   initial?: Partial<TaskFormValues>
   onSaved: (id: string) => void
   onCancel: () => void
+  readiness?: ReactNode
+  workspaceChangeBlockedReason?: string | null
 }) {
   const { data: runtimes } = useRuntimes()
   const { data: projects } = useProjects()
+  const { data: tasks } = useTasks()
   const save = useSaveTask()
   const { prefs, remember } = usePickerPrefs()
   // A brand-new automation seeds its pickers from the last-used selections; an
@@ -991,6 +999,8 @@ export function TaskForm({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [promptError, setPromptError] = useState<string | null>(null)
   const [showAddProject, setShowAddProject] = useState(false)
+  const [showNewWorkspace, setShowNewWorkspace] = useState(false)
+  const [openingBranch, setOpeningBranch] = useState('')
   const [showVerificationSettings, setShowVerificationSettings] = useState(false)
   const [nativeError, setNativeError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -1164,23 +1174,47 @@ export function TaskForm({
       set('workspaceId', '')
       return
     }
-    const list = (allWorkspaces ?? []).filter((w) => w.projectId === pid)
-    set('workspaceId', pickDefaultWorkspace(list)?.id ?? '')
+    const eligible = (allWorkspaces ?? []).filter(
+      (workspace) => workspace.projectId === pid && workspace.kind === 'worktree',
+    )
+    set('workspaceId', pickDefaultWorkspace(eligible)?.id ?? '')
   }
 
+  const selectedProject = projects?.find((project) => project.id === projectId)
+  const unattendedDraft = hasUnattendedTrigger({
+    cron: v.cron,
+    fireOnce: v.fireOnce,
+    webhookIntegrationId: webhookEnabled ? v.webhookIntegrationId : '',
+  })
   const branchChoices = useMemo(
     () =>
       projectBranchChoices({
         gitBranches: gitBranches ?? [],
-        workspaces: (projectWorkspaces ?? []).map((w) => ({
-          id: w.id,
-          branch: w.branch,
-          kind: w.kind,
-          status: w.status,
-          activeRunId: w.activeRunId,
-        })),
+        workspaces: (projectWorkspaces ?? [])
+          .filter((w) => w.kind === 'worktree')
+          .map((w) => ({
+            id: w.id,
+            branch: w.configuredBranch,
+            kind: w.kind,
+            status: w.status,
+            activeRunId: w.activeRunId,
+            exists: w.exists,
+            dirty: w.dirty,
+            actualBranch: w.actualBranch,
+            quarantineReason: w.blockedReason,
+            unattendedOwnerName: tasks?.find(
+              (task) =>
+                task.id !== v.id &&
+                task.enabled === 1 &&
+                task.workspaceId === w.id &&
+                hasUnattendedTrigger(task),
+            )?.name,
+          })),
+        selectedWorkspaceId: v.workspaceId,
+        unattended: unattendedDraft,
+        requireIsolation,
       }),
-    [gitBranches, projectWorkspaces],
+    [gitBranches, projectWorkspaces, tasks, v.id, v.workspaceId, unattendedDraft, requireIsolation],
   )
 
   const selectBranch = async (id: string) => {
@@ -1192,6 +1226,7 @@ export function TaskForm({
     }
     if (!projectId) return
     const gitRow = (gitBranches ?? []).find((b) => b.name === pending)
+    setOpeningBranch(pending)
     try {
       const ws = await createWorkspace.mutateAsync({
         projectId,
@@ -1202,12 +1237,23 @@ export function TaskForm({
       set('workspaceId', ws.id)
     } catch (err) {
       setWorkspaceError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpeningBranch('')
     }
+  }
+
+  const createNewWorkspace = async (input: { branch: string; fromBranch?: string }) => {
+    if (!projectId) return
+    const workspace = await createWorkspace.mutateAsync({ projectId, ...input })
+    set('workspaceId', workspace.id)
+    setShowNewWorkspace(false)
   }
 
   useEffect(() => {
     if (!projectId || v.workspaceId) return
-    const picked = pickDefaultWorkspace(projectWorkspaces ?? [])
+    const picked = pickDefaultWorkspace(
+      (projectWorkspaces ?? []).filter((workspace) => workspace.kind === 'worktree'),
+    )
     if (picked) {
       setV((prev) => ({ ...prev, workspaceId: picked.id }))
     }
@@ -1287,6 +1333,10 @@ export function TaskForm({
   }
 
   const selectedWorkspace = (allWorkspaces ?? []).find((w) => w.id === v.workspaceId)
+  const workspaceChanged = Boolean(
+    initial?.id && v.workspaceId && v.workspaceId !== initial.workspaceId,
+  )
+  const selectedBranch = branchChoices.find((choice) => choice.id === v.workspaceId)?.branch
   // Checks live on the project, so how many exist depends on which repository
   // the automation targets — worth saying out loud here, because with none the
   // "verified" outcome is unreachable no matter what this form is set to.
@@ -1373,9 +1423,19 @@ export function TaskForm({
           <BranchPicker
             workspaces={branchChoices}
             workspaceId={v.workspaceId}
-            disabled={!projectId || createWorkspace.isPending}
+            disabled={
+              !projectId || createWorkspace.isPending || Boolean(workspaceChangeBlockedReason)
+            }
+            disabledReason={workspaceChangeBlockedReason ?? undefined}
+            busyLabel={openingBranch ? `Opening ${openingBranch}…` : undefined}
+            invalid={Boolean(
+              workspaceError || branchChoices.find((w) => w.id === v.workspaceId)?.blockedReason,
+            )}
+            aria-describedby={workspaceError ? 'workspace-required-error' : undefined}
             placeholder={createWorkspace.isPending ? 'Opening branch…' : 'Select branch'}
+            newBranchLabel="New branch and workspace"
             onChange={(id) => void selectBranch(id)}
+            onRequestNewBranch={projectId ? () => setShowNewWorkspace(true) : undefined}
           />
 
           <span aria-hidden className="text-tier-quaternary">
@@ -1418,6 +1478,15 @@ export function TaskForm({
           />
         </div>
         {nativeError ? <p className="mt-2 text-[12px] text-rose-300">{nativeError}</p> : null}
+        {workspaceError ? (
+          <p
+            id="workspace-required-error"
+            aria-live="polite"
+            className="mt-2 text-[12px] text-rose-300"
+          >
+            {workspaceError}
+          </p>
+        ) : null}
         {(v.resumeSessionId ?? '').trim() ? (
           <p className="mt-1 text-ui-sm text-tier-quaternary">
             Continues that chat unattended with skip-permissions, even if it was a supervised
@@ -1433,7 +1502,35 @@ export function TaskForm({
         />
       ) : null}
 
+      {showNewWorkspace && selectedProject ? (
+        <NewWorkspaceModal
+          projectName={selectedProject.name}
+          defaultBaseBranch={
+            branchChoices.find((choice) => choice.id === v.workspaceId)?.branch ||
+            selectedProject.defaultBranch ||
+            ''
+          }
+          pending={createWorkspace.isPending}
+          onClose={() => setShowNewWorkspace(false)}
+          onCreate={createNewWorkspace}
+        />
+      ) : null}
+
       <div className="space-y-7">
+        {workspaceChanged ? (
+          <Card className="mt-6 p-4">
+            <h2 className="text-ui-sm font-medium text-tier-secondary">
+              Workspace Change Not Saved
+            </h2>
+            <p className="mt-1 text-ui-sm leading-relaxed text-tier-tertiary">
+              Save changes to validate {selectedBranch ? `“${selectedBranch}”` : 'this workspace'}.
+              Readiness will update from the new workspace immediately after saving.
+            </p>
+          </Card>
+        ) : (
+          readiness
+        )}
+
         <section>
           <StepLabel n={1}>What the agent should do</StepLabel>
           <div
@@ -1793,15 +1890,6 @@ export function TaskForm({
             />
           ) : null}
         </section>
-
-        {workspaceError ? (
-          <p
-            id="workspace-required-error"
-            className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300"
-          >
-            {workspaceError}
-          </p>
-        ) : null}
 
         {isMainCheckout(selectedWorkspace) ? (
           <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-300">
