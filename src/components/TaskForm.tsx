@@ -1579,10 +1579,6 @@ export function TaskForm({
                     setTriggerError(null)
                   }}
                 />
-                <p className="px-1 text-[12px] text-tier-quaternary">
-                  Open Run must remain running. Recurring fires missed while offline are recorded
-                  and skipped; one-offs catch up for 15 minutes, then show as missed.
-                </p>
               </>
             ) : null}
 
