@@ -11,6 +11,7 @@ import {
   type CommandPreview as CommandPreviewData,
   type CommandPreviewWarningCode,
 } from '../lib/commandPreview'
+import { runtimeModeLabel } from '../lib/runtimeMode'
 
 function ArgToken({ value, origin }: { value: string; origin: 'template' | 'agentops' }) {
   const injected = origin === 'agentops'
@@ -87,7 +88,8 @@ export function CommandPreview({
             </div>
 
             <p className="mt-2 text-[12px] text-tier-quaternary">
-              {promptDeliveryLabel(preview.channels)}
+              {preview.transport === 'acp' ? 'ACP' : 'CLI'} ·{' '}
+              {runtimeModeLabel(preview.runtimeMode)} · {promptDeliveryLabel(preview.channels)}
               {preview.canResume
                 ? ' · follow-ups resume this session'
                 : ' · no resume (each turn is a fresh session)'}

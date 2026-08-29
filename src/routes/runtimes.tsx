@@ -265,8 +265,9 @@ function RuntimeModal({
         bin: value.bin,
         argsTemplate: value.argsTemplate,
         promptViaStdin: value.promptViaStdin,
+        transport: value.transport,
       }),
-      [value.bin, value.argsTemplate, value.promptViaStdin],
+      [value.bin, value.argsTemplate, value.promptViaStdin, value.transport],
     ),
   )
   const { data: preview, isFetching } = useCommandPreview(draft)
@@ -357,27 +358,20 @@ function RuntimeModal({
           />
         </Field>
         {value.transport === 'cli' ? (
-          <>
-            <label className="flex items-center gap-2.5">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-[var(--base)]"
-                checked={value.promptViaStdin}
-                onChange={(e) => set('promptViaStdin', e.target.checked)}
-              />
-              <span className="text-ui-base text-tier-secondary">
-                Pipe prompt to stdin
-                <span className="ml-1.5 text-ui-sm text-tier-quaternary">
-                  (off = use {'{prompt}'} or {'{promptFile}'} in args)
-                </span>
-              </span>
-            </label>
-            <CommandPreview
-              preview={preview?.preview}
-              error={preview?.error}
-              isLoading={isFetching}
+          <label className="flex items-center gap-2.5">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-[var(--base)]"
+              checked={value.promptViaStdin}
+              onChange={(e) => set('promptViaStdin', e.target.checked)}
             />
-          </>
+            <span className="text-ui-base text-tier-secondary">
+              Pipe prompt to stdin
+              <span className="ml-1.5 text-ui-sm text-tier-quaternary">
+                (off = use {'{prompt}'} or {'{promptFile}'} in args)
+              </span>
+            </span>
+          </label>
         ) : (
           <div className="rounded-lg border border-border bg-chrome/60 px-3 py-2 text-ui-sm text-tier-tertiary">
             The prompt is sent as an ACP <span className="mono">session/prompt</span> message, and
@@ -385,6 +379,7 @@ function RuntimeModal({
             launch the agent.
           </div>
         )}
+        <CommandPreview preview={preview?.preview} error={preview?.error} isLoading={isFetching} />
         <label className="flex items-center gap-2.5">
           <input
             type="checkbox"

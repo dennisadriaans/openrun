@@ -12,6 +12,11 @@ import { CHECK_TIMEOUT_MS, parseChecks } from '../lib/checks'
 import { normalizeCron } from '../lib/cron'
 import { assertRunTimeoutMinutes, resolveRunTimeoutMs } from '../lib/runBudget'
 import { assertTaskPrompt, hasTaskPrompt } from '../lib/taskPrompt'
+import {
+  runtimePromptDelivery,
+  taskReadinessBlockers,
+  type TaskReadinessBlocker,
+} from '../lib/taskReadiness.ts'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import {
@@ -103,7 +108,6 @@ import {
   type PreviewCommandResult,
 } from './commandPreview'
 import {
-  assertWorkspaceFree,
   createWorkspace,
   getProject,
   getWorkspace,
@@ -352,6 +356,7 @@ export function previewRuntimeCommandById(input: {
     bin: runtime.bin,
     argsTemplate: runtime.argsTemplate,
     promptViaStdin: runtime.promptViaStdin === 1,
+    transport: runtime.transport,
     workspaceId: input.workspaceId,
     model: input.model,
     effort: input.effort,
@@ -652,6 +657,8 @@ export type TaskWithMeta = TaskRow & {
   workspaceStatus: string | null
   /** False when the runtime row is missing or its binary is not on PATH. */
   runtimeInstalled: boolean
+  /** False when the runtime row itself is missing. */
+  runtimeValid: boolean
   /** Trimmed runtime binary name (for PATH-missing copy); empty if no runtime row. */
   runtimeBin: string
   /**
@@ -689,12 +696,38 @@ export type TaskWithMeta = TaskRow & {
    * may proceed. Attended Run now is judged by `runNowBlockedReason` instead.
    */
   unattendedBlockedReason: string | null
+  /** id of the running run for this task, or null when idle. */
+  activeRunId: string | null
+  /** Whether the runtime has one unambiguous way to receive the prompt. */
+  promptDeliveryValid: boolean
+  promptDeliveryReason: string | null
+  /** Connected webhook is present and enabled when this task has one. */
+  triggerReady: boolean
+  triggerBlockReason: string | null
+  /** All current blockers, in the same order shown by task detail. */
+  readinessBlockers: TaskReadinessBlocker[]
+}
+
+function activeRunByTask(): Record<string, string> {
+  const rows = getDb()
+    .prepare(
+      `SELECT taskId, id FROM runs
+       WHERE taskId IS NOT NULL AND status = 'running'
+       ORDER BY startedAt ASC`,
+    )
+    .all() as Array<{ taskId: string; id: string }>
+  const out: Record<string, string> = {}
+  for (const row of rows) {
+    if (!out[row.taskId]) out[row.taskId] = row.id
+  }
+  return out
 }
 
 function decorate(
   task: TaskRow,
   queueDepths?: Record<string, number>,
   scheduleFires?: Record<string, ScheduleFireRow>,
+  activeRuns?: Record<string, string>,
 ): TaskWithMeta {
   const runtime = getRuntime(task.runtimeId)
   const cronOk = isSchedulableCron(task.cron)
@@ -707,6 +740,24 @@ function decorate(
   const promptOk = hasTaskPrompt(task.prompt)
   const resumeOk = nativeSessionValidForTask(task)
   const project = workspace ? getProject(workspace.projectId) : undefined
+  const promptDelivery = runtime
+    ? runtimePromptDelivery({
+        transport: parseTransport(runtime.transport),
+        promptViaStdin: runtime.promptViaStdin === 1,
+        argsTemplate: runtime.argsTemplate,
+      })
+    : { valid: false, reason: null }
+  const integration = task.webhookIntegrationId.trim()
+    ? (getDb()
+        .prepare('SELECT enabled FROM integrations WHERE id = ?')
+        .get(task.webhookIntegrationId) as { enabled: number } | undefined)
+    : undefined
+  const triggerReady = !task.webhookIntegrationId.trim() || integration?.enabled === 1
+  const triggerBlockReason = task.webhookIntegrationId.trim()
+    ? integration
+      ? 'The selected webhook connection is disabled. Enable it before running this automation.'
+      : 'The selected webhook connection no longer exists. Pick another connection before running this automation.'
+    : null
   // Physical health is read, not repaired, here: `decorate` runs on every list
   // render, and demoting a row as a side effect of drawing a table would make
   // a transient NFS/rename hiccup permanent. The fire and arm paths call
@@ -717,6 +768,45 @@ function decorate(
     canOpenPrs: runtime?.canOpenPrs === 1,
     requireGhAuth: task.requireGhAuth === 1,
   })
+  const unattendedBlocked = workspace
+    ? unattendedBlockedReason({
+        workspaceKind: workspace.kind,
+        requireIsolation: task.requireIsolation === 1,
+        health,
+        requiresGh,
+        ghInstalled: gh.installed,
+        ghAuthenticated: gh.authenticated,
+      })
+    : null
+  const readinessBlockers = taskReadinessBlockers({
+    enabled: task.enabled,
+    cron: task.cron,
+    cronValid: cronOk,
+    workspaceValid: workspaceOk,
+    workspaceReady: workspaceReadyOk,
+    workspaceStatus,
+    runtimeInstalled,
+    runtimeBin,
+    promptValid: promptOk,
+    ...(runtime
+      ? {
+          promptDeliveryValid: promptDelivery.valid,
+          promptDeliveryReason: promptDelivery.reason,
+        }
+      : {}),
+    resumeSessionId: task.resumeSessionId,
+    resumeSessionValid: resumeOk,
+    triggerReady,
+    triggerBlockReason,
+    verifyEnabled: task.verifyEnabled,
+    checkCount: parseChecks(project?.checks).length,
+    fireOnce: task.fireOnce,
+    scheduledAt: task.scheduledAt,
+    unattendedBlockedReason: unattendedBlocked,
+    webhookIntegrationId: task.webhookIntegrationId,
+    runtimeValid: Boolean(runtime),
+  })
+  const activeRunId = activeRuns?.[task.id] ?? null
   return {
     ...task,
     workspaceKind: workspace?.kind ?? '',
@@ -724,16 +814,7 @@ function decorate(
     requiresGh,
     ghInstalled: gh.installed,
     ghAuthenticated: gh.authenticated,
-    unattendedBlockedReason: workspace
-      ? unattendedBlockedReason({
-          workspaceKind: workspace.kind,
-          requireIsolation: task.requireIsolation === 1,
-          health,
-          requiresGh,
-          ghInstalled: gh.installed,
-          ghAuthenticated: gh.authenticated,
-        })
-      : null,
+    unattendedBlockedReason: unattendedBlocked,
     checkCount: parseChecks(project?.checks).length,
     effectiveTimeoutMs: resolveRunTimeoutMs(task.timeoutMs),
     lastScheduleFire: (scheduleFires ?? latestScheduleFires([task.id]))[task.id] ?? null,
@@ -742,7 +823,7 @@ function decorate(
     queuedCount: (queueDepths ?? queueDepthByTask())[task.id] ?? 0,
     runtimeLabel: resolveRuntimeLabel(runtime?.label, task.runtimeId),
     nextRunAt:
-      task.enabled && cronOk && workspaceReadyOk && runtimeInstalled && promptOk && resumeOk
+      task.enabled && readinessBlockers.length === 0
         ? task.fireOnce && task.scheduledAt > 0
           ? task.scheduledAt
           : nextRun(task.cron)
@@ -752,9 +833,16 @@ function decorate(
     workspaceReady: workspaceReadyOk,
     workspaceStatus,
     runtimeInstalled,
+    runtimeValid: Boolean(runtime),
     runtimeBin,
     promptValid: promptOk,
     resumeSessionValid: resumeOk,
+    activeRunId,
+    promptDeliveryValid: promptDelivery.valid,
+    promptDeliveryReason: promptDelivery.reason,
+    triggerReady,
+    triggerBlockReason,
+    readinessBlockers,
   }
 }
 
@@ -762,7 +850,51 @@ export function listTasks(): TaskWithMeta[] {
   const rows = getDb().prepare('SELECT * FROM tasks ORDER BY createdAt DESC').all() as TaskRow[]
   const depths = queueDepthByTask()
   const fires = latestScheduleFires(rows.map((row) => row.id))
-  return rows.map((row) => decorate(row, depths, fires))
+  const activeRuns = activeRunByTask()
+  return rows.map((row) => decorate(row, depths, fires, activeRuns))
+}
+
+function assertTaskWorkspaceIdle(taskId: string): void {
+  const db = getDb()
+  const running = db
+    .prepare("SELECT id FROM runs WHERE taskId = ? AND status = 'running' LIMIT 1")
+    .get(taskId) as { id: string } | undefined
+  if (running) {
+    throw new Error('Cannot change this workspace while a run is in progress. Stop the run first.')
+  }
+  const queuedRun = db
+    .prepare("SELECT id FROM runs WHERE taskId = ? AND status = 'queued' LIMIT 1")
+    .get(taskId) as { id: string } | undefined
+  const queued = db.prepare('SELECT id FROM run_queue WHERE taskId = ? LIMIT 1').get(taskId) as
+    | { id: string }
+    | undefined
+  if (queuedRun || queued) {
+    throw new Error(
+      'Cannot change this workspace while a run is queued. Let it drain or remove it first.',
+    )
+  }
+}
+
+/** Baseline/reset operations address a workspace, so account for every task. */
+function assertWorkspaceMutationIdle(workspaceId: string): void {
+  const db = getDb()
+  const running = db
+    .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' LIMIT 1")
+    .get(workspaceId) as { id: string } | undefined
+  if (running) {
+    throw new Error('Cannot change this workspace while a run is in progress. Stop the run first.')
+  }
+  const queuedRun = db
+    .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'queued' LIMIT 1")
+    .get(workspaceId) as { id: string } | undefined
+  const queued = db
+    .prepare('SELECT id FROM run_queue WHERE workspaceId = ? LIMIT 1')
+    .get(workspaceId) as { id: string } | undefined
+  if (queuedRun || queued) {
+    throw new Error(
+      'Cannot change this workspace while a run is queued. Let it drain or remove it first.',
+    )
+  }
 }
 
 function nativeResumeRuntimes(): Array<{
@@ -830,7 +962,8 @@ export function listNativeSessions(input: {
 
 export function getTask(taskId: string): TaskWithMeta | undefined {
   const row = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
-  return row ? decorate(row) : undefined
+  if (!row) return undefined
+  return decorate(row, queueDepthByTask(), latestScheduleFires([taskId]), activeRunByTask())
 }
 
 export type TaskInput = {
@@ -1230,6 +1363,7 @@ export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
   const db = getDb()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
   if (!task) throw new Error('Task not found')
+  assertTaskWorkspaceIdle(taskId)
 
   const active = db
     .prepare("SELECT id FROM runs WHERE taskId = ? AND status = 'running' LIMIT 1")
@@ -1287,6 +1421,7 @@ export function restoreTaskWorkspace(taskId: string): RestoreResult {
     | TaskRow
     | undefined
   if (!task) throw new Error('Task not found')
+  assertTaskWorkspaceIdle(taskId)
   return restoreWorkspace(assertWorkspaceId(task.workspaceId))
 }
 
@@ -1304,6 +1439,7 @@ export function clearTaskWorkspaceQuarantine(taskId: string): TaskWithMeta {
     | TaskRow
     | undefined
   if (!task) throw new Error('Task not found')
+  assertTaskWorkspaceIdle(taskId)
   clearWorkspaceBlock(assertWorkspaceId(task.workspaceId))
   return getTask(taskId)!
 }
@@ -1328,10 +1464,12 @@ export type BaselineResult = {
  */
 export async function runWorkspaceBaseline(workspaceId: string): Promise<BaselineResult> {
   const id = assertWorkspaceId(workspaceId)
+  assertWorkspaceMutationIdle(id)
   const checked = checkWorkspace(id)
   if (!checked) throw new Error('Workspace not found')
   assertWorkspaceReady(checked.workspace.status)
-  assertWorkspaceFree(id)
+  const healthBlock = workspaceHealthBlockedReason(checked.health, { unattended: true })
+  if (healthBlock) throw new Error(healthBlock)
 
   const defs = checksForWorkspace(id)
   if (defs.length === 0) {

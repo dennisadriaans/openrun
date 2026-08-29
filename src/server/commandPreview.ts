@@ -18,7 +18,8 @@ import {
   type CommandPreview,
 } from '../lib/commandPreview'
 import { emptyRuntimeBinaryMessage, normalizeBin } from '../lib/runtimeBinary'
-import { DEFAULT_RUNTIME_MODE } from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, parseRuntimeMode } from '../lib/runtimeMode'
+import { parseTransport } from '../lib/acpTransport'
 import { buildTurnCommand, runtimeKind } from './resume'
 import { checkRuntimeInstalled } from './runtimePath'
 import { resolveWorkspacePath } from './workspaces'
@@ -30,6 +31,8 @@ export type PreviewCommandInput = {
   /** Draft args template (JSON array); invalid values return an error, not a throw. */
   argsTemplate: string
   promptViaStdin: boolean
+  /** How Open Run talks to the runtime; unknown values use the CLI default. */
+  transport?: string | null
   /** Resolve the real spawn directory for `{cwd}` when a workspace is picked. */
   workspaceId?: string
   model?: string
@@ -80,6 +83,8 @@ export function previewRuntimeCommand(input: PreviewCommandInput): PreviewComman
   const effort = input.effort?.trim() ?? ''
   const isFollowUp = input.isFollowUp === true
   const cwd = previewCwd(input.workspaceId)
+  const transport = parseTransport(input.transport)
+  const runtimeMode = parseRuntimeMode(input.runtimeMode ?? DEFAULT_RUNTIME_MODE)
 
   const runtime: RuntimeRow = {
     id: 'preview',
@@ -90,9 +95,10 @@ export function previewRuntimeCommand(input: PreviewCommandInput): PreviewComman
     description: '',
     enabled: 1,
     canOpenPrs: 0,
-    // The preview is about the CLI argv, so it always previews the CLI path —
-    // an ACP runtime's argv only launches the agent and is shown verbatim.
-    transport: 'cli',
+    // The preview uses the selected transport: CLI argv carries prompt/mode
+    // flags, while ACP argv only launches the agent and the prompt travels via
+    // the protocol.
+    transport,
     createdAt: 0,
   }
 
@@ -107,7 +113,7 @@ export function previewRuntimeCommand(input: PreviewCommandInput): PreviewComman
       isFollowUp,
       model: input.model,
       effort,
-      runtimeMode: input.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+      runtimeMode,
     })
   } catch (err) {
     return { preview: null, error: err instanceof Error ? err.message : String(err) }
@@ -140,6 +146,8 @@ export function previewRuntimeCommand(input: PreviewCommandInput): PreviewComman
       installed,
       binaryPath: path,
       promptToken,
+      transport,
+      runtimeMode,
     }),
   }
 }

@@ -3,6 +3,8 @@
  * runtime receives rather than the automation row — so a stale or dropped
  * setting shows up instead of being echoed back from the same source.
  */
+import { parseTransport, type RuntimeTransport } from './acpTransport.ts'
+import { parseRuntimeMode, type RuntimeMode } from './runtimeMode.ts'
 
 const MODEL_FLAGS = ['--model', '-m']
 const EFFORT_FLAGS = ['--effort', '--reasoning-effort', '--reasoning_effort']
@@ -54,6 +56,12 @@ function accessFlags(args: string[]): string {
 export type EffectiveTurnSettings = {
   bin: string
   args: string[]
+  /** Normalized transport used by the turn. */
+  transport?: string | null
+  /** Normalized access mode used by the turn. */
+  runtimeMode?: string | null
+  /** True for schedule/webhook/repair turns with nobody at the keyboard. */
+  unattended?: boolean
   /** Env the child gets on top of process.env (fx carries model/mode here). */
   extraEnv?: Record<string, string> | undefined
   /** Prompt as delivered to the CLI — effort may be injected into it. */
@@ -68,15 +76,23 @@ export type EffectiveTurnSettings = {
  */
 export function describeEffectiveTurnSettings(input: EffectiveTurnSettings): string {
   const { args, prompt } = input
+  const transport: RuntimeTransport = parseTransport(input.transport)
+  const runtimeMode: RuntimeMode = parseRuntimeMode(input.runtimeMode)
   const model = flagValue(args, MODEL_FLAGS) ?? input.extraEnv?.FX_MODEL ?? 'default'
   const effortFlag =
     flagValue(args, EFFORT_FLAGS) ?? configValue(args, 'model_reasoning_effort') ?? ''
   const promptEffort = /^ultrathink:/i.test(prompt.trimStart()) ? 'ultrathink (in prompt)' : ''
   const effort = effortFlag || promptEffort || 'default'
-  const access = accessFlags(args) || input.extraEnv?.FX_PERMISSION_MODE || 'default'
+  const access =
+    accessFlags(args) ||
+    input.extraEnv?.FX_PERMISSION_MODE ||
+    (transport === 'acp' ? runtimeMode : 'default')
 
   const parts = [
     `runtime=${input.bin}`,
+    `transport=${transport}`,
+    `mode=${runtimeMode}`,
+    `execution=${input.unattended ? 'unattended' : 'attended'}`,
     `model=${model}`,
     `effort=${effort}`,
     `branch=${input.branch || 'none'}`,
