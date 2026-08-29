@@ -46,6 +46,12 @@ export function readMachineId(): string {
   return id
 }
 
+/** The next cloud sign-in represents this installation as a new device. */
+export function resetMachineId(): void {
+  const file = machineIdPath()
+  if (existsSync(file)) unlinkSync(file)
+}
+
 export function readCloudSession(): CloudSessionStored | null {
   const file = cloudSessionPath()
   if (!existsSync(file)) return null

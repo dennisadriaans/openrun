@@ -20,6 +20,7 @@ import {
   readCloudSession,
   readMachineId,
   readPkcePending,
+  resetMachineId,
   writeCloudSession,
   writeConnectPending,
   writePkcePending,
@@ -51,6 +52,9 @@ function deviceName(): string {
 export async function startCloudLogin(origin: string, next?: string): Promise<{ url: string }> {
   const cloudUrl = configuredCloudUrl()
   if (!cloudUrl) throw new Error('Cloud is turned off (AGENTOPS_CLOUD_URL=off).')
+  // Older versions left the machine id claimed after sign-out. A fresh id
+  // repairs those installs without weakening server-side ownership checks.
+  if (!readCloudSession()) resetMachineId()
   const { verifier, challenge } = await createPkcePair()
   const state = randomOAuthState()
   const redirectUri = localCloudCallbackUrl(origin)
@@ -173,6 +177,26 @@ export async function currentAccessToken(): Promise<string | null> {
 export function signOutCloud(): void {
   clearCloudSession()
   clearPkcePending()
+}
+
+/** Revoke remotely, then rotate the id so an offline sign-out cannot lock out the next account. */
+export async function disconnectCloud(): Promise<void> {
+  const session = readCloudSession()
+  const cloudUrl = configuredCloudUrl()
+  try {
+    if (session && cloudUrl) {
+      await fetch(`${cloudUrl}${CLOUD_PATHS.token}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${session.accessToken}` },
+        signal: AbortSignal.timeout(5_000),
+      })
+    }
+  } catch (err) {
+    console.error('[cloud] remote sign out failed; continuing locally', err)
+  } finally {
+    signOutCloud()
+    resetMachineId()
+  }
 }
 
 /**
