@@ -144,9 +144,9 @@ export function StatusDot({ status }: { status: string }) {
 export function StatusBadge({ status }: { status: string }) {
   const m = statusMeta(status)
   return (
-    <span className={`inline-flex items-center gap-1.5 text-ui-sm ${m.text}`} title={m.label}>
+    <span className="inline-flex items-center gap-2 text-ui-sm" title={m.label}>
       <StatusDot status={status} />
-      {m.label}
+      <span className={m.text}>{m.label}</span>
     </span>
   )
 }

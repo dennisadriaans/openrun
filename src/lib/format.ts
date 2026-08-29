@@ -87,17 +87,17 @@ export function duration(start: number, end: number | null): string {
 /**
  * Status presentation.
  *
- * "Live" and "good" states carry saturated green: `running` (in progress) and
- * the terminal success outcomes (success / ready). Running additionally pulses
- * via `live-dot` to distinguish an active run from a finished one. Everything
- * else renders on the neutral opacity tiers and earns emphasis from the dot
- * alone — failure keeps a coloured dot on neutral text so a red row never
- * competes for the eye.
+ * One anatomy for every status: a coloured dot plus a muted label. Hue lives
+ * on the dot only (`success`, `danger`, `warn`, or the quaternary tick), so a
+ * Failed row is not a red word and Success is not a green word. `running`
+ * still pulses via `live-dot` so an in-flight run is distinct from a finished
+ * one. Archived is one step quieter (`text-tier-quaternary`) because it is
+ * not an active row in these lists.
  */
 const STATUS_META: Record<string, { label: string; text: string; dot: string }> = {
   running: {
     label: 'Running',
-    text: 'text-success',
+    text: 'text-tier-tertiary',
     dot: 'bg-success',
   },
   queued: {
@@ -107,12 +107,12 @@ const STATUS_META: Record<string, { label: string; text: string; dot: string }> 
   },
   success: {
     label: 'Success',
-    text: 'text-success',
+    text: 'text-tier-tertiary',
     dot: 'bg-success',
   },
   error: {
     label: 'Failed',
-    text: 'text-tier-secondary',
+    text: 'text-tier-tertiary',
     dot: 'bg-danger',
   },
   cancelled: {
@@ -128,7 +128,7 @@ const STATUS_META: Record<string, { label: string; text: string; dot: string }> 
   },
   ready: {
     label: 'Ready',
-    text: 'text-success',
+    text: 'text-tier-tertiary',
     dot: 'bg-success',
   },
   archived: {
@@ -138,12 +138,12 @@ const STATUS_META: Record<string, { label: string; text: string; dot: string }> 
   },
   enabled: {
     label: 'Enabled',
-    text: 'text-success',
+    text: 'text-tier-tertiary',
     dot: 'bg-success',
   },
   paused: {
     label: 'Paused',
-    text: 'text-warn',
+    text: 'text-tier-tertiary',
     dot: 'bg-warn',
   },
 }

@@ -113,7 +113,7 @@ function TaskDetail() {
                 to="/runs/$runId"
                 params={{ runId: r.id }}
                 viewTransition
-                className="flex items-center justify-between gap-4 px-4 py-2.5 transition-colors hover:bg-hover"
+                className="flex items-center justify-between gap-4 px-4 py-1.5 transition-colors hover:bg-hover"
               >
                 <div className="min-w-0">
                   <div className="text-ui-sm text-tier-secondary">

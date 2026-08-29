@@ -1,2 +1,3 @@
-You no longer have bright, filled checkboxes pulling focus from Runs and
-Automations lists; selection controls now stay transparent until you need them.
+You no longer have outline-only ticks on Runs and Automations lists;
+unchecked boxes stay empty, and a selected box fills with the modified
+color so the check reads as the surface behind it.

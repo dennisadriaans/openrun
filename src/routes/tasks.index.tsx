@@ -192,9 +192,8 @@ function TasksPage() {
                     className="list-selection-checkbox disabled:cursor-not-allowed disabled:opacity-40"
                     onChange={(event) => {
                       event.stopPropagation()
-                      setSelectedIds((selected) =>
-                        toggleSelection(selected, t.id, event.currentTarget.checked),
-                      )
+                      const checked = event.currentTarget.checked
+                      setSelectedIds((selected) => toggleSelection(selected, t.id, checked))
                     }}
                     onClick={(event) => event.stopPropagation()}
                   />

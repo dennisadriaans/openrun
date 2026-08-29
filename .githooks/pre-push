@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -n "${SKIP_LINT_FIX:-}" ]; then
+  exit 0
+fi
+
+run_pnpm() {
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm "$@"
+  else
+    corepack pnpm "$@"
+  fi
+}
+
+status_before="$(git status --porcelain)"
+run_pnpm lint:fix
+status_after="$(git status --porcelain)"
+
+if [ "$status_before" != "$status_after" ]; then
+  echo "pre-push: pnpm lint:fix rewrote files. Commit them and push again." >&2
+  git status --short >&2
+  exit 1
+fi
+
+run_pnpm lint

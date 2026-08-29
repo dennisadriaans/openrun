@@ -263,7 +263,7 @@ function WorkspaceRow({ workspace: w }: { workspace: WorkspaceWithMeta }) {
   return (
     <div>
       <div
-        className={`group/ws px-4 py-2.5 transition-colors hover:bg-hover ${
+        className={`group/ws px-4 py-1.5 transition-colors hover:bg-hover ${
           ready ? 'cursor-pointer' : ''
         } ${opening ? 'opacity-70' : ''}`}
         role={ready ? 'button' : undefined}
