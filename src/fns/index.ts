@@ -197,6 +197,13 @@ export const removeTask = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+export const deleteTasks = createServerFn({ method: 'POST' })
+  .validator((d: { ids: string[] }) => d)
+  .handler(async ({ data }) => {
+    ;(await core()).deleteTasks(data.ids)
+    return { ok: true }
+  })
+
 export const runTaskNow = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => (await core()).runTaskNow(data.id))

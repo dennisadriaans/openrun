@@ -25,7 +25,7 @@ export const Route = createFileRoute('/runs/')({
 })
 
 const ROW_GRID =
-  'grid items-center gap-3 grid-cols-[2rem_6.5rem_minmax(0,1fr)_4rem_4.5rem_1.75rem] sm:grid-cols-[2rem_6.5rem_minmax(0,1fr)_8rem_4rem_4.5rem_1.75rem]'
+  'grid items-center gap-3 grid-cols-[1.5rem_6.5rem_minmax(0,1fr)_4rem_4.5rem_1.75rem] sm:grid-cols-[1.5rem_6.5rem_minmax(0,1fr)_8rem_4rem_4.5rem_1.75rem]'
 
 function RunsPage() {
   const demo = isDemoMode()
@@ -169,7 +169,7 @@ function RunsPage() {
                         ? 'No deletable runs on this page'
                         : 'Select all deletable runs on this page'
                     }
-                    className="relative z-10 size-4 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="relative z-10 size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
                     onChange={(event) => {
                       event.stopPropagation()
                       const checked = event.currentTarget.checked
@@ -214,7 +214,7 @@ function RunsPage() {
                         disabled={busy || deleteRuns.isPending}
                         aria-label={`Select ${r.chatTitle}`}
                         title={busy ? 'Cancel the run before deleting' : `Select ${r.chatTitle}`}
-                        className="size-4 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
                         onChange={(event) => {
                           event.stopPropagation()
                           setSelectedIds((selected) =>
