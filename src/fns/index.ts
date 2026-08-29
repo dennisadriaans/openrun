@@ -29,6 +29,7 @@ export type {
   ProjectWithMeta,
   WorkspaceWithMeta,
   IntegrationPublic,
+  TaskWithMeta,
 } from '../server/core'
 
 const core = () => import('../server/core')
@@ -199,6 +200,26 @@ export const removeTask = createServerFn({ method: 'POST' })
 export const runTaskNow = createServerFn({ method: 'POST' })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => (await core()).runTaskNow(data.id))
+
+export const isolateTaskWorkspace = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).isolateTaskWorkspace(data.id))
+
+export const restoreTaskWorkspace = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).restoreTaskWorkspace(data.id))
+
+export const clearTaskWorkspaceQuarantine = createServerFn({ method: 'POST' })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => (await core()).clearTaskWorkspaceQuarantine(data.id))
+
+export const restoreWorkspace = createServerFn({ method: 'POST' })
+  .validator((d: { workspaceId: string }) => d)
+  .handler(async ({ data }) => (await core()).restoreWorkspaceById(data.workspaceId))
+
+export const runWorkspaceBaseline = createServerFn({ method: 'POST' })
+  .validator((d: { workspaceId: string }) => d)
+  .handler(async ({ data }) => (await core()).runWorkspaceBaseline(data.workspaceId))
 
 export const listNativeSessions = createServerFn({ method: 'GET' })
   .validator(

@@ -95,6 +95,19 @@ export type TaskRow = {
   fireOnce: number
   /** Absolute local wall-clock fire time for one-shot automations. */
   scheduledAt: number
+  /**
+   * 1 = scheduled / webhook fires require an app-managed worktree of their own
+   * rather than the project's shared main checkout. Default on: unattended
+   * runs sharing one checkout is what lets a branch switch and a broken build
+   * from one automation become the next automation's starting point.
+   */
+  requireIsolation: number
+  /**
+   * 1 = refuse to arm or fire this automation unless `gh` is installed and
+   * authenticated. Implied by a runtime with `canOpenPrs`; set explicitly for
+   * automations that shell out to GitHub without the PR capability.
+   */
+  requireGhAuth: number
   createdAt: number
   updatedAt: number
   lastRunAt: number | null
@@ -380,6 +393,17 @@ export type WorkspaceRow = {
   status: 'creating' | 'ready' | 'error' | 'archived'
   setupLog: string
   setupExitCode: number | null
+  /**
+   * Why this workspace is quarantined from unattended runs: 'run' when a
+   * crashed / timed-out / red-checks run left it in an unknown state, or
+   * 'baseline' when a verification pass against it went red. Empty when the
+   * workspace is fit for automation. See lib/workspaceHealth.ts.
+   */
+  blockedKind: '' | 'run' | 'baseline'
+  /** Human-readable reason paired with blockedKind. */
+  blockedReason: string
+  /** When the block was recorded; 0 when not blocked. */
+  blockedAt: number
   createdAt: number
   archivedAt: number | null
 }
@@ -606,6 +630,9 @@ export function getDb(): Database.Database {
       status TEXT NOT NULL DEFAULT 'ready',
       setupLog TEXT NOT NULL DEFAULT '',
       setupExitCode INTEGER,
+      blockedKind TEXT NOT NULL DEFAULT '',
+      blockedReason TEXT NOT NULL DEFAULT '',
+      blockedAt INTEGER NOT NULL DEFAULT 0,
       createdAt INTEGER NOT NULL,
       archivedAt INTEGER,
       FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
@@ -717,6 +744,11 @@ function migrate(db: Database.Database) {
   addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'fireOnce', 'INTEGER NOT NULL DEFAULT 0')
   addColumn(db, 'tasks', 'scheduledAt', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'tasks', 'requireIsolation', 'INTEGER NOT NULL DEFAULT 1')
+  addColumn(db, 'tasks', 'requireGhAuth', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'workspaces', 'blockedKind', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'workspaces', 'blockedReason', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'workspaces', 'blockedAt', 'INTEGER NOT NULL DEFAULT 0')
 
   // Where a webhook-triggered message came from. Held beside the message
   // rather than inside it so the link never reaches the agent's prompt.

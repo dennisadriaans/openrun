@@ -10,15 +10,26 @@ import { runPrereqBlockedReason, type RunPrereqInput } from './runPrereqGate.ts'
 export type EnableGateInput = RunPrereqInput & {
   cron: string
   cronValid: boolean
+  /**
+   * Why an unattended fire would refuse — shared checkout, contaminated
+   * worktree, unusable gh. Computed on the server (it needs the filesystem and
+   * git) and carried on TaskWithMeta; omitted by callers that predate it.
+   */
+  unattendedBlockedReason?: string | null
 }
 
 /**
  * Developer-facing reason Enable would fail, in the same order as
  * `setTaskEnabled` on the server. `null` means arming is allowed.
+ *
+ * Arming is a promise that this automation is safe to run while nobody is
+ * watching, so the AFK rules gate Enable even though they do not gate Run now.
  */
 export function enableBlockedReason(input: EnableGateInput): string | null {
   if (!input.cronValid) return invalidCronMessage(input.cron)
-  return runPrereqBlockedReason(input)
+  const prereq = runPrereqBlockedReason(input)
+  if (prereq) return prereq
+  return input.unattendedBlockedReason ?? null
 }
 
 /** True when Enable may proceed (Pause is always allowed separately). */

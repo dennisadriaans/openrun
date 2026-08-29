@@ -9,6 +9,7 @@ import { emptyTaskPromptMessage } from './taskPrompt.ts'
 import { missingNativeSessionMessage } from './nativeSessions.ts'
 import { missingWorkspaceMessage } from './workspaceRef.ts'
 import { workspaceNotReadyMessage } from './workspaceReady.ts'
+import { workspaceHealthBlockedReason, type WorkspaceHealth } from './workspaceHealth.ts'
 
 /** Fields shared by Run now and (after cron) Enable. */
 export type RunPrereqInput = {
@@ -16,6 +17,8 @@ export type RunPrereqInput = {
   workspaceReady: boolean
   /** Lifecycle status when the workspace row exists; used for ready copy. */
   workspaceStatus?: string | null
+  /** Physical on-disk state, when the caller has it. See WorkspaceGateInput. */
+  workspaceHealth?: WorkspaceHealth | null
   runtimeInstalled: boolean
   /** Trimmed runtime binary name for PATH-missing copy. */
   runtimeBin?: string
@@ -35,18 +38,25 @@ export type WorkspaceGateInput = {
   workspaceValid: boolean
   workspaceReady: boolean
   workspaceStatus?: string | null
+  /**
+   * What is physically on disk, when the caller has it. Only the structural
+   * codes refuse here — a dirty or drifted tree is something the human
+   * pressing the button can see and judge; an absent directory is not.
+   */
+  workspaceHealth?: WorkspaceHealth | null
 }
 
 /**
  * Reason the workspace alone would refuse, or `null` when it is usable.
- * Order matches server assertWorkspaceId → assertWorkspaceReady.
+ * Order matches server assertWorkspaceId → assertWorkspaceReady → the
+ * on-disk check in `resolveWorkspacePath`.
  */
 export function workspaceBlockedReason(input: WorkspaceGateInput): string | null {
   if (!input.workspaceValid) return missingWorkspaceMessage()
   if (!input.workspaceReady) {
     return workspaceNotReadyMessage(input.workspaceStatus)
   }
-  return null
+  return workspaceHealthBlockedReason(input.workspaceHealth, { unattended: false })
 }
 
 /**

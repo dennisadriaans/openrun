@@ -46,6 +46,8 @@ export type DemoTask = {
     outcome: 'started' | 'queued' | 'skipped' | 'failed' | 'missed'
     detail: string
   } | null
+  /** Demo automations are always AFK-safe; declared so the list narrows. */
+  unattendedBlockedReason?: string | null
 }
 
 export function demoRuns(now: number = Date.now()): DemoRun[] {

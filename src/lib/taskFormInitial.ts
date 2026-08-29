@@ -22,6 +22,8 @@ export type TaskFormInitialSource = {
   resumeSessionLabel: string
   fireOnce: number
   scheduledAt: number
+  requireIsolation: number
+  requireGhAuth: number
 }
 
 /**
@@ -50,5 +52,7 @@ export function taskFormInitial(task: TaskFormInitialSource) {
     resumeSessionLabel: task.resumeSessionLabel,
     fireOnce: task.fireOnce,
     scheduledAt: task.scheduledAt,
+    requireIsolation: task.requireIsolation,
+    requireGhAuth: task.requireGhAuth,
   }
 }

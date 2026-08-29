@@ -17,7 +17,8 @@ import { runTask, type MessageSource } from './executor.ts'
 import { isShuttingDown } from './processControl.ts'
 import { checkRuntimeInstalled } from './runtimePath.ts'
 import { settleScheduleFire } from './scheduleFires.ts'
-import { getWorkspace } from './workspaces.ts'
+import { unattendedRefusalFor } from './unattendedPreflight.ts'
+import { checkWorkspace } from './workspaceHealth.ts'
 
 function id(): string {
   return `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
@@ -211,8 +212,12 @@ export function drainWorkspace(workspaceId: string): void {
       })
       continue
     }
-    const workspace = getWorkspace(workspaceId)
-    if (!workspace || !isWorkspaceReady(workspace.status)) {
+    // A queued fire waited precisely because another run was using this
+    // worktree — so re-inspect it here rather than trusting the state it was
+    // in when the fire came due. The run that just finished is exactly the one
+    // that may have switched its branch or left it dirty.
+    const checked = checkWorkspace(workspaceId)
+    if (!checked || !isWorkspaceReady(checked.workspace.status)) {
       removeEntry(entry.id)
       publishDepth(workspaceId)
       settleScheduleFire(entry.scheduleFireId, {
@@ -232,6 +237,19 @@ export function drainWorkspace(workspaceId: string): void {
         outcome: 'failed',
         detail: 'Runtime became unavailable while this fire was queued.',
       })
+      continue
+    }
+
+    const unattended = unattendedRefusalFor({
+      task,
+      runtime,
+      workspace: checked.workspace,
+      health: checked.health,
+    })
+    if (unattended) {
+      removeEntry(entry.id)
+      publishDepth(workspaceId)
+      settleScheduleFire(entry.scheduleFireId, { outcome: 'failed', detail: unattended })
       continue
     }
 

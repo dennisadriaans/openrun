@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { Play, Trash2 } from 'lucide-react'
 import { TaskForm } from '../components/TaskForm'
+import { WorkspaceReadiness } from '../components/WorkspaceReadiness'
 import { useTopBarActions } from '../components/AppChrome'
 import { Button, Card, EmptyState, StatusBadge, VerdictBadge } from '../components/ui'
 import { duration, relativeTime } from '../lib/format'
@@ -98,6 +99,8 @@ function TaskDetail() {
           qc.invalidateQueries({ queryKey: ['tasks'] })
         }}
       />
+
+      <WorkspaceReadiness task={task} />
 
       {runs && runs.length > 0 ? (
         <section className="mx-auto mt-10 max-w-3xl border-t border-[var(--border-quaternary)] pt-6">

@@ -20,7 +20,8 @@ import { drainAllQueues, enqueueRun } from './runQueue'
 import { checkRuntimeInstalled } from './runtimePath'
 import { recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
 import { isSchedulableCron } from './cronValidation.ts'
-import { getWorkspace } from './workspaces'
+import { unattendedRefusalFor } from './unattendedPreflight'
+import { checkWorkspace } from './workspaceHealth'
 
 const MAX_TIMER_MS = 2_147_000_000
 const WORKSPACE_BUSY_MESSAGE = 'This workspace already has a run in progress'
@@ -63,8 +64,12 @@ function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string
   if (!hasWorkspaceId(task.workspaceId)) {
     return { outcome: 'failed', detail: 'Automation has no workspace.' }
   }
-  const workspace = getWorkspace(task.workspaceId)
-  if (!workspace || !isWorkspaceReady(workspace.status)) {
+  // The stored status only records what the app last did to the directory.
+  // Inspect the worktree itself before arming a child process at it — a row
+  // that still says `ready` for a path that no longer exists is what turns a
+  // scheduled fire into an unexplained `spawn <cli> ENOENT`.
+  const checked = checkWorkspace(task.workspaceId)
+  if (!checked || !isWorkspaceReady(checked.workspace.status)) {
     return { outcome: 'failed', detail: 'Automation workspace is not ready.' }
   }
   const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
@@ -79,6 +84,16 @@ function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string
   if (!nativeResumeReady(task, runtime)) {
     return { outcome: 'failed', detail: 'The native CLI session no longer exists.' }
   }
+  // Nobody is watching this fire: refuse a shared checkout, a contaminated
+  // worktree, or a GitHub capability that is not actually usable, rather than
+  // spending an agent turn discovering it.
+  const unattended = unattendedRefusalFor({
+    task,
+    runtime,
+    workspace: checked.workspace,
+    health: checked.health,
+  })
+  if (unattended) return { outcome: 'failed', detail: unattended }
   return null
 }
 

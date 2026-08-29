@@ -740,6 +740,34 @@ export function commit(cwd: string, message: string, paths?: string[]): { sha: s
   return { sha: git(cwd, ['rev-parse', '--short', 'HEAD']).stdout.trim() }
 }
 
+/**
+ * Put a worktree back on `branch` at `origin/<branch>` (or the local branch
+ * when there is no remote), throwing away uncommitted and untracked files —
+ * and, when the branch is on a remote, any commits that were never pushed.
+ * Only ever called against an app-managed worktree; `restoreWorkspace` refuses
+ * to do this to the user's own checkout.
+ */
+export function resetWorktree(cwd: string, branch: string): void {
+  if (!isRepo(cwd)) throw new Error('Not a git repository')
+  if (!branch.trim()) throw new Error('A branch is required to restore a worktree')
+
+  // Reset before checkout: a dirty tree makes `git checkout` refuse when the
+  // branches differ in the files that are dirty.
+  gitOrThrow(cwd, ['reset', '--hard'])
+  // No -x: ignored files are the worktree's installed dependencies, .env and
+  // build caches. Removing those turns a restore into a re-setup.
+  gitOrThrow(cwd, ['clean', '-fd'])
+
+  if (currentBranch(cwd) !== branch) {
+    gitOrThrow(cwd, ['checkout', branch])
+  }
+
+  const remote = git(cwd, ['rev-parse', '--verify', '--quiet', `origin/${branch}`])
+  if (remote.ok && remote.stdout.trim()) {
+    gitOrThrow(cwd, ['reset', '--hard', `origin/${branch}`])
+  }
+}
+
 /** Create and switch to a new branch. */
 export function createBranch(cwd: string, name: string) {
   gitOrThrow(cwd, ['checkout', '-b', name])

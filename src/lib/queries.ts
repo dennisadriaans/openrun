@@ -817,6 +817,56 @@ export function useRunNow() {
   })
 }
 
+/** Move an automation off the shared main checkout onto its own worktree. */
+export function useIsolateTaskWorkspace() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => fns.isolateTaskWorkspace({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+/** Discard everything in an automation's worktree and lift its quarantine. */
+export function useRestoreTaskWorkspace() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => fns.restoreTaskWorkspace({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+/** Lift a quarantine without discarding what the failed run left behind. */
+export function useClearWorkspaceQuarantine() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => fns.clearTaskWorkspaceQuarantine({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+    },
+  })
+}
+
+/** Run the project's checks against a workspace before anything is armed on it. */
+export function useRunWorkspaceBaseline() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (workspaceId: string) => fns.runWorkspaceBaseline({ data: { workspaceId } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+    },
+  })
+}
+
 export function useDeleteTask() {
   const qc = useQueryClient()
   return useMutation({

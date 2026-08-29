@@ -42,6 +42,7 @@ import {
   type TurnEventRow,
 } from './turnEvents'
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
+import { recordRunOutcomeForWorkspace } from './workspaceHealth'
 import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
@@ -1899,6 +1900,22 @@ async function concludeTurn(input: {
         messageId: input.assistantMessageId,
       })
     }
+  }
+
+  // An unattended run owns its workspace's fitness for the next unattended
+  // run: a bad verdict quarantines it so the following automation refuses the
+  // worktree instead of inheriting the broken tree it left behind, and a good
+  // one lifts an earlier quarantine. Attended turns are excluded — a human is
+  // looking at the result and does not need the workspace taken away.
+  if (input.unattended) {
+    const taskName = db.prepare('SELECT taskName FROM runs WHERE id = ?').get(input.runId) as
+      | { taskName: string }
+      | undefined
+    recordRunOutcomeForWorkspace({
+      workspaceId: run.workspaceId,
+      taskName: taskName?.taskName ?? 'a scheduled run',
+      verdict,
+    })
   }
 
   finalizeRun(input.runId, input.status, input.exitCode, verdict)

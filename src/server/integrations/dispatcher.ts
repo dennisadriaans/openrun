@@ -16,6 +16,7 @@ import type { CanonicalWebhookEvent } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow, type TaskRow } from '../db.ts'
 import { startRun } from '../executor.ts'
 import { enqueueRun } from '../runQueue.ts'
+import { unattendedRefusal } from '../unattendedPreflight.ts'
 import { getIntegration } from './connections.ts'
 import { getWorkspace } from '../workspaces.ts'
 
@@ -94,6 +95,21 @@ function matchingTasks(integrationId: string, event: CanonicalWebhookEvent): Tas
   return rows.filter((t) => taskMatchesWebhookEvent(t, integrationId, event))
 }
 
+/**
+ * Reason this automation must not fire at all right now — a shared checkout, a
+ * contaminated worktree, or a GitHub capability that is not usable. Distinct
+ * from a busy workspace: none of these get better by waiting, so the caller
+ * records the refusal instead of parking the fire in the queue.
+ */
+function webhookRefusal(task: TaskRow): string | null {
+  const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
+    | RuntimeRow
+    | undefined
+  if (!runtime) return `Runtime not found: ${task.runtimeId}`
+  if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
+  return unattendedRefusal(task, runtime)
+}
+
 function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
   const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
     | RuntimeRow
@@ -160,6 +176,13 @@ function ingestCanonicalEvents(
     const runIds: string[] = []
     const queuedTaskIds: string[] = []
     for (const task of tasks) {
+      // Checked before the try: a refusal here is permanent for this delivery,
+      // and queueing it would only replay the same failure later.
+      const refused = webhookRefusal(task)
+      if (refused) {
+        errors.push(`${task.id}: ${refused}`)
+        continue
+      }
       try {
         const runId = fireTask(task, event)
         runIds.push(runId)

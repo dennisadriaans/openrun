@@ -685,6 +685,10 @@ export type TaskFormValues = {
   resumeSessionLabel?: string
   fireOnce?: number
   scheduledAt?: number
+  /** Unattended fires need an app-managed worktree rather than the main checkout. */
+  requireIsolation?: number
+  /** Refuse to arm or fire unless the gh CLI is installed and logged in. */
+  requireGhAuth?: number
 }
 
 const empty: TaskFormValues = {
@@ -706,6 +710,8 @@ const empty: TaskFormValues = {
   resumeSessionLabel: '',
   fireOnce: 0,
   scheduledAt: 0,
+  requireIsolation: 1,
+  requireGhAuth: 0,
 }
 
 function WebhookTriggerRow({
@@ -976,6 +982,8 @@ export function TaskForm({
   const [model, setModel] = useState(initial?.model ?? '')
   const [effort, setEffort] = useState(initial?.effort ?? '')
   const [verifyEnabled, setVerifyEnabled] = useState((initial?.verifyEnabled ?? 1) !== 0)
+  const [requireIsolation, setRequireIsolation] = useState((initial?.requireIsolation ?? 1) !== 0)
+  const [requireGhAuth, setRequireGhAuth] = useState((initial?.requireGhAuth ?? 0) !== 0)
   const [repairAttempts, setRepairAttempts] = useState(initial?.maxRepairAttempts ?? 1)
   const [timeoutMinutes, setTimeoutMinutes] = useState(
     initial?.timeoutMs ? Math.round(initial.timeoutMs / 60_000) : 0,
@@ -1266,6 +1274,8 @@ export function TaskForm({
       webhookEvents: webhookEnabled ? (v.webhookEvents ?? []) : [],
       webhookFilters: webhookEnabled ? (v.webhookFilters ?? {}) : {},
       verifyEnabled: verifyEnabled,
+      requireIsolation,
+      requireGhAuth,
       maxRepairAttempts: repairAttempts,
       timeoutMinutes: timeoutMinutes,
       resumeSessionId: v.resumeSessionId ?? '',
@@ -1776,6 +1786,16 @@ export function TaskForm({
                 setDirty(true)
                 setTimeoutMinutes(n)
               }}
+              requireIsolation={requireIsolation}
+              onRequireIsolationChange={(on) => {
+                setDirty(true)
+                setRequireIsolation(on)
+              }}
+              requireGhAuth={requireGhAuth}
+              onRequireGhAuthChange={(on) => {
+                setDirty(true)
+                setRequireGhAuth(on)
+              }}
             />
           ) : null}
         </section>
@@ -1829,6 +1849,10 @@ function VerificationSection({
   onRepairAttemptsChange,
   timeoutMinutes,
   onTimeoutMinutesChange,
+  requireIsolation,
+  onRequireIsolationChange,
+  requireGhAuth,
+  onRequireGhAuthChange,
 }: {
   verifyEnabled: boolean
   onVerifyEnabledChange: (value: boolean) => void
@@ -1836,6 +1860,10 @@ function VerificationSection({
   onRepairAttemptsChange: (value: number) => void
   timeoutMinutes: number
   onTimeoutMinutesChange: (value: number) => void
+  requireIsolation: boolean
+  onRequireIsolationChange: (value: boolean) => void
+  requireGhAuth: boolean
+  onRequireGhAuthChange: (value: boolean) => void
 }) {
   return (
     <div className="mt-2 space-y-3 rounded-xl border border-border bg-elevated px-3.5 py-3">
@@ -1879,6 +1907,39 @@ function VerificationSection({
             onChange={(e) => onTimeoutMinutesChange(Number(e.target.value))}
           />
         </label>
+      </div>
+
+      <div className="border-t border-[var(--border-quaternary)] pt-3">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-[var(--base)]"
+            checked={requireIsolation}
+            onChange={(e) => onRequireIsolationChange(e.target.checked)}
+          />
+          <span className="text-ui-base text-foreground">
+            Scheduled runs need a worktree of their own
+          </span>
+        </label>
+        <p className="mt-1 text-ui-sm text-tier-tertiary">
+          Refuses to arm or fire against the main checkout, and against a worktree that has drifted
+          onto another branch or still holds an earlier run's changes. Turning this off lets one
+          automation's leftovers become the next one's starting point.
+        </p>
+
+        <label className="mt-3 flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-[var(--base)]"
+            checked={requireGhAuth}
+            onChange={(e) => onRequireGhAuthChange(e.target.checked)}
+          />
+          <span className="text-ui-base text-foreground">Needs an authenticated GitHub CLI</span>
+        </label>
+        <p className="mt-1 text-ui-sm text-tier-tertiary">
+          Checks <code>gh auth status</code> before the run starts instead of letting the agent
+          discover it mid-turn. Already implied for runtimes allowed to open pull requests.
+        </p>
       </div>
     </div>
   )

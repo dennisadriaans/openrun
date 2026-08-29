@@ -90,7 +90,12 @@ function TasksPage() {
           </div>
           {tasks.map((t) => {
             const runBlocked = runNowBlockedReason(t)
-            const schedule = scheduleCell(t, runBlocked)
+            // An armed automation whose worktree has drifted, gone dirty, or
+            // lost its gh login still looks scheduled — say so on the row
+            // rather than letting it fail at 03:20.
+            const afkBlocked = t.enabled ? (t.unattendedBlockedReason ?? null) : null
+            const blocked = runBlocked ?? afkBlocked
+            const schedule = scheduleCell(t, blocked)
             const when = whenCell(t)
             return (
               <div
@@ -109,7 +114,7 @@ function TasksPage() {
                   {t.runtimeLabel}
                 </span>
                 <span
-                  className={`truncate text-ui-sm ${runBlocked ? 'text-warn' : 'text-tier-tertiary'}`}
+                  className={`truncate text-ui-sm ${blocked ? 'text-warn' : 'text-tier-tertiary'}`}
                   title={schedule}
                 >
                   {schedule}

@@ -23,6 +23,8 @@ const stored: TaskFormInitialSource = {
   resumeSessionLabel: 'Release chat',
   fireOnce: 1,
   scheduledAt: 1_700_000_100_000,
+  requireIsolation: 1,
+  requireGhAuth: 0,
 }
 
 describe('taskFormInitial', () => {
@@ -54,6 +56,8 @@ describe('taskFormInitial', () => {
       resumeSessionLabel: 'Release chat',
       fireOnce: 1,
       scheduledAt: 1_700_000_100_000,
+      requireIsolation: 1,
+      requireGhAuth: 0,
     })
   })
 })
