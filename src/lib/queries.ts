@@ -747,7 +747,8 @@ export function useSaveTask() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: Parameters<typeof fns.saveTask>[0]['data']) => fns.saveTask({ data }),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      if (saved?.id) qc.setQueryData(['task', saved.id], saved)
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
     },

@@ -768,16 +768,19 @@ function decorate(
     canOpenPrs: runtime?.canOpenPrs === 1,
     requireGhAuth: task.requireGhAuth === 1,
   })
-  const unattendedBlocked = workspace
-    ? unattendedBlockedReason({
-        workspaceKind: workspace.kind,
-        requireIsolation: task.requireIsolation === 1,
-        health,
-        requiresGh,
-        ghInstalled: gh.installed,
-        ghAuthenticated: gh.authenticated,
-      })
-    : null
+  const unattendedOwner = workspace ? getUnattendedWorkspaceOwner(workspace.id, task.id) : undefined
+  const unattendedBlocked = unattendedOwner
+    ? workspaceOwnerMessage(unattendedOwner.name)
+    : workspace
+      ? unattendedBlockedReason({
+          workspaceKind: workspace.kind,
+          requireIsolation: task.requireIsolation === 1,
+          health,
+          requiresGh,
+          ghInstalled: gh.installed,
+          ghAuthenticated: gh.authenticated,
+        })
+      : null
   const readinessBlockers = taskReadinessBlockers({
     enabled: task.enabled,
     cron: task.cron,
@@ -1020,6 +1023,9 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
   const tid = input.id ?? id('task')
   const now = Date.now()
   const existingRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(tid) as TaskRow | undefined
+  if (existingRow && existingRow.workspaceId !== workspaceId) {
+    assertTaskWorkspaceIdle(tid)
+  }
 
   // cwd stays the source of truth for git operations (executor, diff panel,
   // etc.) — resolve once here so cwd stays in sync with the workspace path.

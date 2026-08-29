@@ -11,8 +11,9 @@ import { AlertTriangle, CheckCircle2, GitBranch, Loader2, RotateCcw, Split } fro
 import type { TaskWithMeta } from '../fns'
 import { hasUnattendedTrigger } from '../lib/taskReadiness'
 import { taskWorkspaceChangeBlockedReason } from '../lib/taskIsolationGate'
+import { runNowBlockedReason } from '../lib/runNowGate'
 import { missingWorkspaceMessage } from '../lib/workspaceRef'
-import { workspaceHealthMessage } from '../lib/workspaceHealth'
+import { isFatalHealth, workspaceHealthMessage } from '../lib/workspaceHealth'
 import { workspaceNotReadyMessage } from '../lib/workspaceReady'
 import { Button, Card } from './ui'
 import {
@@ -44,8 +45,11 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
   const health = task.workspaceHealth
   const blockers = task.readinessBlockers ?? []
   const blocked = blockers.length > 0
+  const cannotRun = runNowBlockedReason(task) !== null
   const sharedCheckout = task.workspaceKind === 'main' && task.requireIsolation === 1
-  const canRestore = task.workspaceKind === 'worktree'
+  const workspaceUnavailable =
+    !task.workspaceValid || !task.workspaceReady || Boolean(health && isFatalHealth(health.code))
+  const canRestore = task.workspaceKind === 'worktree' && (!health || !isFatalHealth(health.code))
   const quarantined = health?.code === 'blocked'
   const activityBlocked = taskWorkspaceChangeBlockedReason(task)
   const baselineBlocked = !task.workspaceValid
@@ -70,10 +74,12 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
         )}
         <h2 className="text-ui-sm font-medium text-tier-secondary">
           {blocked
-            ? 'Not ready for unattended runs'
+            ? cannotRun
+              ? 'Cannot Run This Automation'
+              : 'Not Ready for Unattended Runs'
             : hasUnattendedTrigger(task)
-              ? 'Ready for unattended runs'
-              : 'Ready to run'}
+              ? 'Ready for Unattended Runs'
+              : 'Ready to Run'}
         </h2>
       </div>
 
@@ -88,6 +94,13 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {workspaceUnavailable ? (
+        <p className="mb-3 text-ui-sm leading-relaxed text-tier-tertiary">
+          Choose another workspace above, open an existing branch in a new workspace, or create a
+          new branch and workspace from the same menu.
+        </p>
       ) : null}
 
       <div className="space-y-1">

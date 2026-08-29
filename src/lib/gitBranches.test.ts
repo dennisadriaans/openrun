@@ -36,7 +36,7 @@ describe('parseGitForEachRef', () => {
 })
 
 describe('projectBranchChoices', () => {
-  it('attaches existing worktrees and marks unattached git branches as pending', () => {
+  it('separates existing workspaces from branches that create one', () => {
     const rows = projectBranchChoices({
       gitBranches: [
         { name: 'main', lastCommitAt: 2, current: true, remote: false },
@@ -47,12 +47,13 @@ describe('projectBranchChoices', () => {
         { id: 'ws-orphan', branch: 'hotfix', kind: 'worktree', status: 'ready' },
       ],
     })
-    assert.equal(rows[0]?.id, 'ws-main')
-    assert.equal(rows[0]?.hint, 'main checkout')
-    assert.equal(rows[1]?.id, pendingGitBranchId('feat'))
-    assert.equal(rows[1]?.hint, 'remote — open worktree')
-    assert.equal(rows[2]?.id, 'ws-orphan')
-    assert.equal(rows[2]?.branch, 'hotfix')
+    const main = rows.find((row) => row.id === 'ws-main')
+    assert.equal(main?.action, 'select-workspace')
+    assert.equal(main?.hint, 'Shared main checkout')
+    const feat = rows.find((row) => row.id === pendingGitBranchId('feat'))
+    assert.equal(feat?.action, 'create-workspace')
+    assert.match(feat?.hint ?? '', /new isolated workspace/i)
+    assert.equal(rows.find((row) => row.id === 'ws-orphan')?.branch, 'hotfix')
   })
 
   it('blocks workspaces that are still setting up', () => {
@@ -60,11 +61,10 @@ describe('projectBranchChoices', () => {
       gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
       workspaces: [{ id: 'ws-1', branch: 'feat', status: 'creating' }],
     })
-    assert.equal(rows[0]?.id, 'ws-1')
-    assert.equal(rows[0]?.blockedReason, 'setting up')
+    assert.match(rows[0]?.blockedReason ?? '', /setting up/i)
   })
 
-  it('prefers a usable workspace when duplicate branch rows are stale', () => {
+  it('shows duplicate workspace rows instead of hiding the broken one', () => {
     const rows = projectBranchChoices({
       gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
       workspaces: [
@@ -72,11 +72,12 @@ describe('projectBranchChoices', () => {
         { id: 'ws-main', branch: 'feat', kind: 'main', status: 'ready' },
       ],
     })
-    assert.equal(rows[0]?.id, 'ws-main')
-    assert.equal(rows[0]?.blockedReason, null)
+    assert.equal(rows.filter((row) => row.action === 'select-workspace').length, 2)
+    assert.equal(rows.find((row) => row.id === 'ws-main')?.blockedReason, null)
+    assert.match(rows.find((row) => row.id === 'ws-deleted')?.blockedReason ?? '', /failed/i)
   })
 
-  it('does not let a creating duplicate shadow a ready worktree', () => {
+  it('keeps a ready duplicate selectable while another is creating', () => {
     const rows = projectBranchChoices({
       gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
       workspaces: [
@@ -84,8 +85,8 @@ describe('projectBranchChoices', () => {
         { id: 'ws-ready', branch: 'feat', kind: 'worktree', status: 'ready' },
       ],
     })
-    assert.equal(rows[0]?.id, 'ws-ready')
-    assert.equal(rows[0]?.blockedReason, null)
+    assert.equal(rows.find((row) => row.id === 'ws-ready')?.blockedReason, null)
+    assert.match(rows.find((row) => row.id === 'ws-creating')?.blockedReason ?? '', /setting up/i)
   })
 
   it('blocks workspaces that already have an active run', () => {
@@ -94,7 +95,66 @@ describe('projectBranchChoices', () => {
       workspaces: [{ id: 'ws-1', branch: 'feat', status: 'ready', activeRunId: 'run-active' }],
     })
     assert.equal(rows[0]?.id, 'ws-1')
-    assert.equal(rows[0]?.blockedReason, 'run active')
+    assert.match(rows[0]?.blockedReason ?? '', /active run/i)
+  })
+
+  it('never revives an archived workspace as a selected picker option', () => {
+    const rows = projectBranchChoices({
+      gitBranches: [{ name: 'feat', lastCommitAt: 1, current: false, remote: false }],
+      workspaces: [{ id: 'ws-old', branch: 'feat', kind: 'worktree', status: 'archived' }],
+      selectedWorkspaceId: 'ws-old',
+    })
+    assert.equal(
+      rows.some((row) => row.id === 'ws-old'),
+      false,
+    )
+    assert.equal(rows[0]?.action, 'create-workspace')
+  })
+
+  it('hides the branch in the primary checkout but keeps an existing worktree', () => {
+    const rows = projectBranchChoices({
+      gitBranches: [
+        { name: 'main', lastCommitAt: 2, current: true, remote: false },
+        { name: 'feat', lastCommitAt: 1, current: false, remote: false },
+      ],
+      workspaces: [
+        { id: 'ws-feat', branch: 'feat', kind: 'worktree', status: 'ready' },
+      ],
+    })
+    assert.equal(
+      rows.some((row) => row.branch === 'main'),
+      false,
+    )
+    assert.equal(
+      rows.some((row) => row.id === 'ws-feat'),
+      true,
+    )
+
+    const existing = projectBranchChoices({
+      gitBranches: [{ name: 'main', lastCommitAt: 2, current: false, remote: false }],
+      workspaces: [{ id: 'ws-main', branch: 'main', kind: 'worktree', status: 'ready' }],
+    })
+    assert.equal(existing[0]?.id, 'ws-main')
+  })
+
+  it('explains physical, ownership, and contamination blockers for unattended use', () => {
+    const rows = projectBranchChoices({
+      gitBranches: [],
+      workspaces: [
+        { id: 'missing', branch: 'a', status: 'ready', exists: false },
+        {
+          id: 'owned',
+          branch: 'b',
+          status: 'ready',
+          unattendedOwnerName: 'Nightly docs',
+        },
+        { id: 'dirty', branch: 'c', status: 'ready', dirty: true },
+      ],
+      unattended: true,
+    })
+    assert.match(rows.find((row) => row.id === 'missing')?.blockedReason ?? '', /missing/i)
+    assert.match(rows.find((row) => row.id === 'owned')?.blockedReason ?? '', /Nightly docs/)
+    assert.match(rows.find((row) => row.id === 'dirty')?.blockedReason ?? '', /uncommitted/i)
   })
 })
 

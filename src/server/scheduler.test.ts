@@ -10,6 +10,7 @@ import type { ScheduleFireRow } from './db.ts'
 const appRoot = process.cwd()
 const root = mkdtempSync(join(tmpdir(), 'openrun-scheduler-'))
 const repo = join(root, 'repo')
+const worktree = join(root, 'worktree')
 mkdirSync(repo)
 // -b main: the workspace row says `main`, and a runner whose git defaults to
 // `master` would read as branch drift and refuse the unattended fire.
@@ -17,6 +18,9 @@ execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
 execFileSync('git', ['config', 'user.email', 'scheduler@example.test'], { cwd: repo })
 execFileSync('git', ['config', 'user.name', 'Scheduler Test'], { cwd: repo })
 execFileSync('git', ['commit', '--allow-empty', '-qm', 'initial'], { cwd: repo })
+execFileSync('git', ['worktree', 'add', '-q', '-b', 'openrun/scheduler', worktree, 'main'], {
+  cwd: repo,
+})
 
 const cwdBefore = process.cwd()
 process.chdir(root)
@@ -64,8 +68,8 @@ function seedTask(id: string, scheduledAt: number) {
   db.prepare(
     `INSERT OR REPLACE INTO workspaces
        (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
-     VALUES ('workspace-1', 'project-1', 'main', 'main', ?, 'main', 'ready', '', NULL, 1, NULL)`,
-  ).run(repo)
+     VALUES ('workspace-1', 'project-1', 'scheduler', 'openrun/scheduler', ?, 'worktree', 'ready', '', NULL, 1, NULL)`,
+  ).run(worktree)
   db.prepare(
     `INSERT INTO tasks
        (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled,
@@ -75,7 +79,7 @@ function seedTask(id: string, scheduledAt: number) {
         createdAt, updatedAt, lastRunAt)
      VALUES (?, 'One shot', '', 'test-shell', 'work', ?, 'workspace-1', '* * * * *', 1,
              '', '', '', '[]', '{}', 1, 0, 0, '', '', 1, ?, 0, 0, 1, 1, NULL)`,
-  ).run(id, repo, scheduledAt)
+  ).run(id, worktree, scheduledAt)
 }
 
 async function waitForFire(taskId: string): Promise<ScheduleFireRow> {
