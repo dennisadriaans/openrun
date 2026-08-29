@@ -96,3 +96,12 @@ export function workspaceHealthBlockedReason(
   if (!options.unattended && !isFatalHealth(health.code)) return null
   return workspaceHealthMessage(health)
 }
+
+/**
+ * Shared wording for a run whose working directory is no longer on disk.
+ * Node reports a missing cwd from `spawn` as ENOENT on the *binary*, so
+ * without this the failure reads as "the CLI is not installed".
+ */
+export function missingRunCwdMessage(path: string): string {
+  return `The working directory is gone (${path}). Recreate it, or point this run at a directory that still exists.`
+}

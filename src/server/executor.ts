@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDb, type CheckResultRow, type MessageRow, type RuntimeRow, type TaskRow } from './db'
@@ -43,6 +43,7 @@ import {
 } from './turnEvents'
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
 import { recordRunOutcomeForWorkspace } from './workspaceHealth'
+import { missingRunCwdMessage } from '../lib/workspaceHealth.ts'
 import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
@@ -285,6 +286,7 @@ export function startRun(input: StartRunInput): string {
   } else {
     cwd = input.cwd && input.cwd.trim().length > 0 ? input.cwd : process.cwd()
   }
+  assertRunCwdExists(cwd)
 
   // Claude and Grok let us choose the session id up front, which avoids having
   // to parse it back out of the output before the user can send a follow-up.
@@ -475,6 +477,7 @@ export function sendFollowUp(input: {
       }
     | undefined
   if (!run) throw new Error('Run not found')
+  assertRunCwdExists(run.cwd)
   if (!input.internal && run.status === 'running') {
     throw new Error('This run is still working — wait for it to finish')
   }
@@ -614,6 +617,11 @@ function handoffChangedFiles(cwd: string, baseSnapshot: string): string[] {
  * answer for *this* run: the CLI inherits it and passes it down to any MCP
  * server it spawns, so the tools need no handshake of their own.
  */
+/** Refuse before spawn when the run's working directory is not on disk. */
+function assertRunCwdExists(cwd: string): void {
+  if (!existsSync(cwd)) throw new Error(missingRunCwdMessage(cwd))
+}
+
 function turnEnv(runId: string, extraEnv?: Record<string, string>): Record<string, string> {
   return {
     ...(extraEnv ?? {}),
