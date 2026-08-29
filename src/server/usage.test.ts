@@ -27,7 +27,7 @@ const { getDb, closeDb } = await import('./db.ts')
 
 const DAY = 86_400_000
 const now = Date.now()
-const today = new Date(now).toISOString().slice(0, 10)
+const latestClaudeDay = new Date(now - 2 * 3_600_000).toISOString().slice(0, 10)
 
 function write(file: string, contents: string): void {
   mkdirSync(dirname(file), { recursive: true })
@@ -347,7 +347,7 @@ describe('collectUsage: ranges and totals', () => {
 
   it('dates daily rows by the day the tokens landed on', () => {
     const claude = rowFor('rt_claude')
-    assert.ok(claude.daily.some((d) => d.date === today))
+    assert.ok(claude.daily.some((d) => d.date === latestClaudeDay))
     assert.deepEqual(
       [...claude.daily].sort((a, b) => (a.date < b.date ? -1 : 1)),
       claude.daily,
