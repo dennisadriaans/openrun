@@ -72,6 +72,7 @@ import {
 import type { ApprovalDecision } from '../lib/claudeControl'
 import * as files from './files'
 import * as git from './git'
+import { isPullRequestLive, type RunPullRequest } from '../lib/pullRequest'
 import { supportsResume, runtimeKind } from './resume'
 import { bootScheduler, syncTask, unscheduleTask } from './scheduler'
 import type { TurnEventRow } from '../lib/turnEvents'
@@ -1434,6 +1435,65 @@ export function getConversation(runId: string) {
   }
 }
 
+/**
+ * Pull request attached to a run, cached on the run row.
+ *
+ * The probe shells out to `gh`, so it is rate-limited per run rather than run
+ * on every workspace poll. A merged or closed PR stops moving, so it is only
+ * re-probed on the slow interval; a live one refreshes often enough to catch a
+ * merge shortly after it happens.
+ */
+const PR_LIVE_TTL_MS = 30_000
+const PR_SETTLED_TTL_MS = 10 * 60_000
+
+function cachedRunPullRequest(run: RunRow): RunPullRequest | null {
+  if (!run.prNumber || !run.prUrl) return null
+  return {
+    number: run.prNumber,
+    url: run.prUrl,
+    title: run.prTitle,
+    state: (run.prState || 'open') as RunPullRequest['state'],
+    checks: (run.prChecks || 'none') as RunPullRequest['checks'],
+  }
+}
+
+function persistRunPullRequest(runId: string, pr: RunPullRequest | null) {
+  getDb()
+    .prepare(
+      `UPDATE runs SET prNumber = @prNumber, prUrl = @prUrl, prTitle = @prTitle,
+       prState = @prState, prChecks = @prChecks, prCheckedAt = @prCheckedAt WHERE id = @id`,
+    )
+    .run({
+      id: runId,
+      prNumber: pr?.number ?? 0,
+      prUrl: pr?.url ?? '',
+      prTitle: pr?.title ?? '',
+      prState: pr?.state ?? '',
+      prChecks: pr?.checks ?? '',
+      prCheckedAt: Date.now(),
+    })
+}
+
+export async function getRunPullRequest(runId: string): Promise<RunPullRequest | null> {
+  const run = getRun(runId)
+  if (!run) return null
+
+  const cached = cachedRunPullRequest(run)
+  const ttl = cached && !isPullRequestLive(cached.state) ? PR_SETTLED_TTL_MS : PR_LIVE_TTL_MS
+  if (run.prCheckedAt && Date.now() - run.prCheckedAt < ttl) return cached
+
+  const fresh = await git.pullRequestForBranchAsync(run.cwd)
+  // A branch that lost its PR (deleted, or the run moved branches) clears the
+  // cache; a probe that simply failed also clears it rather than showing stale.
+  persistRunPullRequest(runId, fresh)
+  return fresh
+}
+
+/** Drop the TTL so the next read re-probes — used after opening a PR. */
+export function invalidateRunPullRequest(runId: string) {
+  getDb().prepare('UPDATE runs SET prCheckedAt = 0 WHERE id = ?').run(runId)
+}
+
 /** Files / repo / gh for the run detail right panel — deferred from chat load. */
 export async function getRunWorkspace(runId: string) {
   const run = getRun(runId)
@@ -1744,12 +1804,14 @@ export function openPullRequest(input: {
     base = project?.defaultBranch
   }
 
-  return git.createPullRequest({
+  const result = git.createPullRequest({
     cwd: run.cwd,
     title: input.title,
     body: input.body,
     base,
   })
+  invalidateRunPullRequest(input.runId)
+  return result
 }
 
 // ---------------------------------------------------------------------------

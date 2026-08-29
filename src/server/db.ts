@@ -159,6 +159,18 @@ export type RunRow = {
   timedOut: number
   /** When the user last opened this run; agent messages after it read as unread. */
   lastReadAt: number
+  /**
+   * Last known pull request for the run's branch — cached from `gh pr view` so
+   * the chip paints before (and without) a network round trip. `prNumber` 0
+   * means "no PR seen yet"; `prState` is one of lib/pullRequest.ts's states.
+   */
+  prNumber: number
+  prUrl: string
+  prTitle: string
+  prState: string
+  prChecks: string
+  /** When the cache above was last refreshed; 0 = never probed. */
+  prCheckedAt: number
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system'
@@ -692,6 +704,14 @@ function migrate(db: Database.Database) {
   if (addColumn(db, 'runs', 'lastReadAt', 'INTEGER NOT NULL DEFAULT 0')) {
     db.prepare('UPDATE runs SET lastReadAt = ?').run(Date.now())
   }
+
+  // Cached pull request for a run's branch (opened by the user or by the agent).
+  addColumn(db, 'runs', 'prNumber', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'runs', 'prUrl', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'runs', 'prTitle', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'runs', 'prState', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'runs', 'prChecks', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'runs', 'prCheckedAt', 'INTEGER NOT NULL DEFAULT 0')
 
   addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'resumeSessionLabel', "TEXT NOT NULL DEFAULT ''")

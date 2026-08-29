@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { NeedProjectEmpty } from '../components/NeedProjectEmpty'
 import { Button, Card, EmptyState, PageHeader, StatusBadge } from '../components/ui'
 import { DEMO_RUNNING_TASK_ID, demoTasks, isDemoMode, type DemoTask } from '../lib/demoData.ts'
-import { absoluteTime, describeCron, relativeTime, taskScheduleStatus } from '../lib/format'
+import { absoluteTime, describeSchedule, relativeTime, taskScheduleStatus } from '../lib/format'
 import { automationsEmptyKind } from '../lib/projectGate'
 import { useProjects, useRuns, useTasks } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
@@ -24,9 +24,7 @@ const ROW_GRID =
  */
 function scheduleCell(t: ListTask, blocked: string | null): string {
   if (blocked) return blocked
-  const parts = [
-    t.webhookIntegrationId?.trim() && !t.cron.trim() ? 'Webhook' : describeCron(t.cron),
-  ]
+  const parts = [t.webhookIntegrationId?.trim() && !t.cron.trim() ? 'Webhook' : describeSchedule(t)]
   if (t.queuedCount > 0) parts.push(queueDepthLabel(t.queuedCount))
   if (
     t.lastScheduleFire &&

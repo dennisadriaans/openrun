@@ -279,6 +279,10 @@ export const getRunWorkspace = createServerFn({ method: 'GET' })
   .validator((d: { runId: string }) => d)
   .handler(async ({ data }) => (await core()).getRunWorkspace(data.runId))
 
+export const getRunPullRequest = createServerFn({ method: 'GET' })
+  .validator((d: { runId: string }) => d)
+  .handler(async ({ data }) => (await core()).getRunPullRequest(data.runId))
+
 export const postMessage = createServerFn({ method: 'POST' })
   .validator(
     (d: {

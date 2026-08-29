@@ -62,6 +62,7 @@ import { withPrCapability } from '../lib/prCapability'
 import { buildHandoffPrompt, handoffSystemNote, type HandoffMessage } from '../lib/handoffPrompt.ts'
 import { isRuntimeSwitch, resolveSwitchMode, resolveSwitchModel } from '../lib/runtimeSwitch.ts'
 import { cachedModelsForBin } from './modelCatalog.ts'
+import { describeEffectiveTurnSettings } from '../lib/runSettingsDebug.ts'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { nativeSessionExists } from './nativeSessions'
@@ -350,6 +351,8 @@ export function startRun(input: StartRunInput): string {
     throw new Error(`The "${input.runtime.label}" runtime does not support resuming a conversation`)
   }
 
+  const baseBranch = currentBranch(cwd)
+
   db.prepare(
     `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
      VALUES (@id, @taskId, @taskName, @runtimeId, @trigger, 'running', @command, @cwd, @workspaceId, NULL, NULL, '', '', @startedAt, NULL, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
@@ -364,7 +367,7 @@ export function startRun(input: StartRunInput): string {
     workspaceId: input.workspaceId ?? '',
     startedAt: now,
     sessionId,
-    baseBranch: currentBranch(cwd),
+    baseBranch,
     baseSnapshot: captureBaseSnapshot(cwd),
     model,
     effort,
@@ -373,6 +376,29 @@ export function startRun(input: StartRunInput): string {
 
   if (input.taskId) {
     db.prepare('UPDATE tasks SET lastRunAt = ? WHERE id = ?').run(now, input.taskId)
+  }
+
+  // Automation runs get a settings stub read back off the argv the CLI is about
+  // to receive, so a setting that silently failed to reach it is visible in the
+  // transcript instead of being echoed back from the automation row.
+  if (input.taskId && input.trigger !== 'chat' && input.trigger !== 'planner') {
+    db.prepare(
+      `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
+       VALUES (?, ?, 'system', ?, '', '', 'success', NULL, '', ?, ?)`,
+    ).run(
+      randomId('msg'),
+      runId,
+      describeEffectiveTurnSettings({
+        bin: input.runtime.bin,
+        args: turn.args,
+        extraEnv: turn.extraEnv,
+        prompt: turn.acpPrompt,
+        branch: baseBranch,
+        cwd,
+      }),
+      now - 2,
+      now - 2,
+    )
   }
 
   if (resumeSessionId) {

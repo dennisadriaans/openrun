@@ -450,6 +450,20 @@ export function useRunWorkspace(
   })
 }
 
+/**
+ * The run's pull request, if it has one. Polled far slower than the workspace —
+ * it costs a `gh` round trip, and the server caches it on the run row anyway.
+ */
+export function useRunPullRequest(runId: string, opts?: { enabled?: boolean }) {
+  const demo = isDemoMode() && isDemoDetailRun(runId)
+  return useQuery({
+    queryKey: ['runPullRequest', runId] as const,
+    queryFn: () => fns.getRunPullRequest({ data: { runId } }),
+    enabled: (opts?.enabled ?? true) && !demo,
+    refetchInterval: 30_000,
+  })
+}
+
 export function useFileDiff(runId: string, path: string | null) {
   const demo = isDemoMode() && isDemoDetailRun(runId)
   return useQuery({
@@ -660,6 +674,7 @@ function useGitMutation<TData, TVars>(runId: string, fn: (vars: TVars) => Promis
       qc.invalidateQueries({ queryKey: ['conversation', runId] })
       qc.invalidateQueries({ queryKey: ['runWorkspace', runId] })
       qc.invalidateQueries({ queryKey: ['fileDiff', runId] })
+      qc.invalidateQueries({ queryKey: ['runPullRequest', runId] })
     },
   })
 }
