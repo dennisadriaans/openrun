@@ -899,6 +899,17 @@ export function useDeleteTask() {
   })
 }
 
+export function useDeleteTasks() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) => fns.deleteTasks({ data: { ids } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
 // --- Projects & workspaces --------------------------------------------------
 
 export function useProjects(initialData?: fns.ProjectWithMeta[]) {
