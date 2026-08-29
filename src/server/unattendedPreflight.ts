@@ -10,11 +10,40 @@
  * The rules themselves live in `lib/unattendedGate.ts`; this module only does
  * the lookups those rules need.
  */
-import { requiresGhAuth, unattendedBlockedReason } from '../lib/unattendedGate.ts'
+import {
+  requiresGhAuth,
+  unattendedBlockedReason,
+  workspaceOwnerMessage,
+} from '../lib/unattendedGate.ts'
+import { hasTaskPrompt } from '../lib/taskPrompt.ts'
+import { hasWorkspaceId } from '../lib/workspaceRef.ts'
+import { isWorkspaceReady } from '../lib/workspaceReady.ts'
+import { missingNativeSessionMessage, nativeResumeKindFor } from '../lib/nativeSessions.ts'
 import type { WorkspaceHealth } from '../lib/workspaceHealth.ts'
 import type { RuntimeRow, TaskRow, WorkspaceRow } from './db'
 import { ghStatus } from './git'
+import { checkRuntimeInstalled } from './runtimePath.ts'
+import { nativeSessionExists } from './nativeSessions.ts'
+import { checksForWorkspace } from './checks.ts'
 import { checkWorkspace } from './workspaceHealth'
+import { getUnattendedWorkspaceOwner } from './workspaces.ts'
+
+const VERIFICATION_DISABLED_MESSAGE =
+  'Unattended verification is disabled. Enable verification and configure at least one project check before arming scheduled or webhook runs.'
+const VERIFICATION_CHECKS_MISSING_MESSAGE =
+  'Unattended automation needs at least one configured verification check. Add a project check before arming scheduled or webhook runs.'
+
+/** Shared mutation/fire error so an automation cannot be armed unverified. */
+export function unattendedVerificationRefusal(input: {
+  workspaceId: string
+  verifyEnabled: number | boolean
+}): string | null {
+  if (!input.verifyEnabled) return VERIFICATION_DISABLED_MESSAGE
+  if (checksForWorkspace(input.workspaceId).length === 0) {
+    return VERIFICATION_CHECKS_MISSING_MESSAGE
+  }
+  return null
+}
 
 /** The two automation columns the AFK rules read. */
 export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth'>
@@ -46,8 +75,30 @@ export function unattendedRefusalFor(input: {
  * refuse, or `null` to proceed.
  */
 export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | null {
+  if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
+  const verificationRefusal = unattendedVerificationRefusal({
+    workspaceId: task.workspaceId,
+    verifyEnabled: task.verifyEnabled,
+  })
+  if (verificationRefusal) return verificationRefusal
   const checked = checkWorkspace(task.workspaceId)
   if (!checked) return 'Automation workspace is not ready.'
+  if (!isWorkspaceReady(checked.workspace.status)) return 'Automation workspace is not ready.'
+  if (!checkRuntimeInstalled(runtime.bin).installed) return 'Automation runtime is not on PATH.'
+  if (!hasTaskPrompt(task.prompt)) return 'Automation has empty agent instructions.'
+
+  const sessionId = task.resumeSessionId.trim()
+  if (sessionId) {
+    const kind = nativeResumeKindFor(runtime)
+    if (!kind) return 'The selected runtime does not support resuming a conversation.'
+    if (!nativeSessionExists(checked.workspace.path, kind, sessionId)) {
+      return missingNativeSessionMessage(kind)
+    }
+  }
+
+  const owner = getUnattendedWorkspaceOwner(task.workspaceId, task.id)
+  if (owner) return workspaceOwnerMessage(owner.name)
+
   return unattendedRefusalFor({
     task,
     runtime,

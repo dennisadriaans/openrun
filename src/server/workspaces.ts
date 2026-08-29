@@ -45,6 +45,7 @@ import {
   type WorkspaceRow,
 } from './db'
 import * as git from './git'
+import { isWorkspaceCancellationPending } from './processControl.ts'
 import type { GitBranchRow } from '../lib/gitBranches.ts'
 
 /**
@@ -299,12 +300,13 @@ export function addProject(input: AddProjectInput): ProjectRow {
       blockedKind: '',
       blockedReason: '',
       blockedAt: 0,
+      baseCommit: git.resolveCommit(resolvedPath, defaultBranch),
       createdAt: now,
       archivedAt: null,
     }
     db.prepare(
-      `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
-       VALUES (@id, @projectId, @name, @branch, @path, @kind, @status, @setupLog, @setupExitCode, @createdAt, @archivedAt)`,
+      `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
+       VALUES (@id, @projectId, @name, @branch, @path, @kind, @status, @setupLog, @setupExitCode, @blockedKind, @blockedReason, @blockedAt, @baseCommit, @createdAt, @archivedAt)`,
     ).run(workspace)
 
     return project
@@ -489,6 +491,28 @@ export function getWorkspace(id: string): WorkspaceRow | undefined {
     | undefined
 }
 
+/** Find another enabled schedule/webhook task that owns this managed worktree. */
+export function getUnattendedWorkspaceOwner(
+  workspaceId: string,
+  taskId: string,
+): { id: string; name: string } | undefined {
+  if (!workspaceId.trim()) return undefined
+  return getDb()
+    .prepare(
+      `SELECT t.id, t.name
+       FROM tasks t
+       JOIN workspaces w ON w.id = t.workspaceId
+       WHERE t.enabled = 1
+         AND t.id != ?
+         AND t.workspaceId = ?
+         AND w.kind = 'worktree'
+         AND (trim(t.cron) != '' OR trim(t.webhookIntegrationId) != '')
+       ORDER BY t.updatedAt ASC
+       LIMIT 1`,
+    )
+    .get(taskId, workspaceId) as { id: string; name: string } | undefined
+}
+
 export function createWorkspace(input: {
   projectId: string
   branch: string
@@ -505,6 +529,17 @@ export function createWorkspace(input: {
   const wsPath = uniqueDestPath(
     path.join(openrunHome(), 'worktrees', project.slug, slugify(branch)),
   )
+
+  const fromBranch = input.fromBranch?.trim() || project.defaultBranch
+  // Prefer the remote-tracking ref when it resolves — a freshly cloned repo
+  // has origin refs and the local branch may not exist or be stale. A
+  // registered repo may be offline / have no origin, so fall back to the
+  // plain local branch name in that case.
+  const remoteRef = `origin/${fromBranch}`
+  const baseRef =
+    git.isRepo(project.path) && refExists(project.path, remoteRef) ? remoteRef : fromBranch
+  const baseCommit = git.resolveCommit(project.path, baseRef)
+  if (!baseCommit) throw new Error(`Could not resolve the workspace base ref "${baseRef}"`)
 
   // Insert as 'creating' BEFORE touching git so the UI has a row to show
   // progress against immediately, instead of the workspace appearing out of
@@ -523,22 +558,14 @@ export function createWorkspace(input: {
     blockedKind: '',
     blockedReason: '',
     blockedAt: 0,
+    baseCommit,
     createdAt: now,
     archivedAt: null,
   }
   db.prepare(
-    `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
-     VALUES (@id, @projectId, @name, @branch, @path, @kind, @status, @setupLog, @setupExitCode, @createdAt, @archivedAt)`,
+    `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
+     VALUES (@id, @projectId, @name, @branch, @path, @kind, @status, @setupLog, @setupExitCode, @blockedKind, @blockedReason, @blockedAt, @baseCommit, @createdAt, @archivedAt)`,
   ).run(workspace)
-
-  const fromBranch = input.fromBranch?.trim() || project.defaultBranch
-  // Prefer the remote-tracking ref when it resolves — a freshly cloned repo
-  // has origin refs and the local branch may not exist or be stale. A
-  // registered repo may be offline / have no origin, so fall back to the
-  // plain local branch name in that case.
-  const remoteRef = `origin/${fromBranch}`
-  const baseRef =
-    git.isRepo(project.path) && refExists(project.path, remoteRef) ? remoteRef : fromBranch
 
   try {
     git.addWorktree({
@@ -674,6 +701,9 @@ export function resolveWorkspacePath(workspaceId: string): string {
  * that belong to neither run. Every run must have the workspace to itself.
  */
 export function assertWorkspaceFree(workspaceId: string): void {
+  if (isWorkspaceCancellationPending(workspaceId)) {
+    throw new Error('This workspace already has a run in progress')
+  }
   const active = getDb()
     .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
     .get(workspaceId) as { id: string } | undefined
