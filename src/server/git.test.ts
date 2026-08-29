@@ -15,6 +15,8 @@ import {
   fileDiff,
   pullRequestForBranchAsync,
   push,
+  resetWorktree,
+  resolveCommit,
 } from './git.ts'
 import { missingOriginRemoteMessage } from '../lib/gitActionGate.ts'
 
@@ -179,6 +181,25 @@ describe('discard scoped to run delta', () => {
     assert.equal(readFileSync(join(cwd, 'clean.txt'), 'utf8'), 'clean\n')
     assert.equal(readFileSync(join(cwd, 'pre.txt'), 'utf8'), 'pre\n')
     assert.ok(!existsSync(join(cwd, 'agent.txt')))
+  })
+})
+
+describe('resetWorktree', () => {
+  it('resets local commits to the recorded base while keeping the configured branch', () => {
+    const cwd = makeRepo()
+    const base = resolveCommit(cwd, 'HEAD')
+    git(cwd, ['checkout', '-q', '-b', 'openrun/feature'])
+    writeFileSync(join(cwd, 'tracked.txt'), 'agent commit\n')
+    git(cwd, ['add', 'tracked.txt'])
+    git(cwd, ['commit', '-qm', 'agent local commit'])
+    writeFileSync(join(cwd, 'untracked.txt'), 'leftover\n')
+
+    resetWorktree(cwd, 'openrun/feature', base)
+
+    assert.equal(git(cwd, ['rev-parse', 'HEAD']), base)
+    assert.equal(git(cwd, ['branch', '--show-current']), 'openrun/feature')
+    assert.equal(git(cwd, ['status', '--porcelain']), '')
+    assert.equal(existsSync(join(cwd, 'untracked.txt')), false)
   })
 })
 

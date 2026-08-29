@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { agentSpawnOptions, isPidAlive, isShuttingDown, setShuttingDown } from './processControl.ts'
+import {
+  agentSpawnOptions,
+  isPidAlive,
+  isShuttingDown,
+  isWorkspaceCancellationPending,
+  releaseWorkspaceCancellation,
+  reserveWorkspaceCancellation,
+  setShuttingDown,
+} from './processControl.ts'
 
 describe('processControl', () => {
   it('reports the current process as alive and nonsense pids as dead', () => {
@@ -31,5 +39,13 @@ describe('processControl', () => {
     assert.equal(isShuttingDown(), true)
     setShuttingDown(before)
     assert.equal(isShuttingDown(), before)
+  })
+
+  it('holds a workspace reservation until cancellation cleanup releases it', () => {
+    const workspaceId = `cancel-test-${Date.now()}`
+    reserveWorkspaceCancellation(workspaceId)
+    assert.equal(isWorkspaceCancellationPending(workspaceId), true)
+    releaseWorkspaceCancellation(workspaceId)
+    assert.equal(isWorkspaceCancellationPending(workspaceId), false)
   })
 })

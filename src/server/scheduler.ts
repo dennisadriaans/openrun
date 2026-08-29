@@ -7,25 +7,17 @@
  */
 import parser from 'cron-parser'
 import cron, { type TaskContext } from 'node-cron'
-import { nativeResumeKindFor } from '../lib/nativeSessions.ts'
 import { oneShotDecision } from '../lib/oneShotSchedule.ts'
-import { hasTaskPrompt } from '../lib/taskPrompt'
 import { hasWorkspaceId } from '../lib/workspaceRef'
-import { isWorkspaceReady } from '../lib/workspaceReady'
 import { getDb, type RuntimeRow, type TaskRow } from './db'
 import { runTask } from './executor'
-import { nativeSessionExists } from './nativeSessions'
 import { isShuttingDown } from './processControl'
-import { drainAllQueues, enqueueRun } from './runQueue'
-import { checkRuntimeInstalled } from './runtimePath'
+import { drainAllQueues, enqueueRun, workspaceBusy, WORKSPACE_BUSY_MESSAGE } from './runQueue'
 import { recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
 import { isSchedulableCron } from './cronValidation.ts'
-import { unattendedRefusalFor } from './unattendedPreflight'
-import { checkWorkspace } from './workspaceHealth'
+import { unattendedRefusal } from './unattendedPreflight'
 
 const MAX_TIMER_MS = 2_147_000_000
-const WORKSPACE_BUSY_MESSAGE = 'This workspace already has a run in progress'
-
 type Scheduled = {
   stop: () => void | Promise<void>
   destroy?: () => void | Promise<void>
@@ -42,14 +34,6 @@ function jobs(): Map<string, Scheduled> {
   return g.__agentopsJobs
 }
 
-function nativeResumeReady(task: TaskRow, runtime: RuntimeRow): boolean {
-  const id = task.resumeSessionId.trim()
-  if (!id) return true
-  const kind = nativeResumeKindFor(runtime)
-  if (!kind) return false
-  return nativeSessionExists(task.cwd, kind, id)
-}
-
 function disableAfterScheduleFire(taskId: string) {
   getDb()
     .prepare('UPDATE tasks SET enabled = 0, updatedAt = ? WHERE id = ?')
@@ -64,36 +48,19 @@ function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string
   if (!hasWorkspaceId(task.workspaceId)) {
     return { outcome: 'failed', detail: 'Automation has no workspace.' }
   }
-  // The stored status only records what the app last did to the directory.
-  // Inspect the worktree itself before arming a child process at it — a row
-  // that still says `ready` for a path that no longer exists is what turns a
-  // scheduled fire into an unexplained `spawn <cli> ENOENT`.
-  const checked = checkWorkspace(task.workspaceId)
-  if (!checked || !isWorkspaceReady(checked.workspace.status)) {
-    return { outcome: 'failed', detail: 'Automation workspace is not ready.' }
-  }
   const runtime = getDb().prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
     | RuntimeRow
     | undefined
-  if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) {
-    return { outcome: 'failed', detail: 'Automation runtime is not on PATH.' }
-  }
-  if (!hasTaskPrompt(task.prompt)) {
-    return { outcome: 'failed', detail: 'Automation has empty agent instructions.' }
-  }
-  if (!nativeResumeReady(task, runtime)) {
-    return { outcome: 'failed', detail: 'The native CLI session no longer exists.' }
-  }
+  // Busy-first is important: a healthy run is expected to dirty or switch its
+  // worktree while it is active. Let that fire queue, then inspect the tree
+  // after the owner has really finished.
+  if (workspaceBusy(task.workspaceId)) return null
+  if (!runtime) return { outcome: 'failed', detail: 'Runtime not found for automation.' }
   // Nobody is watching this fire: refuse a shared checkout, a contaminated
   // worktree, or a GitHub capability that is not actually usable, rather than
   // spending an agent turn discovering it.
-  const unattended = unattendedRefusalFor({
-    task,
-    runtime,
-    workspace: checked.workspace,
-    health: checked.health,
-  })
-  if (unattended) return { outcome: 'failed', detail: unattended }
+  const refused = unattendedRefusal(task, runtime)
+  if (refused) return { outcome: 'failed', detail: refused }
   return null
 }
 

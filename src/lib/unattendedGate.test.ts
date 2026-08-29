@@ -5,6 +5,7 @@ import {
   requiresGhAuth,
   sharedCheckoutMessage,
   unattendedBlockedReason,
+  workspaceOwnerMessage,
   type UnattendedGateInput,
 } from './unattendedGate.ts'
 import type { WorkspaceHealth } from './workspaceHealth.ts'
@@ -72,5 +73,10 @@ describe('unattendedGate', () => {
     assert.equal(requiresGhAuth({ canOpenPrs: true, requireGhAuth: false }), true)
     assert.equal(requiresGhAuth({ canOpenPrs: false, requireGhAuth: true }), true)
     assert.equal(requiresGhAuth({ canOpenPrs: false, requireGhAuth: false }), false)
+  })
+
+  it('gives a shared-worktree owner conflict an actionable next step', () => {
+    assert.match(workspaceOwnerMessage('Nightly docs'), /Nightly docs/)
+    assert.match(workspaceOwnerMessage('Nightly docs'), /own worktree/i)
   })
 })

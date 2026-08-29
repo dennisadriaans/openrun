@@ -150,6 +150,52 @@ setTimeout(() => {}, 60_000)
     assert.match(result.output, /cancelled/)
   })
 
+  it('does not spawn when the signal was already aborted', async () => {
+    const dir = workdir()
+    const marker = join(dir, 'spawned.txt')
+    const controller = new AbortController()
+    controller.abort()
+    const result = await executeCheck({
+      command: nodeFile(
+        dir,
+        'should-not-run.js',
+        `require('fs').writeFileSync(${JSON.stringify(marker)}, 'spawned')\n`,
+      ),
+      cwd: dir,
+      timeoutMs: 30_000,
+      signal: controller.signal,
+    })
+    assert.equal(result.outcome, 'skipped')
+    assert.match(result.output, /cancelled/)
+    assert.equal(existsSync(marker), false)
+  })
+
+  it('does not resolve cancellation until the check child has closed', async () => {
+    const dir = workdir()
+    const controller = new AbortController()
+    let settled = false
+    const promise = executeCheck({
+      command: nodeFile(
+        dir,
+        'slow-stop.js',
+        `process.on('SIGTERM', () => setTimeout(() => process.exit(0), 600))
+setTimeout(() => {}, 30_000)
+`,
+      ),
+      cwd: dir,
+      timeoutMs: 30_000,
+      signal: controller.signal,
+    }).finally(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    controller.abort()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(settled, false)
+    const result = await promise
+    assert.equal(result.outcome, 'skipped')
+  })
+
   it('keeps the tail of a very chatty command', async () => {
     const dir = workdir()
     const result = await executeCheck({
