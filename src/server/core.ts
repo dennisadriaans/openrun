@@ -50,6 +50,7 @@ import {
   type TaskRow,
 } from './db'
 import {
+  adoptNativeChat as _adoptNativeChat,
   answerApproval as _answerApproval,
   cancelRun as _cancelRun,
   cancelRunsForTask,
@@ -1352,6 +1353,42 @@ export function startChat(input: {
     runtimeMode: input.runtimeMode,
     resumeSessionId: input.resumeSessionId,
     resumeSessionLabel: input.resumeSessionLabel,
+  })
+  return { runId }
+}
+
+/**
+ * Open a saved CLI chat as a run — history only, no turn executed.
+ *
+ * The composer in the run that comes back is what starts the first real turn,
+ * so browsing an old conversation never costs a model call.
+ */
+export function openNativeChat(input: {
+  workspaceId: string
+  runtimeId: string
+  sessionId: string
+  sessionLabel?: string
+  model?: string
+  effort?: string
+  runtimeMode?: string
+}): { runId: string } {
+  const workspace = getWorkspace(input.workspaceId)
+  if (!workspace) throw new Error('Workspace not found')
+  assertWorkspaceReady(workspace.status)
+
+  const runtime = getRuntime(input.runtimeId)
+  if (!runtime) throw new Error('Runtime not found')
+
+  const runId = _adoptNativeChat({
+    runtime,
+    taskName: `Chat · ${workspace.branch}`,
+    workspaceId: workspace.id,
+    cwd: '',
+    sessionId: input.sessionId,
+    sessionLabel: input.sessionLabel ?? '',
+    model: input.model,
+    effort: input.effort,
+    runtimeMode: input.runtimeMode,
   })
   return { runId }
 }
