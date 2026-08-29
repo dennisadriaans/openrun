@@ -9,14 +9,16 @@ import Database from 'better-sqlite3'
 import {
   closeSync,
   existsSync,
+  lstatSync,
   openSync,
   readFileSync,
   readdirSync,
   readSync,
+  realpathSync,
   statSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, extname, join, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   agyCliRoot,
   claudeProjectDir,
@@ -38,6 +40,116 @@ import {
 
 const JSONL_PREFIX_BYTES = 64 * 1024
 const CODEX_PREFIX_BYTES = 32 * 1024
+
+const INVALID_SESSION_ID =
+  'Invalid native session id: expected one file-safe identifier without path separators.'
+const UNSAFE_SESSION_FILE =
+  'Native session transcript is not a regular file inside the expected session directory.'
+
+function hasControlCharacters(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
+/**
+ * Validate an id before it is ever used as a path component.
+ *
+ * Native ids are opaque values supplied by a picker/API caller. Keep the
+ * validation deliberately conservative: trimming or normalising here could
+ * silently select a different transcript than the caller requested.
+ */
+export function validateNativeSessionId(sessionId: string): string {
+  if (
+    typeof sessionId !== 'string' ||
+    !sessionId ||
+    sessionId !== sessionId.trim() ||
+    sessionId === '.' ||
+    sessionId === '..' ||
+    sessionId.includes('/') ||
+    sessionId.includes('\\') ||
+    hasControlCharacters(sessionId)
+  ) {
+    throw new Error(INVALID_SESSION_ID)
+  }
+  return sessionId
+}
+
+/**
+ * Resolve one id directly below an expected native-session directory.
+ * Containment uses path.relative so a sibling such as `sessions-evil` cannot
+ * pass a string-prefix check.
+ */
+function directSessionPath(directory: string, sessionId: string, suffix: string): string {
+  const id = validateNativeSessionId(sessionId)
+  const root = resolve(directory)
+  const candidate = resolve(root, `${id}${suffix}`)
+  const rel = relative(root, candidate)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) || rel.includes(sep)) {
+    throw new Error(INVALID_SESSION_ID)
+  }
+  return candidate
+}
+
+/** Check that a file is regular and its resolved path stays below `directory`. */
+function isRegularNativeFileInside(file: string, directory: string, directChild = false): boolean {
+  let entry: ReturnType<typeof lstatSync>
+  try {
+    entry = lstatSync(file)
+  } catch {
+    return false
+  }
+  if (entry.isSymbolicLink() || !entry.isFile()) return false
+
+  try {
+    const realRoot = realpathSync(resolve(directory))
+    const realFile = realpathSync(file)
+    const rel = relative(realRoot, realFile)
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false
+    return !directChild || !rel.includes(sep)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Existing session files must not be symlinks. Refusing them avoids a
+ * time-of-check/read race and keeps a transcript id from redirecting reads
+ * outside the directory the CLI owns.
+ */
+function assertRegularNativeFile(file: string, directory: string): void {
+  if (existsSync(file) && !isRegularNativeFileInside(file, directory, true)) {
+    throw new Error(UNSAFE_SESSION_FILE)
+  }
+}
+
+/** Safe path for a native session file; existing symlinks are refused. */
+export function safeNativeSessionFile(
+  directory: string,
+  sessionId: string,
+  suffix: string,
+): string {
+  const file = directSessionPath(directory, sessionId, suffix)
+  if (existsSync(file)) assertRegularNativeFile(file, directory)
+  return file
+}
+
+/** Safe path for a native session directory (used by Grok's nested store). */
+function safeNativeSessionDirectory(directory: string, sessionId: string): string {
+  const path = directSessionPath(directory, sessionId, '')
+  if (existsSync(path)) {
+    let entry: ReturnType<typeof lstatSync>
+    try {
+      entry = lstatSync(path)
+    } catch {
+      throw new Error(UNSAFE_SESSION_FILE)
+    }
+    if (entry.isSymbolicLink() || !entry.isDirectory()) throw new Error(UNSAFE_SESSION_FILE)
+  }
+  return path
+}
 
 function homeDir(): string {
   return homedir()
@@ -98,7 +210,13 @@ function listClaudeFromJsonl(dir: string): NativeSession[] {
   const out: NativeSession[] = []
   for (const name of names) {
     if (extname(name) !== '.jsonl') continue
-    const file = join(dir, name)
+    const id = basename(name, '.jsonl')
+    let file: string
+    try {
+      file = safeNativeSessionFile(dir, id, '.jsonl')
+    } catch {
+      continue
+    }
     let st: ReturnType<typeof statSync>
     try {
       st = statSync(file)
@@ -122,7 +240,8 @@ function listClaudeFromJsonl(dir: string): NativeSession[] {
 /** Where one Claude chat's JSONL lives, whether or not it exists. */
 export function claudeSessionFile(cwd: string, sessionId: string): string {
   const dir = claudeDir(cwd)
-  return dir ? join(dir, `${sessionId}.jsonl`) : ''
+  if (!cwd.trim() || !dir) throw new Error('Native session workspace folder is required.')
+  return safeNativeSessionFile(dir, sessionId, '.jsonl')
 }
 
 const claudeAdapter: NativeSessionAdapter = {
@@ -134,9 +253,8 @@ const claudeAdapter: NativeSessionAdapter = {
     return mergeNativeSessions(listClaudeFromIndex(dir), listClaudeFromJsonl(dir))
   },
   exists(cwd, sessionId) {
-    const id = sessionId.trim()
-    if (!id || !cwd.trim()) return false
-    const file = claudeSessionFile(cwd, id)
+    if (!cwd.trim()) return false
+    const file = claudeSessionFile(cwd, sessionId)
     try {
       return statSync(file).isFile()
     } catch {
@@ -177,14 +295,18 @@ function walkFiles(dir: string, acc: string[]): void {
   }
   for (const name of names) {
     const file = join(dir, name)
-    let st: ReturnType<typeof statSync>
+    let st: ReturnType<typeof lstatSync>
     try {
-      st = statSync(file)
+      st = lstatSync(file)
     } catch {
       continue
     }
+    // Codex's store is user-controlled. Do not follow a directory symlink
+    // into another tree (or back into this one), and do not collect a linked
+    // file for a later containment check to discover.
+    if (st.isSymbolicLink()) continue
     if (st.isDirectory()) walkFiles(file, acc)
-    else acc.push(file)
+    else if (st.isFile()) acc.push(file)
   }
 }
 
@@ -203,6 +325,7 @@ function listCodexFromJsonl(cwd: string): NativeSession[] {
       continue
     }
     if (!st.isFile()) continue
+    if (!isRegularNativeFileInside(file, root)) continue
     try {
       const row = parseCodexJsonlPrefix(readPrefix(file, CODEX_PREFIX_BYTES), {
         sessionIdFromFilename: codexSessionIdFromFilename(basename(file)),
@@ -217,12 +340,17 @@ function listCodexFromJsonl(cwd: string): NativeSession[] {
 }
 
 function findCodexJsonl(sessionId: string): string | null {
+  const id = validateNativeSessionId(sessionId)
   const root = join(codexHome(), 'sessions')
   if (!existsSync(root)) return null
   const files: string[] = []
   walkFiles(root, files)
-  const needle = `-${sessionId}.jsonl`
-  return files.find((file) => file.endsWith(needle)) ?? null
+  const needle = `-${id}.jsonl`
+  for (const file of files) {
+    if (!file.endsWith(needle)) continue
+    if (isRegularNativeFileInside(file, root)) return file
+  }
+  return null
 }
 
 const codexAdapter: NativeSessionAdapter = {
@@ -234,8 +362,8 @@ const codexAdapter: NativeSessionAdapter = {
     return stripCwd(listCodexFromJsonl(trimmed))
   },
   exists(cwd, sessionId) {
-    const id = sessionId.trim()
-    if (!id || !cwd.trim()) return false
+    if (!cwd.trim()) return false
+    const id = validateNativeSessionId(sessionId)
     const fromIndex = listCodexFromSqlite(cwd)
     if (fromIndex.some((row) => row.sessionId === id)) return true
     const file = findCodexJsonl(id)
@@ -270,8 +398,19 @@ function listGrokInDir(dir: string): NativeSession[] {
   }
   const out: NativeSession[] = []
   for (const name of names) {
-    const summaryPath = join(dir, name, 'summary.json')
+    let sessionDir: string
+    try {
+      sessionDir = safeNativeSessionDirectory(dir, name)
+    } catch {
+      continue
+    }
+    const summaryPath = join(sessionDir, 'summary.json')
     if (!existsSync(summaryPath)) continue
+    try {
+      assertRegularNativeFile(summaryPath, sessionDir)
+    } catch {
+      continue
+    }
     let st: ReturnType<typeof statSync>
     try {
       st = statSync(summaryPath)
@@ -298,10 +437,12 @@ const grokAdapter: NativeSessionAdapter = {
     return stripCwd(filterSessionsForCwd(listGrokInDir(dir), trimmed))
   },
   exists(cwd, sessionId) {
-    const id = sessionId.trim()
-    if (!id || !cwd.trim()) return false
-    const file = join(grokDirFor(cwd), id, 'summary.json')
+    if (!cwd.trim()) return false
+    const id = validateNativeSessionId(sessionId)
+    const sessionDir = safeNativeSessionDirectory(grokDirFor(cwd), id)
+    const file = join(sessionDir, 'summary.json')
     try {
+      assertRegularNativeFile(file, sessionDir)
       return statSync(file).isFile()
     } catch {
       return false
@@ -343,7 +484,7 @@ function listAgyFromHistory(): NativeSession[] {
 }
 
 function agyConversationFile(sessionId: string): string {
-  return join(agyRoot(), 'conversations', `${sessionId}.db`)
+  return safeNativeSessionFile(join(agyRoot(), 'conversations'), sessionId, '.db')
 }
 
 function agyConversationExists(sessionId: string): boolean {
@@ -391,7 +532,14 @@ export function nativeSessionExists(
   kind: NativeSessionKind,
   sessionId: string,
 ): boolean {
-  return adapters[kind].exists(cwd, sessionId)
+  try {
+    validateNativeSessionId(sessionId)
+    return adapters[kind].exists(cwd, sessionId)
+  } catch {
+    // Existence is a probe, not a read boundary: malformed ids must be safely
+    // absent and must never be allowed to influence a filesystem path.
+    return false
+  }
 }
 
 export function nativeSessionTitle(
