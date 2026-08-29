@@ -146,6 +146,7 @@ import { bootCloud } from './cloud'
 import { assertServerAccess } from './accessToken'
 import { assertSchedulableCron, isSchedulableCron } from './cronValidation.ts'
 import { latestScheduleFires } from './scheduleFires.ts'
+import { deleteRunsInTransaction } from './runDeletion.ts'
 
 // Reap any CLI left behind by a previous process *before* arming cron or
 // draining the queue — otherwise a phantom `running` row locks the workspace
@@ -1601,10 +1602,11 @@ export function unarchiveRun(runId: string): RunRow {
 }
 
 export function deleteRun(runId: string): void {
-  const run = getRun(runId)
-  if (!run) throw new Error('Run not found')
-  if (run.status === 'running') throw new Error('Cancel the run before deleting it')
-  getDb().prepare('DELETE FROM runs WHERE id = ?').run(runId)
+  deleteRunsInTransaction(getDb(), [runId])
+}
+
+export function deleteRuns(runIds: string[]): void {
+  deleteRunsInTransaction(getDb(), runIds)
 }
 
 // ---------------------------------------------------------------------------
