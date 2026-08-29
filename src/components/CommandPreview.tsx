@@ -88,8 +88,8 @@ export function CommandPreview({
             </div>
 
             <p className="mt-2 text-[12px] text-tier-quaternary">
-              {preview.transport === 'acp' ? 'ACP' : 'CLI'} · {runtimeModeLabel(preview.runtimeMode)} ·{' '}
-              {promptDeliveryLabel(preview.channels)}
+              {preview.transport === 'acp' ? 'ACP' : 'CLI'} ·{' '}
+              {runtimeModeLabel(preview.runtimeMode)} · {promptDeliveryLabel(preview.channels)}
               {preview.canResume
                 ? ' · follow-ups resume this session'
                 : ' · no resume (each turn is a fresh session)'}

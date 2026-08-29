@@ -863,7 +863,7 @@ export function useRunWorkspaceBaseline(taskId?: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (workspaceId: string) => fns.runWorkspaceBaseline({ data: { workspaceId } }),
-    onSuccess: (_data, workspaceId) => {
+    onSuccess: () => {
       if (taskId) qc.invalidateQueries({ queryKey: ['task', taskId] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['workspaces'] })

@@ -84,7 +84,9 @@ export function describeEffectiveTurnSettings(input: EffectiveTurnSettings): str
   const promptEffort = /^ultrathink:/i.test(prompt.trimStart()) ? 'ultrathink (in prompt)' : ''
   const effort = effortFlag || promptEffort || 'default'
   const access =
-    accessFlags(args) || input.extraEnv?.FX_PERMISSION_MODE || (transport === 'acp' ? runtimeMode : 'default')
+    accessFlags(args) ||
+    input.extraEnv?.FX_PERMISSION_MODE ||
+    (transport === 'acp' ? runtimeMode : 'default')
 
   const parts = [
     `runtime=${input.bin}`,
