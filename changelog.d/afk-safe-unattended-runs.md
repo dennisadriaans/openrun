@@ -12,4 +12,11 @@ for GitHub is now checked against `gh auth status` before it is armed and again
 before it fires, rather than discovering a logged-out CLI four minutes into a
 run. The automation page shows the configured branch and the branch actually
 checked out side by side, so a workspace that moved is visible before you enable
-anything.
+anything. Overlapping scheduled and webhook fires now wait their turn and
+re-check the destination workspace before starting, rather than colliding with
+one another. If a run is cancelled or the app restarts, its workspace stays
+reserved and, when needed, quarantined until the run and its checks have truly
+stopped. Scheduled and webhook automations must have verification enabled and
+at least one check configured before they can run unattended. Each managed
+worktree can belong to only one enabled unattended automation, so two schedules
+cannot quietly contend for the same workspace.

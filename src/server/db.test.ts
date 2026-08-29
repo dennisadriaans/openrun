@@ -44,6 +44,7 @@ describe('a brand-new database', () => {
     assert.ok(columns('tasks').includes('scheduledAt'))
     assert.ok(columns('run_queue').includes('scheduleFireId'))
     assert.ok(columns('schedule_fires').includes('scheduledFor'))
+    assert.ok(columns('workspaces').includes('baseCommit'))
   })
 
   it('accepts the insert the queue actually makes', () => {

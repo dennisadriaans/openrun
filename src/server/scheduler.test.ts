@@ -50,8 +50,17 @@ function seedTask(id: string, scheduledAt: number) {
   db.prepare(
     `INSERT OR REPLACE INTO projects
        (id, name, slug, path, defaultBranch, remoteUrl, managed, setupCommand, checks, createdAt)
-     VALUES ('project-1', 'Project', 'project', ?, 'main', '', 0, '', '[]', 1)`,
-  ).run(repo)
+     VALUES ('project-1', 'Project', 'project', ?, 'main', '', 0, '', ?, 1)`,
+  ).run(
+    repo,
+    JSON.stringify([
+      {
+        id: 'test-check',
+        name: 'test check',
+        command: `${JSON.stringify(process.execPath)} -e "process.exit(0)"`,
+      },
+    ]),
+  )
   db.prepare(
     `INSERT OR REPLACE INTO workspaces
        (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, createdAt, archivedAt)
@@ -65,7 +74,7 @@ function seedTask(id: string, scheduledAt: number) {
         resumeSessionLabel, fireOnce, scheduledAt, requireIsolation, requireGhAuth,
         createdAt, updatedAt, lastRunAt)
      VALUES (?, 'One shot', '', 'test-shell', 'work', ?, 'workspace-1', '* * * * *', 1,
-             '', '', '', '[]', '{}', 0, 0, 0, '', '', 1, ?, 0, 0, 1, 1, NULL)`,
+             '', '', '', '[]', '{}', 1, 0, 0, '', '', 1, ?, 0, 0, 1, 1, NULL)`,
   ).run(id, repo, scheduledAt)
 }
 
