@@ -404,6 +404,8 @@ export type WorkspaceRow = {
   blockedReason: string
   /** When the block was recorded; 0 when not blocked. */
   blockedAt: number
+  /** Immutable commit the worktree was created from; empty on legacy rows. */
+  baseCommit: string
   createdAt: number
   archivedAt: number | null
 }
@@ -633,6 +635,7 @@ export function getDb(): Database.Database {
       blockedKind TEXT NOT NULL DEFAULT '',
       blockedReason TEXT NOT NULL DEFAULT '',
       blockedAt INTEGER NOT NULL DEFAULT 0,
+      baseCommit TEXT NOT NULL DEFAULT '',
       createdAt INTEGER NOT NULL,
       archivedAt INTEGER,
       FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
@@ -749,6 +752,7 @@ function migrate(db: Database.Database) {
   addColumn(db, 'workspaces', 'blockedKind', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'workspaces', 'blockedReason', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'workspaces', 'blockedAt', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'workspaces', 'baseCommit', "TEXT NOT NULL DEFAULT ''")
 
   // Where a webhook-triggered message came from. Held beside the message
   // rather than inside it so the link never reaches the agent's prompt.
