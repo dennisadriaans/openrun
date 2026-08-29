@@ -244,6 +244,16 @@ export function parseAllowedHosts(raw: string | null | undefined): string[] {
     .filter((entry): entry is string => entry !== null)
 }
 
+/** Union of configured extra names and (when mobile is on) this machine's LAN IPs. */
+export function mergeAllowedHosts(configured: string[], extra: string[]): string[] {
+  const hosts = new Set(configured)
+  for (const entry of extra) {
+    const name = hostnameFromHostHeader(entry)
+    if (name) hosts.add(name)
+  }
+  return [...hosts]
+}
+
 /**
  * Why a request's `Host` header disqualifies it, or `null` to let it through.
  *
