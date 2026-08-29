@@ -331,11 +331,28 @@ export function useRemoveRun() {
   return useMutation({
     mutationFn: (id: string) => fns.removeRun({ data: { id } }),
     onSuccess: (_data, id) => {
-      qc.invalidateQueries({ queryKey: ['runs'] })
-      qc.invalidateQueries({ queryKey: ['dashboard'] })
-      qc.removeQueries({ queryKey: ['conversation', id] })
-      qc.removeQueries({ queryKey: ['run', id] })
+      invalidateDeletedRuns(qc, [id])
     },
+  })
+}
+
+function invalidateDeletedRuns(qc: QueryClient, ids: readonly string[]) {
+  qc.invalidateQueries({ queryKey: ['runs'] })
+  qc.invalidateQueries({ queryKey: ['dashboard'] })
+  for (const id of ids) {
+    qc.removeQueries({ queryKey: ['conversation', id] })
+    qc.removeQueries({ queryKey: ['run', id] })
+    qc.removeQueries({ queryKey: ['runWorkspace', id] })
+    qc.removeQueries({ queryKey: ['runPullRequest', id] })
+    qc.removeQueries({ queryKey: ['fileDiff', id] })
+  }
+}
+
+export function useDeleteRuns() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) => fns.deleteRuns({ data: { ids } }),
+    onSuccess: (_data, ids) => invalidateDeletedRuns(qc, ids),
   })
 }
 
