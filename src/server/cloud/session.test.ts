@@ -9,9 +9,13 @@ test('machine id is stable across reads', async () => {
   const prev = process.env.OPENRUN_HOME
   process.env.OPENRUN_HOME = home
   try {
-    const { readMachineId, readCloudSession, writeCloudSession, clearCloudSession } = await import(
-      './session.ts'
-    )
+    const {
+      readMachineId,
+      readCloudSession,
+      writeCloudSession,
+      clearCloudSession,
+      resetMachineId,
+    } = await import('./session.ts')
     const a = readMachineId()
     const b = readMachineId()
     assert.equal(a, b)
@@ -30,6 +34,8 @@ test('machine id is stable across reads', async () => {
     assert.equal(session?.accessExpiresAt, 1_700_000_000_000)
     clearCloudSession()
     assert.equal(readCloudSession(), null)
+    resetMachineId()
+    assert.notEqual(readMachineId(), a)
   } finally {
     if (prev === undefined) delete process.env.OPENRUN_HOME
     else process.env.OPENRUN_HOME = prev
