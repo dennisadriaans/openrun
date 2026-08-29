@@ -169,7 +169,7 @@ function RunsPage() {
                         ? 'No deletable runs on this page'
                         : 'Select all deletable runs on this page'
                     }
-                    className="relative z-10 size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="list-selection-checkbox relative z-10 disabled:cursor-not-allowed disabled:opacity-40"
                     onChange={(event) => {
                       event.stopPropagation()
                       const checked = event.currentTarget.checked
@@ -198,7 +198,7 @@ function RunsPage() {
                 return (
                   <div
                     key={r.id}
-                    className={`group/row relative ${ROW_GRID} px-4 py-2.5 transition-colors hover:bg-hover`}
+                    className={`group/row relative ${ROW_GRID} px-4 py-1.5 transition-colors hover:bg-hover`}
                   >
                     <Link
                       to="/runs/$runId"
@@ -214,12 +214,11 @@ function RunsPage() {
                         disabled={busy || deleteRuns.isPending}
                         aria-label={`Select ${r.chatTitle}`}
                         title={busy ? 'Cancel the run before deleting' : `Select ${r.chatTitle}`}
-                        className="size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="list-selection-checkbox disabled:cursor-not-allowed disabled:opacity-40"
                         onChange={(event) => {
                           event.stopPropagation()
-                          setSelectedIds((selected) =>
-                            toggleRunSelection(selected, r.id, event.currentTarget.checked),
-                          )
+                          const checked = event.currentTarget.checked
+                          setSelectedIds((selected) => toggleRunSelection(selected, r.id, checked))
                         }}
                         onClick={(event) => event.stopPropagation()}
                       />

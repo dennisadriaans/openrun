@@ -29,7 +29,8 @@
     "token:print": "node --experimental-strip-types scripts/token.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src scripts && node --experimental-strip-types scripts/lint-comments.ts",
+    "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
+    "lint": "biome check src scripts",
     "lint:fix": "biome check --write src scripts",
     "format": "biome format --write src scripts",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
