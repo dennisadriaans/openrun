@@ -8,17 +8,15 @@
  * Policy (what queues, what coalesces, what gets dropped) lives in
  * `lib/runQueue.ts`; this module owns the table and the draining.
  */
-import { hasTaskPrompt } from '../lib/taskPrompt.ts'
-import { isWorkspaceReady } from '../lib/workspaceReady.ts'
 import { queueDecision, type PendingEntry, type QueueTrigger } from '../lib/runQueue.ts'
 import { publishActivityLive } from './activityLive.ts'
 import { getDb, type RunQueueRow, type RuntimeRow, type TaskRow } from './db.ts'
 import { runTask, type MessageSource } from './executor.ts'
-import { isShuttingDown } from './processControl.ts'
-import { checkRuntimeInstalled } from './runtimePath.ts'
+import { isShuttingDown, isWorkspaceCancellationPending } from './processControl.ts'
 import { settleScheduleFire } from './scheduleFires.ts'
-import { unattendedRefusalFor } from './unattendedPreflight.ts'
-import { checkWorkspace } from './workspaceHealth.ts'
+import { unattendedRefusal } from './unattendedPreflight.ts'
+
+export const WORKSPACE_BUSY_MESSAGE = 'This workspace already has a run in progress'
 
 function id(): string {
   return `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
@@ -68,14 +66,25 @@ export type EnqueueResult = { queued: true; position: number } | { queued: false
  * was coalesced into an existing one or dropped at the cap — callers log that
  * instead of pretending the trigger ran.
  */
-export function enqueueRun(input: {
-  taskId: string
-  workspaceId: string
-  trigger: QueueTrigger | string
-  prompt?: string
-  source?: MessageSource
-  scheduleFireId?: string
-}): EnqueueResult {
+export function enqueueRun(
+  input: {
+    taskId: string
+    workspaceId: string
+    trigger: QueueTrigger | string
+    prompt?: string
+    source?: MessageSource
+    scheduleFireId?: string
+  },
+  options?: { allowWhenFree?: boolean },
+): EnqueueResult {
+  // A queue entry represents a fire that lost a workspace race. Refuse to
+  // manufacture one for a free workspace: otherwise a webhook error can be
+  // hidden as "queued" forever. The one exception is an entry being moved
+  // after its task changed workspaces; that move is explicit and is checked
+  // again by drainWorkspace before spawning.
+  if (!options?.allowWhenFree && !workspaceBusy(input.workspaceId)) {
+    return { queued: false, reason: 'This workspace is not busy' }
+  }
   const pending: PendingEntry[] = listQueue(input.workspaceId).map((row) => ({
     taskId: row.taskId,
     trigger: row.trigger,
@@ -87,7 +96,7 @@ export function enqueueRun(input: {
     pending,
   })
   if (decision.action === 'refuse') {
-    return { queued: false, reason: 'This workspace already has a run in progress' }
+    return { queued: false, reason: WORKSPACE_BUSY_MESSAGE }
   }
   if (decision.action !== 'enqueue') {
     return { queued: false, reason: decision.reason }
@@ -152,11 +161,11 @@ export function dequeueEntry(entryId: string): void {
   }
 }
 
-function workspaceBusy(workspaceId: string): boolean {
+export function workspaceBusy(workspaceId: string): boolean {
   const row = getDb()
     .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' LIMIT 1")
     .get(workspaceId) as { id: string } | undefined
-  return Boolean(row)
+  return Boolean(row) || isWorkspaceCancellationPending(workspaceId)
 }
 
 /**
@@ -194,6 +203,50 @@ export function drainWorkspace(workspaceId: string): void {
       })
       continue
     }
+    if (task.workspaceId !== entry.workspaceId) {
+      // The task was edited while this fire was parked. Never run it with the
+      // old workspace identity: remove the stale row, then carry the same
+      // fire over to the task's current workspace. The destination is still
+      // subjected to the full preflight below (via its own drain), so a move
+      // cannot bypass health, policy, or ownership gates.
+      removeEntry(entry.id)
+      publishDepth(entry.workspaceId)
+      if (!task.workspaceId.trim()) {
+        settleScheduleFire(entry.scheduleFireId, {
+          outcome: 'failed',
+          detail: 'Automation workspace changed while queued, but the new workspace is empty.',
+        })
+        continue
+      }
+      const moved = enqueueRun(
+        {
+          taskId: task.id,
+          workspaceId: task.workspaceId,
+          trigger: entry.trigger,
+          prompt: entry.prompt || undefined,
+          scheduleFireId: entry.scheduleFireId,
+          ...(entry.sourceUrl
+            ? {
+                source: {
+                  provider: entry.sourceProvider,
+                  url: entry.sourceUrl,
+                  label: entry.sourceLabel,
+                },
+              }
+            : {}),
+        },
+        { allowWhenFree: true },
+      )
+      if (!moved.queued) {
+        settleScheduleFire(entry.scheduleFireId, {
+          outcome: 'failed',
+          detail: `Automation workspace changed while queued: ${moved.reason}`,
+        })
+      } else {
+        drainWorkspace(task.workspaceId)
+      }
+      continue
+    }
     if (!task.enabled && !task.fireOnce) {
       removeEntry(entry.id)
       publishDepth(workspaceId)
@@ -203,34 +256,10 @@ export function drainWorkspace(workspaceId: string): void {
       })
       continue
     }
-    if (!hasTaskPrompt(task.prompt) && !entry.prompt.trim()) {
-      removeEntry(entry.id)
-      publishDepth(workspaceId)
-      settleScheduleFire(entry.scheduleFireId, {
-        outcome: 'failed',
-        detail: 'Agent instructions became empty while this fire was queued.',
-      })
-      continue
-    }
-    // A queued fire waited precisely because another run was using this
-    // worktree — so re-inspect it here rather than trusting the state it was
-    // in when the fire came due. The run that just finished is exactly the one
-    // that may have switched its branch or left it dirty.
-    const checked = checkWorkspace(workspaceId)
-    if (!checked || !isWorkspaceReady(checked.workspace.status)) {
-      removeEntry(entry.id)
-      publishDepth(workspaceId)
-      settleScheduleFire(entry.scheduleFireId, {
-        outcome: 'failed',
-        detail: 'Workspace became unavailable while this fire was queued.',
-      })
-      continue
-    }
-
     const runtime = db.prepare('SELECT * FROM runtimes WHERE id = ?').get(task.runtimeId) as
       | RuntimeRow
       | undefined
-    if (!runtime || !checkRuntimeInstalled(runtime.bin).installed) {
+    if (!runtime) {
       removeEntry(entry.id)
       publishDepth(workspaceId)
       settleScheduleFire(entry.scheduleFireId, {
@@ -240,12 +269,10 @@ export function drainWorkspace(workspaceId: string): void {
       continue
     }
 
-    const unattended = unattendedRefusalFor({
-      task,
-      runtime,
-      workspace: checked.workspace,
-      health: checked.health,
-    })
+    // This is deliberately the final gate before runTask. It re-reads the
+    // exact task.workspaceId represented by the entry and checks lifecycle,
+    // PATH, prompt, resume session, health, policy, and ownership together.
+    const unattended = unattendedRefusal(task, runtime)
     if (unattended) {
       removeEntry(entry.id)
       publishDepth(workspaceId)

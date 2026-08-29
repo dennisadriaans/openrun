@@ -46,6 +46,12 @@ export function ghPreflightMessage(installed: boolean): string {
   return installed ? ghNotAuthenticatedMessage() : ghNotInstalledMessage()
 }
 
+/** Developer-facing error when a managed worktree already has an AFK owner. */
+export function workspaceOwnerMessage(ownerName: string): string {
+  const owner = ownerName.trim() || 'another automation'
+  return `This worktree is already assigned to unattended automation "${owner}". Give this automation its own worktree before enabling or firing it.`
+}
+
 /**
  * True when this automation is going to touch GitHub — either because its
  * runtime is allowed to open PRs (the prompt appendix tells it to run

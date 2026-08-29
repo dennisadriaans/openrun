@@ -24,9 +24,10 @@ import {
   type WorkspaceHealth,
   type WorkspaceHealthCode,
 } from '../lib/workspaceHealth.ts'
-import { getDb, type WorkspaceRow } from './db'
-import * as git from './git'
-import { getProject, getWorkspace } from './workspaces'
+import { getDb, type WorkspaceRow } from './db.ts'
+import * as git from './git.ts'
+import { isWorkspaceCancellationPending } from './processControl.ts'
+import { getProject, getWorkspace } from './workspaces.ts'
 
 /** macOS hands out /tmp and /private/tmp for the same directory; compare real paths. */
 function canonical(p: string): string {
@@ -35,6 +36,20 @@ function canonical(p: string): string {
   } catch {
     return p
   }
+}
+
+/**
+ * Confirm that an app-managed workspace still belongs to its recorded
+ * project. A path can remain a perfectly valid Git repository after somebody
+ * removes the worktree and places a different clone there; path existence and
+ * `git.isRepo` alone are therefore not a safe restore target.
+ */
+export function isRegisteredWorktree(workspace: WorkspaceRow): boolean {
+  if (workspace.kind !== 'worktree') return false
+  const project = getProject(workspace.projectId)
+  if (!project) return false
+  const wanted = canonical(workspace.path)
+  return git.listWorktrees(project.path).some((entry) => canonical(entry.path) === wanted)
 }
 
 function at(
@@ -66,13 +81,8 @@ export function inspectWorkspaceHealth(workspace: WorkspaceRow): WorkspaceHealth
   // directory that is a repo but no longer a worktree of this project (someone
   // ran `git worktree remove` and re-created the folder, or the project moved)
   // would have the agent committing into a checkout nothing else tracks.
-  if (workspace.kind === 'worktree') {
-    const project = getProject(workspace.projectId)
-    const wanted = canonical(workspace.path)
-    const known = project
-      ? git.listWorktrees(project.path).some((entry) => canonical(entry.path) === wanted)
-      : false
-    if (!known) return at(workspace, 'not-a-worktree')
+  if (workspace.kind === 'worktree' && !isRegisteredWorktree(workspace)) {
+    return at(workspace, 'not-a-worktree')
   }
 
   const info = git.repoInfo(workspace.path)
@@ -207,17 +217,18 @@ export function recordRunOutcomeForWorkspace(input: {
   verdict: string
 }): void {
   if (!input.workspaceId.trim()) return
-  // Only app-managed worktrees are quarantined. A main checkout belongs to the
-  // user — its contents are their business, and the isolation rule already
-  // keeps unattended runs out of it unless they explicitly opted in.
+  // Quarantine any workspace an unattended run touched, including a main
+  // checkout when the task explicitly opted out of isolation. Manual runs
+  // still ignore non-structural quarantine signals, so this does not take the
+  // user's attended workflow away from them.
   const workspace = getWorkspace(input.workspaceId)
-  if (workspace?.kind !== 'worktree') return
+  if (!workspace) return
   const recoverable = input.verdict === 'verified' || input.verdict === 'no-changes'
   if (recoverable) {
     clearWorkspaceBlock(input.workspaceId)
     return
   }
-  if (input.verdict === '' || input.verdict === 'unverified') return
+  if (input.verdict === '') return
 
   blockWorkspace(
     input.workspaceId,
@@ -251,10 +262,49 @@ export function restoreWorkspace(workspaceId: string): RestoreResult {
     .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
     .get(workspaceId) as { id: string } | undefined
   if (active) throw new Error('Cannot restore a workspace with a run in progress')
+  if (isWorkspaceCancellationPending(workspaceId)) {
+    throw new Error('Cannot restore a workspace while its cancelled run is still shutting down')
+  }
   if (!existsSync(workspace.path)) throw new Error(missingWorkspaceDirMessage(workspace.path))
+  const project = getProject(workspace.projectId)
+  if (!project || !isRegisteredWorktree(workspace)) {
+    throw new Error(
+      'Cannot restore this workspace because its path is no longer a registered worktree of the recorded project. Recreate the workspace instead.',
+    )
+  }
 
-  const discarded = git.repoInfo(workspace.path).dirty
-  git.resetWorktree(workspace.path, workspace.branch)
+  // `baseCommit` was added after older workspaces already existed. Infer their
+  // original branch point once, then persist that immutable SHA before future
+  // restores. Using merge-base is important: resetting to the current branch
+  // tip would preserve local commits, which are exactly what restore must
+  // discard.
+  let baseCommit = workspace.baseCommit.trim()
+  if (!baseCommit) {
+    const refs = [`origin/${project.defaultBranch}`, project.defaultBranch, 'HEAD']
+    for (const ref of refs) {
+      const candidate = git.resolveCommit(project.path, ref)
+      if (!candidate) continue
+      baseCommit = git.mergeBase(workspace.path, candidate)
+      if (baseCommit) break
+    }
+    if (!baseCommit) {
+      throw new Error(
+        'Cannot restore this legacy workspace because its original base commit cannot be determined. Recreate the workspace instead.',
+      )
+    }
+  }
+
+  const beforeHead = git.resolveCommit(workspace.path, 'HEAD')
+  const discarded = git.repoInfo(workspace.path).dirty || beforeHead !== baseCommit
+  git.resetWorktree(workspace.path, workspace.branch, baseCommit)
+  if (git.currentBranch(workspace.path) !== workspace.branch) {
+    throw new Error('Workspace restore did not leave the configured branch checked out')
+  }
+  if (!workspace.baseCommit.trim()) {
+    getDb()
+      .prepare('UPDATE workspaces SET baseCommit = ? WHERE id = ?')
+      .run(baseCommit, workspace.id)
+  }
   clearWorkspaceBlock(workspaceId)
   forgetHealth(workspaceId)
   // A restore repairs whatever demoted the row to 'error' short of the

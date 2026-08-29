@@ -17,6 +17,27 @@ import { RUN_KILL_GRACE_MS } from '../lib/runBudget.ts'
 
 const g = globalThis as unknown as {
   __agentopsShuttingDown?: boolean
+  __agentopsCancellingWorkspaces?: Set<string>
+}
+
+function cancellingWorkspaces(): Set<string> {
+  if (!g.__agentopsCancellingWorkspaces) g.__agentopsCancellingWorkspaces = new Set()
+  return g.__agentopsCancellingWorkspaces
+}
+
+/** Reserve a workspace while a cancelled child is still able to write. */
+export function reserveWorkspaceCancellation(workspaceId: string): void {
+  if (workspaceId.trim()) cancellingWorkspaces().add(workspaceId)
+}
+
+/** Release the cancellation reservation after the child is known to be gone. */
+export function releaseWorkspaceCancellation(workspaceId: string): void {
+  if (workspaceId.trim()) cancellingWorkspaces().delete(workspaceId)
+}
+
+/** True while a cancellation is still waiting for its child process to exit. */
+export function isWorkspaceCancellationPending(workspaceId: string): boolean {
+  return cancellingWorkspaces().has(workspaceId)
 }
 
 /** True while the process is tearing down — no new agent spawns. */

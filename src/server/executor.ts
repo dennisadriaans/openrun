@@ -100,6 +100,8 @@ import {
   isShuttingDown,
   killChildTree,
   killPidTree,
+  releaseWorkspaceCancellation,
+  reserveWorkspaceCancellation,
   setShuttingDown,
 } from './processControl'
 import { peekQueuedMessage, removeQueuedMessage } from './messageQueue'
@@ -136,6 +138,10 @@ const g = globalThis as unknown as {
   __agentopsLive?: Map<string, LiveHandle>
   __agentopsApprovals?: Map<string, ApprovalController>
   __agentopsVerifying?: Map<string, AbortController>
+  __agentopsCancellationPending?: Map<
+    string,
+    { workspaceId: string; trigger: string; taskName: string; drainQueue: boolean }
+  >
   __agentopsShutdownHooks?: boolean
   __agentopsDrainOnExit?: Set<string>
 }
@@ -158,6 +164,14 @@ function approvalsMap(): Map<string, ApprovalController> {
 function verifyingMap(): Map<string, AbortController> {
   if (!g.__agentopsVerifying) g.__agentopsVerifying = new Map()
   return g.__agentopsVerifying
+}
+
+function cancellationMap(): Map<
+  string,
+  { workspaceId: string; trigger: string; taskName: string; drainQueue: boolean }
+> {
+  if (!g.__agentopsCancellationPending) g.__agentopsCancellationPending = new Map()
+  return g.__agentopsCancellationPending
 }
 
 /**
@@ -425,9 +439,10 @@ export function startRun(input: StartRunInput): string {
     prompt: input.prompt,
     turn,
     timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
-    // The opening turn is never someone typing into a conversation. Whether it
-    // actually verifies still depends on the automation's settings.
-    unattended: true,
+    // Only scheduler/webhook openings are unattended. Manual "Run now" and
+    // chat openings are attended workflows; treating every opening as AFK
+    // would quarantine a human's own checkout after an ordinary conversation.
+    unattended: input.trigger === 'schedule' || input.trigger === 'webhook',
     ...(input.source ? { source: input.source } : {}),
   })
   return runId
@@ -868,7 +883,7 @@ function spawnTurn(input: {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
-    if (current?.status === 'cancelled') return
+    if (current?.status === 'cancelled' || cancellationMap().has(runId)) return
     const note = `\n[executor] ${runTimedOutMessage(timeoutMs)}\n`
     appendRunStderr.run(note, runId)
     appendMsgStderr.run(note, assistantMsgId)
@@ -957,7 +972,7 @@ function spawnTurn(input: {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
-    if (current?.status === 'cancelled') return
+    if (current?.status === 'cancelled' || cancellationMap().has(runId)) return
     for (const ev of events) {
       // A gauge, not a transcript row: fold it onto the message and move on.
       if (ev.kind === 'usage') {
@@ -1238,13 +1253,14 @@ function spawnTurn(input: {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
-    if (current?.status === 'cancelled') {
+    if (current?.status === 'cancelled' || cancellationMap().has(runId)) {
       finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
       publishRunStatus(runId, 'cancelled', code)
       publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
-      // The agent is gone for good now, so a "send now" interrupt can hand the
-      // queued message to a fresh turn.
-      if (drainOnExitSet().delete(runId)) drainMessageQueue(runId)
+      // The agent is gone for good now. Release the cancellation reservation,
+      // quarantine unattended work, and only then hand a queued message or
+      // another workspace run to a fresh process.
+      completeCancelledRun(runId)
       return
     }
     if (signal) {
@@ -1609,11 +1625,11 @@ function spawnAcpTurn(input: {
         const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
           | { status: string }
           | undefined
-        if (current?.status === 'cancelled') {
+        if (current?.status === 'cancelled' || cancellationMap().has(runId)) {
           finalizeMessage(assistantMsgId, 'cancelled', code, cwd)
           publishRunStatus(runId, 'cancelled', code)
           publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
-          if (drainOnExitSet().delete(runId)) drainMessageQueue(runId)
+          completeCancelledRun(runId)
           return
         }
 
@@ -1654,7 +1670,7 @@ function spawnAcpTurn(input: {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
-    if (current?.status === 'cancelled') return
+    if (current?.status === 'cancelled' || cancellationMap().has(runId)) return
     appendLog('stderr', `\n[executor] ${runTimedOutMessage(timeoutMs)}\n`)
     db.prepare('UPDATE runs SET timedOut = 1 WHERE id = ?').run(runId)
     handle.cancelTurn()
@@ -1794,6 +1810,77 @@ function onRunFinalized(runId: string) {
   }
 }
 
+/**
+ * Finish cancellation only after no child, verification pass, or follow-up
+ * can still write to the workspace. The in-memory cancellation marker is set
+ * up front so the child stops normal conclusion work; the database stays
+ * `running` until this function confirms the process and checks are gone.
+ */
+function completeCancelledRun(runId: string): void {
+  const pending = cancellationMap().get(runId)
+  if (!pending) return
+  if (liveMap().has(runId) || verifyingMap().has(runId)) return
+  const row = getDb().prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
+    | { pid: number | null }
+    | undefined
+  if (isPidAlive(row?.pid)) return
+
+  // Keep the row running while a cancellation is in flight. This prevents a
+  // terminal status from being mistaken for a free workspace by any caller.
+  // The reservation is still useful for the verification-only/no-pid case and
+  // survives HMR on globalThis.
+  getDb()
+    .prepare("UPDATE runs SET status = 'cancelled', verdict = '', finishedAt = ? WHERE id = ?")
+    .run(Date.now(), runId)
+  getDb()
+    .prepare(
+      "UPDATE messages SET status = 'cancelled', finishedAt = ? WHERE runId = ? AND status = 'running'",
+    )
+    .run(Date.now(), runId)
+  publishRunStatus(runId, 'cancelled', null)
+  publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
+
+  cancellationMap().delete(runId)
+  drainOnExitSet().delete(runId)
+  if (pending.trigger === 'schedule' || pending.trigger === 'webhook') {
+    recordRunOutcomeForWorkspace({
+      workspaceId: pending.workspaceId,
+      taskName: pending.taskName || 'an unattended run',
+      verdict: 'cancelled',
+    })
+  }
+  releaseWorkspaceCancellation(pending.workspaceId)
+
+  // A queued follow-up belongs to this conversation and gets first chance to
+  // resume it. If there is no follow-up, notify the normal workspace queue now
+  // that the child is definitely gone.
+  if (pending.drainQueue && drainMessageQueue(runId)) return
+  onRunFinalized(runId)
+}
+
+function waitForCancelledRun(runId: string): void {
+  const check = () => {
+    if (!cancellationMap().has(runId)) return
+    if (
+      liveMap().has(runId) ||
+      verifyingMap().has(runId) ||
+      isPidAlive(
+        (
+          getDb().prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
+            | { pid: number | null }
+            | undefined
+        )?.pid,
+      )
+    ) {
+      const timer = setTimeout(check, 50)
+      timer.unref?.()
+      return
+    }
+    completeCancelledRun(runId)
+  }
+  check()
+}
+
 // ---------------------------------------------------------------------------
 // Verification
 // ---------------------------------------------------------------------------
@@ -1830,6 +1917,41 @@ function verificationSettings(taskId: string | null): VerificationSettings {
     verifyEnabled: row.verifyEnabled !== 0,
     timeoutMs: row.timeoutMs ?? 0,
   }
+}
+
+/**
+ * Atomically acquire the in-memory verification reservation and confirm that
+ * cancellation has not won the race. JavaScript runs this registration and
+ * both durable/in-memory reads without yielding, so `cancelRun` can never
+ * release a workspace between the last check and the check runner starting.
+ *
+ * `afterRegister` is a deterministic test seam for exercising the exact
+ * cancellation window; production callers omit it.
+ */
+export function acquireVerificationController(
+  runId: string,
+  afterRegister?: () => void,
+): AbortController | null {
+  const controller = new AbortController()
+  const active = verifyingMap()
+  active.set(runId, controller)
+  try {
+    afterRegister?.()
+  } catch (err) {
+    if (active.get(runId) === controller) active.delete(runId)
+    throw err
+  }
+
+  const row = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+    | { status: string }
+    | undefined
+  const cancelled = row?.status === 'cancelled' || cancellationMap().has(runId)
+  if (cancelled) {
+    controller.abort()
+    if (active.get(runId) === controller) active.delete(runId)
+    return null
+  }
+  return controller
 }
 
 function countChangedFiles(cwd: string, baseSnapshot: string): number {
@@ -1896,40 +2018,45 @@ async function concludeTurn(input: {
 
   const timedOut = run.timedOut === 1
   const settings = input.unattended ? verificationSettings(run.taskId) : NO_VERIFICATION
+  const cancellationRequested = run.status === 'cancelled' || cancellationMap().has(input.runId)
 
   let results: CheckResultRow[] = []
   // Only a clean turn is worth verifying — a crashed or over-budget agent has
   // already told us the answer, and running the test suite anyway just delays
   // the failure the user is waiting on.
-  if (input.status === 'success' && !timedOut && settings.verifyEnabled) {
+  if (input.status === 'success' && !timedOut && settings.verifyEnabled && !cancellationRequested) {
     const defs = checksForWorkspace(run.workspaceId)
     if (defs.length > 0) {
-      const controller = new AbortController()
-      verifyingMap().set(input.runId, controller)
-      try {
-        const pass = await runCheckPass({
-          runId: input.runId,
-          messageId: input.assistantMessageId,
-          attempt: run.repairAttempts,
-          cwd: input.cwd,
-          checks: defs,
-          signal: controller.signal,
-        })
-        results = pass.results
-      } catch (err) {
-        console.error(`[executor] verification failed for ${input.runId}:`, err)
-      } finally {
-        verifyingMap().delete(input.runId)
+      const controller = acquireVerificationController(input.runId)
+      if (controller) {
+        try {
+          const pass = await runCheckPass({
+            runId: input.runId,
+            messageId: input.assistantMessageId,
+            attempt: run.repairAttempts,
+            cwd: input.cwd,
+            checks: defs,
+            signal: controller.signal,
+          })
+          results = pass.results
+        } catch (err) {
+          console.error(`[executor] verification failed for ${input.runId}:`, err)
+        } finally {
+          if (verifyingMap().get(input.runId) === controller) {
+            verifyingMap().delete(input.runId)
+          }
+        }
       }
     }
   }
 
-  // Cancelled while the checks were running — the user's decision wins, and
-  // cancelRun has already written the terminal status.
+  // Cancelled while the checks were running — the user's decision wins. The
+  // cancellation completion path marks the row terminal after this pass has
+  // unwound and the workspace is safe to reuse.
   const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(input.runId) as
     | { status: string }
     | undefined
-  if (current?.status === 'cancelled') return
+  if (current?.status === 'cancelled' || cancellationMap().has(input.runId)) return
 
   const verdict = deriveVerdict({
     status: input.status,
@@ -2120,30 +2247,28 @@ export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boole
   // over, which is the opposite of a Stop — no finished notification, and the
   // workspace stays reserved for this conversation.
   const drainQueue = opts?.drainQueue === true
+  const row = db
+    .prepare('SELECT pid, workspaceId, trigger, taskName, status FROM runs WHERE id = ?')
+    .get(runId) as
+    | { pid: number | null; workspaceId: string; trigger: string; taskName: string; status: string }
+    | undefined
+  if (row?.status !== 'running') return false
+
   if (drainQueue) drainOnExitSet().add(runId)
   else drainOnExitSet().delete(runId)
-  const row = db.prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
-    | { pid: number | null }
-    | undefined
-
-  db.prepare("UPDATE runs SET status = 'cancelled', verdict = '', finishedAt = ? WHERE id = ?").run(
-    Date.now(),
-    runId,
-  )
-  db.prepare(
-    "UPDATE messages SET status = 'cancelled', finishedAt = ? WHERE runId = ? AND status = 'running'",
-  ).run(Date.now(), runId)
-
-  publishRunStatus(runId, 'cancelled', null)
-  publishActivityLive({ type: 'run_changed', runId, status: 'cancelled' })
-  if (!drainQueue) onRunFinalized(runId)
+  cancellationMap().set(runId, {
+    workspaceId: row.workspaceId,
+    trigger: row.trigger,
+    taskName: row.taskName,
+    drainQueue,
+  })
+  if (row.workspaceId.trim()) reserveWorkspaceCancellation(row.workspaceId)
 
   // A run in verification has no live agent child but is very much still
   // occupying the worktree — cancel has to reach the checks too.
   const verification = verifyingMap().get(runId)
   if (verification) {
     verification.abort()
-    verifyingMap().delete(runId)
   }
 
   live?.requestStop?.()
@@ -2161,10 +2286,10 @@ export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boole
     killed = killPidTree(row.pid)
   }
 
-  // With a live child, the queue drains from its close handler. Without one
-  // there is no close handler to wait for — a run cancelled during
-  // verification, or after a restart — so deliver here.
-  if (!child && drainOnExitSet().delete(runId)) drainMessageQueue(runId)
+  // A live child is completed by its close handler. For a restart/HMR case,
+  // poll the stored pid; for verification-only cancellation, poll until the
+  // aborted check has unwound. In both cases the reservation remains held.
+  waitForCancelledRun(runId)
 
   return killed || Boolean(verification)
 }
@@ -2178,18 +2303,60 @@ export function cancelRunsForTask(taskId: string): number {
   return rows.length
 }
 
+type OrphanRow = {
+  id: string
+  pid: number | null
+  workspaceId: string
+  trigger: string
+  taskName: string
+}
+
+function markOrphanTerminal(row: OrphanRow, now: number, note: string): void {
+  const db = getDb()
+  db.prepare(
+    "UPDATE runs SET status = 'error', verdict = 'crashed', finishedAt = ?, stderr = stderr || ? WHERE id = ? AND status = 'running'",
+  ).run(now, note, row.id)
+  db.prepare(
+    "UPDATE messages SET status = 'error', finishedAt = ? WHERE runId = ? AND status = 'running'",
+  ).run(now, row.id)
+  publishRunStatus(row.id, 'error', null)
+  publishActivityLive({ type: 'run_changed', runId: row.id, status: 'error' })
+  onRunFinalized(row.id)
+}
+
+/** Keep an orphaned workspace reserved until its stored pid is truly gone. */
+function releaseOrphanReservationAfterExit(
+  workspaceId: string,
+  pid: number,
+  onExit: () => void,
+): void {
+  const check = () => {
+    if (isPidAlive(pid)) {
+      const timer = setTimeout(check, 50)
+      timer.unref?.()
+      return
+    }
+    releaseWorkspaceCancellation(workspaceId)
+    onExit()
+    // Reconciliation runs before the normal queue boot drain. Kick this one
+    // workspace when the delayed kill finally finishes instead of waiting for
+    // the next scheduler tick.
+    void import('./runQueue.ts').then(({ drainWorkspace }) => drainWorkspace(workspaceId))
+  }
+  check()
+}
+
 /**
  * On boot: any row still `running` has no live handle in this process. Kill
- * leftover OS processes by stored pid and mark the rows terminal so workspace
- * locks free and the queue can drain honestly. Without this, a crash leaves
- * phantom `running` rows forever and any surviving CLI keeps spending tokens.
+ * leftover OS processes by stored pid, quarantine unattended workspaces, and
+ * only mark rows terminal once the process is gone. Without this, a crash
+ * leaves phantom rows or lets a surviving CLI write beside a replacement.
  */
 export function reconcileOrphanRuns(): { marked: number; killed: number } {
   const db = getDb()
-  const orphans = db.prepare("SELECT id, pid FROM runs WHERE status = 'running'").all() as Array<{
-    id: string
-    pid: number | null
-  }>
+  const orphans = db
+    .prepare("SELECT id, pid, workspaceId, trigger, taskName FROM runs WHERE status = 'running'")
+    .all() as OrphanRow[]
 
   let killed = 0
   const now = Date.now()
@@ -2205,19 +2372,31 @@ export function reconcileOrphanRuns(): { marked: number; killed: number } {
       continue
     }
 
-    if (row.pid != null && isPidAlive(row.pid)) {
-      if (killPidTree(row.pid)) killed += 1
+    const pidLive = row.pid != null && isPidAlive(row.pid)
+    if (pidLive && row.workspaceId.trim()) reserveWorkspaceCancellation(row.workspaceId)
+    if (pidLive && row.pid != null && killPidTree(row.pid)) killed += 1
+
+    if (row.trigger === 'schedule' || row.trigger === 'webhook') {
+      // A restarted server cannot know whether the child was about to commit,
+      // edit, or run checks. Treat the tree as contaminated until an explicit
+      // restore (or a later verified run) clears the quarantine.
+      recordRunOutcomeForWorkspace({
+        workspaceId: row.workspaceId,
+        taskName: row.taskName || 'an unattended run',
+        verdict: 'crashed',
+      })
     }
 
-    db.prepare(
-      "UPDATE runs SET status = 'error', verdict = 'crashed', finishedAt = ?, stderr = stderr || ? WHERE id = ? AND status = 'running'",
-    ).run(now, note, row.id)
-    db.prepare(
-      "UPDATE messages SET status = 'error', finishedAt = ? WHERE runId = ? AND status = 'running'",
-    ).run(now, row.id)
-    publishRunStatus(row.id, 'error', null)
-    publishActivityLive({ type: 'run_changed', runId: row.id, status: 'error' })
-    onRunFinalized(row.id)
+    if (pidLive && row.pid != null) {
+      releaseOrphanReservationAfterExit(row.workspaceId, row.pid, () =>
+        markOrphanTerminal(row, Date.now(), note),
+      )
+    } else if (row.workspaceId.trim()) {
+      releaseWorkspaceCancellation(row.workspaceId)
+      markOrphanTerminal(row, now, note)
+    } else {
+      markOrphanTerminal(row, now, note)
+    }
   }
 
   if (orphans.length > 0) {
