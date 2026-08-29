@@ -204,6 +204,12 @@ function runtimeSupportsLastResume(bin: string) {
   return (bin.split(/[\\/]/).pop() ?? bin).includes('codex')
 }
 
+/** A detached HEAD is not a branch that `gh pr view` can resolve reliably. */
+function namedBranch(cwd: string): string {
+  const branch = currentBranch(cwd)
+  return branch && branch !== 'HEAD' ? branch : ''
+}
+
 function publishRunStatus(runId: string, status: string, exitCode: number | null) {
   const db = getDb()
   const run = db.prepare('SELECT sessionId, runtimeId FROM runs WHERE id = ?').get(runId) as
@@ -354,11 +360,11 @@ export function startRun(input: StartRunInput): string {
     throw new Error(`The "${input.runtime.label}" runtime does not support resuming a conversation`)
   }
 
-  const baseBranch = currentBranch(cwd)
+  const baseBranch = namedBranch(cwd)
 
   db.prepare(
-    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
-     VALUES (@id, @taskId, @taskName, @runtimeId, @trigger, 'running', @command, @cwd, @workspaceId, NULL, NULL, '', '', @startedAt, NULL, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
+    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, headBranch, baseSnapshot, model, effort, runtimeMode)
+     VALUES (@id, @taskId, @taskName, @runtimeId, @trigger, 'running', @command, @cwd, @workspaceId, NULL, NULL, '', '', @startedAt, NULL, @sessionId, @baseBranch, @headBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
   ).run({
     id: runId,
     taskId: input.taskId,
@@ -371,6 +377,9 @@ export function startRun(input: StartRunInput): string {
     startedAt: now,
     sessionId,
     baseBranch,
+    // Seed with the starting branch so a live run has a stable identity too;
+    // finalizeRun replaces it with the branch actually used by the agent.
+    headBranch: baseBranch,
     baseSnapshot: captureBaseSnapshot(cwd),
     model,
     effort,
@@ -475,8 +484,8 @@ export function adoptNativeChat(input: {
 
   const runtimeMode = parseRuntimeMode(input.runtimeMode ?? DEFAULT_RUNTIME_MODE)
   db.prepare(
-    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
-     VALUES (@id, NULL, @taskName, @runtimeId, 'chat', 'success', @command, @cwd, @workspaceId, NULL, 0, '', '', @startedAt, @finishedAt, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
+    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, headBranch, baseSnapshot, model, effort, runtimeMode)
+     VALUES (@id, NULL, @taskName, @runtimeId, 'chat', 'success', @command, @cwd, @workspaceId, NULL, 0, '', '', @startedAt, @finishedAt, @sessionId, @baseBranch, @headBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
   ).run({
     id: runId,
     taskName: input.taskName,
@@ -489,7 +498,8 @@ export function adoptNativeChat(input: {
     startedAt: now,
     finishedAt: now,
     sessionId,
-    baseBranch: currentBranch(cwd),
+    baseBranch: namedBranch(cwd),
+    headBranch: namedBranch(cwd),
     // The diff a follow-up shows starts here, not at whatever the CLI did.
     baseSnapshot: captureBaseSnapshot(cwd),
     model: input.model?.trim() ?? '',
@@ -798,7 +808,7 @@ function spawnTurn(input: {
         messageId: assistantMsgId,
       })
       finalizeMessage(assistantMsgId, 'error', null, cwd)
-      finalizeRun(runId, 'error', null, 'crashed')
+      finalizeRun(runId, 'error', null, 'crashed', cwd)
       return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
     }
     publishRunLive(runId, {
@@ -848,7 +858,7 @@ function spawnTurn(input: {
       messageId: assistantMsgId,
     })
     finalizeMessage(assistantMsgId, 'error', null, cwd)
-    finalizeRun(runId, 'error', null, 'crashed')
+    finalizeRun(runId, 'error', null, 'crashed', cwd)
     return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
   }
 
@@ -1723,10 +1733,26 @@ function finalizeRun(
   status: 'success' | 'error',
   code: number | null,
   verdict: RunVerdict,
+  cwd: string,
 ) {
-  getDb()
-    .prepare('UPDATE runs SET status = ?, exitCode = ?, verdict = ?, finishedAt = ? WHERE id = ?')
-    .run(status, code, verdict, Date.now(), runId)
+  const db = getDb()
+  const run = db.prepare('SELECT headBranch FROM runs WHERE id = ?').get(runId) as
+    | { headBranch: string }
+    | undefined
+  const finishedBranch = namedBranch(cwd)
+  // If the agent moved (or detached) the checkout, an older PR cache belongs
+  // to the old branch. Drop it before the workspace can be reused by another
+  // run. Store the empty string for a detached/missing checkout rather than
+  // inferring a branch later from whatever reuses this workspace.
+  const branchChanged = (run?.headBranch ?? '') !== finishedBranch
+  db.prepare(
+    'UPDATE runs SET status = ?, exitCode = ?, verdict = ?, finishedAt = ?, headBranch = ? WHERE id = ?',
+  ).run(status, code, verdict, Date.now(), finishedBranch, runId)
+  if (branchChanged) {
+    db.prepare(
+      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+    ).run(runId)
+  }
   publishRunStatus(runId, status, code)
   publishActivityLive({ type: 'run_changed', runId, status, verdict })
   // A queued follow-up means the conversation is not over: it takes the
@@ -2004,7 +2030,7 @@ async function concludeTurn(input: {
     })
   }
 
-  finalizeRun(input.runId, input.status, input.exitCode, verdict)
+  finalizeRun(input.runId, input.status, input.exitCode, verdict, input.cwd)
 }
 
 /** Latest verification results for a run, newest pass only. */
@@ -2122,14 +2148,22 @@ export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boole
   const drainQueue = opts?.drainQueue === true
   if (drainQueue) drainOnExitSet().add(runId)
   else drainOnExitSet().delete(runId)
-  const row = db.prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
-    | { pid: number | null }
+  const row = db.prepare('SELECT pid, cwd, headBranch FROM runs WHERE id = ?').get(runId) as
+    | { pid: number | null; cwd: string; headBranch: string }
     | undefined
 
-  db.prepare("UPDATE runs SET status = 'cancelled', verdict = '', finishedAt = ? WHERE id = ?").run(
-    Date.now(),
-    runId,
-  )
+  // Capture before publishing the terminal state or invoking the finalization
+  // hook: that hook may immediately start a queued run in this same workspace.
+  const finishedBranch = row?.cwd ? namedBranch(row.cwd) : ''
+  const branchChanged = (row?.headBranch ?? '') !== finishedBranch
+  db.prepare(
+    "UPDATE runs SET status = 'cancelled', verdict = '', finishedAt = ?, headBranch = ? WHERE id = ?",
+  ).run(Date.now(), finishedBranch, runId)
+  if (branchChanged) {
+    db.prepare(
+      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+    ).run(runId)
+  }
   db.prepare(
     "UPDATE messages SET status = 'cancelled', finishedAt = ? WHERE runId = ? AND status = 'running'",
   ).run(Date.now(), runId)
@@ -2186,9 +2220,13 @@ export function cancelRunsForTask(taskId: string): number {
  */
 export function reconcileOrphanRuns(): { marked: number; killed: number } {
   const db = getDb()
-  const orphans = db.prepare("SELECT id, pid FROM runs WHERE status = 'running'").all() as Array<{
+  const orphans = db
+    .prepare("SELECT id, pid, cwd, headBranch FROM runs WHERE status = 'running'")
+    .all() as Array<{
     id: string
     pid: number | null
+    cwd: string
+    headBranch: string
   }>
 
   let killed = 0
@@ -2197,6 +2235,10 @@ export function reconcileOrphanRuns(): { marked: number; killed: number } {
     '\n[executor] Server restarted while this run was in flight — process reaped and run marked crashed.\n'
 
   for (const row of orphans) {
+    // Read the branch while this process still owns the old workspace. The
+    // queue drain in onRunFinalized may hand it to another run immediately.
+    const finishedBranch = row.cwd ? namedBranch(row.cwd) : ''
+    const branchChanged = row.headBranch !== finishedBranch
     // Prefer the live handle if HMR reloaded modules but the process is still
     // tracked — cancelRun covers that path completely.
     if (liveMap().has(row.id)) {
@@ -2210,8 +2252,13 @@ export function reconcileOrphanRuns(): { marked: number; killed: number } {
     }
 
     db.prepare(
-      "UPDATE runs SET status = 'error', verdict = 'crashed', finishedAt = ?, stderr = stderr || ? WHERE id = ? AND status = 'running'",
-    ).run(now, note, row.id)
+      "UPDATE runs SET status = 'error', verdict = 'crashed', finishedAt = ?, headBranch = ?, stderr = stderr || ? WHERE id = ? AND status = 'running'",
+    ).run(now, finishedBranch, note, row.id)
+    if (branchChanged) {
+      db.prepare(
+        "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+      ).run(row.id)
+    }
     db.prepare(
       "UPDATE messages SET status = 'error', finishedAt = ? WHERE runId = ? AND status = 'running'",
     ).run(now, row.id)

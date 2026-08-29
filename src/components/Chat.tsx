@@ -1195,6 +1195,7 @@ export function Chat({
   workspaceId,
   onNewChat,
   pullRequest,
+  pullRequestError,
 }: {
   messages: ChatMessage[]
   /** Pulse the transcript scroller while conversation is still in flight. */
@@ -1274,6 +1275,8 @@ export function Chat({
   onNewChat?: () => void
   /** PR on the run's branch, if any — shown as a strip above the composer. */
   pullRequest?: RunPullRequest | null
+  /** A failed PR probe is shown alongside any stale cached result. */
+  pullRequestError?: string | null
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -1634,6 +1637,15 @@ export function Chat({
                 <PullRequestChip pr={pullRequest} />
               </div>
             ) : null}
+            {pullRequestError ? (
+              <div
+                role="alert"
+                className="relative z-[6] mx-auto -mb-[2px] w-[92%] truncate rounded-t-[16px] border border-b-0 border-border bg-elevated px-2.5 py-1.5 text-[12.5px] text-danger"
+                title={pullRequestError}
+              >
+                Pull request status unavailable: {pullRequestError}
+              </div>
+            ) : null}
             {changedFiles && changedFiles.length > 0 && onReviewFile ? (
               <div className="relative mx-auto -mb-[2px] w-[92%]">
                 <FilesChanged
@@ -1664,7 +1676,8 @@ export function Chat({
               className={
                 (changedFiles && changedFiles.length > 0 && onReviewFile) ||
                 queuedMessages.length > 0 ||
-                pullRequest
+                pullRequest ||
+                pullRequestError
                   ? 'relative z-10 w-full'
                   : 'w-full pt-2'
               }
