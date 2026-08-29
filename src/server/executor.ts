@@ -1919,6 +1919,41 @@ function verificationSettings(taskId: string | null): VerificationSettings {
   }
 }
 
+/**
+ * Atomically acquire the in-memory verification reservation and confirm that
+ * cancellation has not won the race. JavaScript runs this registration and
+ * both durable/in-memory reads without yielding, so `cancelRun` can never
+ * release a workspace between the last check and the check runner starting.
+ *
+ * `afterRegister` is a deterministic test seam for exercising the exact
+ * cancellation window; production callers omit it.
+ */
+export function acquireVerificationController(
+  runId: string,
+  afterRegister?: () => void,
+): AbortController | null {
+  const controller = new AbortController()
+  const active = verifyingMap()
+  active.set(runId, controller)
+  try {
+    afterRegister?.()
+  } catch (err) {
+    if (active.get(runId) === controller) active.delete(runId)
+    throw err
+  }
+
+  const row = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+    | { status: string }
+    | undefined
+  const cancelled = row?.status === 'cancelled' || cancellationMap().has(runId)
+  if (cancelled) {
+    controller.abort()
+    if (active.get(runId) === controller) active.delete(runId)
+    return null
+  }
+  return controller
+}
+
 function countChangedFiles(cwd: string, baseSnapshot: string): number {
   try {
     return changedFiles(cwd, baseSnapshot || undefined).length
@@ -1992,22 +2027,25 @@ async function concludeTurn(input: {
   if (input.status === 'success' && !timedOut && settings.verifyEnabled && !cancellationRequested) {
     const defs = checksForWorkspace(run.workspaceId)
     if (defs.length > 0) {
-      const controller = new AbortController()
-      verifyingMap().set(input.runId, controller)
-      try {
-        const pass = await runCheckPass({
-          runId: input.runId,
-          messageId: input.assistantMessageId,
-          attempt: run.repairAttempts,
-          cwd: input.cwd,
-          checks: defs,
-          signal: controller.signal,
-        })
-        results = pass.results
-      } catch (err) {
-        console.error(`[executor] verification failed for ${input.runId}:`, err)
-      } finally {
-        verifyingMap().delete(input.runId)
+      const controller = acquireVerificationController(input.runId)
+      if (controller) {
+        try {
+          const pass = await runCheckPass({
+            runId: input.runId,
+            messageId: input.assistantMessageId,
+            attempt: run.repairAttempts,
+            cwd: input.cwd,
+            checks: defs,
+            signal: controller.signal,
+          })
+          results = pass.results
+        } catch (err) {
+          console.error(`[executor] verification failed for ${input.runId}:`, err)
+        } finally {
+          if (verifyingMap().get(input.runId) === controller) {
+            verifyingMap().delete(input.runId)
+          }
+        }
       }
     }
   }

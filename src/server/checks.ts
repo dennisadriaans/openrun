@@ -68,11 +68,14 @@ export function executeCheck(input: {
     let settled = false
     let timedOut = false
     let aborted = false
+    let spawnError = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort = () => {}
 
     const finish = (outcome: CheckOutcome, exitCode: number | null) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
       input.signal?.removeEventListener('abort', onAbort)
       resolve({
         outcome,
@@ -80,6 +83,16 @@ export function executeCheck(input: {
         output: tail(output),
         durationMs: Date.now() - startedAt,
       })
+    }
+
+    // Do not spawn a check after cancellation. Apart from being cheaper, this
+    // closes the small window where an already-aborted signal could otherwise
+    // start a process before the abort listener is attached.
+    if (input.signal?.aborted) {
+      aborted = true
+      output = '\n[checks] cancelled\n'
+      finish('skipped', null)
+      return
     }
 
     let child: ReturnType<typeof spawn>
@@ -104,13 +117,13 @@ export function executeCheck(input: {
       killChildTree(child, { stillLive: () => !settled })
     }
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       timedOut = true
       output += `\n[checks] timed out after ${Math.round(input.timeoutMs / 1000)}s\n`
       stop()
     }, input.timeoutMs)
 
-    const onAbort = () => {
+    onAbort = () => {
       if (settled) return
       output += '\n[checks] cancelled\n'
       aborted = true
@@ -121,6 +134,10 @@ export function executeCheck(input: {
       stop()
     }
     input.signal?.addEventListener('abort', onAbort, { once: true })
+    // AbortSignal does not invoke a listener added after abort. Re-check after
+    // registration so a signal that changed during setup still kills the
+    // child and waits for its close event before resolving.
+    if (input.signal?.aborted) onAbort()
 
     const append = (chunk: Buffer) => {
       output += chunk.toString()
@@ -135,12 +152,16 @@ export function executeCheck(input: {
 
     child.on('error', (err) => {
       output += `\n[checks] ${err.message}\n`
-      finish('failed', null)
+      // Wait for `close` before settling. An error event can arrive while the
+      // child still has output or grandchildren alive; the workspace remains
+      // reserved until the process lifecycle has actually ended.
+      spawnError = true
     })
 
     child.on('close', (code) => {
       if (aborted) return finish('skipped', null)
       if (timedOut) return finish('timeout', code)
+      if (spawnError) return finish('failed', null)
       finish(code === 0 ? 'passed' : 'failed', code)
     })
   })

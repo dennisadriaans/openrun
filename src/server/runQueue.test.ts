@@ -29,12 +29,11 @@ const vite = await createServer({
 const { closeDb, getDb } = (await vite.ssrLoadModule(
   '/src/server/db.ts',
 )) as typeof import('./db.ts')
-const { enqueueRun, drainWorkspace, listQueue } = (await vite.ssrLoadModule(
+const { enqueueRun, drainWorkspace, listQueue, workspaceBusy } = (await vite.ssrLoadModule(
   '/src/server/runQueue.ts',
 )) as typeof import('./runQueue.ts')
-const { cancelRun, reconcileOrphanRuns, runTask } = (await vite.ssrLoadModule(
-  '/src/server/executor.ts',
-)) as typeof import('./executor.ts')
+const { acquireVerificationController, cancelRun, reconcileOrphanRuns, runTask } =
+  (await vite.ssrLoadModule('/src/server/executor.ts')) as typeof import('./executor.ts')
 
 after(async () => {
   closeDb()
@@ -245,6 +244,62 @@ describe('server pending-run queue', () => {
     }
     child.kill('SIGKILL')
     throw new Error('cancelled child did not finish cleanup')
+  })
+
+  it('does not start verification after cancellation wins during acquisition', async () => {
+    seed()
+    const db = getDb()
+    db.prepare("UPDATE runs SET status = 'error' WHERE id = 'busy-run'").run()
+    db.prepare(
+      "UPDATE tasks SET workspaceId = 'workspace-cancel', cwd = ? WHERE id = 'queue-task'",
+    ).run(oldRepo)
+    assert.equal(
+      enqueueRun({
+        taskId: 'queue-task',
+        workspaceId: 'workspace-cancel',
+        trigger: 'webhook',
+      }).queued,
+      true,
+    )
+
+    // The callback is the exact post-registration/pre-flight seam. It runs
+    // synchronously, so this exercises the race without relying on a timer.
+    const controller = acquireVerificationController('cancel-run', () => {
+      assert.equal(cancelRun('cancel-run'), true)
+      assert.equal(
+        (db.prepare("SELECT status FROM runs WHERE id = 'cancel-run'").get() as { status: string })
+          .status,
+        'running',
+      )
+      assert.equal(listQueue('workspace-cancel').length, 1)
+    })
+    assert.equal(controller, null)
+    assert.equal(
+      (
+        db.prepare("SELECT COUNT(*) AS n FROM check_results WHERE runId = 'cancel-run'").get() as {
+          n: number
+        }
+      ).n,
+      0,
+    )
+
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline) {
+      const status = (
+        db.prepare("SELECT status FROM runs WHERE id = 'cancel-run'").get() as {
+          status: string
+        }
+      ).status
+      if (status === 'cancelled') break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.equal(
+      (db.prepare("SELECT status FROM runs WHERE id = 'cancel-run'").get() as { status: string })
+        .status,
+      'cancelled',
+    )
+    assert.equal(workspaceBusy('workspace-cancel'), false)
+    assert.equal(listQueue('workspace-cancel').length, 1)
   })
 
   it('keeps a workspace and its queue held until aborted verification closes', async () => {

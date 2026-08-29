@@ -150,6 +150,26 @@ setTimeout(() => {}, 60_000)
     assert.match(result.output, /cancelled/)
   })
 
+  it('does not spawn when the signal was already aborted', async () => {
+    const dir = workdir()
+    const marker = join(dir, 'spawned.txt')
+    const controller = new AbortController()
+    controller.abort()
+    const result = await executeCheck({
+      command: nodeFile(
+        dir,
+        'should-not-run.js',
+        `require('fs').writeFileSync(${JSON.stringify(marker)}, 'spawned')\n`,
+      ),
+      cwd: dir,
+      timeoutMs: 30_000,
+      signal: controller.signal,
+    })
+    assert.equal(result.outcome, 'skipped')
+    assert.match(result.output, /cancelled/)
+    assert.equal(existsSync(marker), false)
+  })
+
   it('does not resolve cancellation until the check child has closed', async () => {
     const dir = workdir()
     const controller = new AbortController()
