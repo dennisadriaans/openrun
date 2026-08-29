@@ -1,3 +1,5 @@
+import { normalizeSelection, selectionState, toggleSelection } from './listSelection.ts'
+
 export type SelectableRun = { id: string; status: string }
 
 export function deletableRunIds(runs: readonly SelectableRun[]): string[] {
@@ -9,17 +11,7 @@ export function normalizeRunSelection(
   selectedIds: readonly string[],
   visibleRuns: readonly SelectableRun[],
 ): string[] {
-  const visible = new Set(deletableRunIds(visibleRuns))
-  const normalized = [...new Set(selectedIds)].filter((id) => visible.has(id))
-  if (
-    normalized.length === selectedIds.length &&
-    normalized.every((id, i) => id === selectedIds[i])
-  ) {
-    // Returning the existing state lets React bail out even when a demo or
-    // refetch supplies a fresh visible-runs array on every render.
-    return selectedIds as string[]
-  }
-  return normalized
+  return normalizeSelection(selectedIds, deletableRunIds(visibleRuns))
 }
 
 export function toggleRunSelection(
@@ -27,24 +19,14 @@ export function toggleRunSelection(
   runId: string,
   checked: boolean,
 ): string[] {
-  const selected = new Set(selectedIds)
-  if (checked) selected.add(runId)
-  else selected.delete(runId)
-  return [...selected]
+  return toggleSelection(selectedIds, runId, checked)
 }
 
 export function pageSelectionState(
   selectedIds: readonly string[],
   visibleRuns: readonly SelectableRun[],
 ): { ids: string[]; checked: boolean; indeterminate: boolean } {
-  const ids = deletableRunIds(visibleRuns)
-  const selected = new Set(selectedIds)
-  const selectedCount = ids.filter((id) => selected.has(id)).length
-  return {
-    ids,
-    checked: ids.length > 0 && selectedCount === ids.length,
-    indeterminate: selectedCount > 0 && selectedCount < ids.length,
-  }
+  return selectionState(selectedIds, deletableRunIds(visibleRuns))
 }
 
 export function normalizeRunPage(page: number, total: number, pageSize: number): number {

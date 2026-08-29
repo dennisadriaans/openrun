@@ -1298,6 +1298,10 @@ export function deleteTask(taskId: string) {
   getDb().prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
 }
 
+export function deleteTasks(taskIds: string[]): void {
+  for (const id of [...new Set(taskIds)]) deleteTask(id)
+}
+
 /** Runs parked because their workspace was busy, oldest first. */
 export function listPendingRuns() {
   const db = getDb()
