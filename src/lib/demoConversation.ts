@@ -345,6 +345,7 @@ export function demoConversation(runId: string, now: number = Date.now()) {
       finishedAt: t1,
       sessionId: 'demo-session',
       baseBranch: 'main',
+      headBranch: 'main',
       baseSnapshot: 'demo-snap',
       model: 'opus',
       effort: 'high',

@@ -1569,27 +1569,25 @@ export function TaskForm({
           <StepLabel n={2}>When it should run</StepLabel>
           <div className="space-y-1.5">
             {v.cron ? (
-              <>
-                <ScheduleTriggerRow
-                  cron={v.cron}
-                  fireOnce={Boolean(v.fireOnce)}
-                  scheduledAt={v.scheduledAt}
-                  onChange={(cron) => {
-                    set('cron', cron)
-                    if (v.fireOnce) set('scheduledAt', nextRunAt(cron) ?? 0)
-                    setRunOnce(false)
-                    setTriggerError(null)
-                  }}
-                  onRemove={() => {
-                    set('cron', '')
-                    set('fireOnce', 0)
-                    set('scheduledAt', 0)
-                    setAddingTrigger(false)
-                    setTriggerDraft('')
-                    setTriggerError(null)
-                  }}
-                />
-              </>
+              <ScheduleTriggerRow
+                cron={v.cron}
+                fireOnce={Boolean(v.fireOnce)}
+                scheduledAt={v.scheduledAt}
+                onChange={(cron) => {
+                  set('cron', cron)
+                  if (v.fireOnce) set('scheduledAt', nextRunAt(cron) ?? 0)
+                  setRunOnce(false)
+                  setTriggerError(null)
+                }}
+                onRemove={() => {
+                  set('cron', '')
+                  set('fireOnce', 0)
+                  set('scheduledAt', 0)
+                  setAddingTrigger(false)
+                  setTriggerDraft('')
+                  setTriggerError(null)
+                }}
+              />
             ) : null}
 
             {runOnce && !v.cron ? (

@@ -80,7 +80,12 @@ import {
 import type { ApprovalDecision } from '../lib/claudeControl'
 import * as files from './files'
 import * as git from './git'
-import { isPullRequestLive, type RunPullRequest } from '../lib/pullRequest'
+import {
+  isPullRequestLive,
+  type PullRequestChecks,
+  type PullRequestState,
+  type RunPullRequest,
+} from '../lib/pullRequest'
 import { supportsResume, runtimeKind } from './resume'
 import { bootScheduler, syncTask, unscheduleTask } from './scheduler'
 import {
@@ -1806,12 +1811,16 @@ const PR_SETTLED_TTL_MS = 10 * 60_000
 
 function cachedRunPullRequest(run: RunRow): RunPullRequest | null {
   if (!run.prNumber || !run.prUrl) return null
+  const states: PullRequestState[] = ['open', 'draft', 'merged', 'closed']
+  const checks: PullRequestChecks[] = ['passing', 'failing', 'pending', 'none']
+  if (!states.includes(run.prState as PullRequestState)) return null
+  if (!checks.includes(run.prChecks as PullRequestChecks)) return null
   return {
     number: run.prNumber,
     url: run.prUrl,
     title: run.prTitle,
-    state: (run.prState || 'open') as RunPullRequest['state'],
-    checks: (run.prChecks || 'none') as RunPullRequest['checks'],
+    state: run.prState as PullRequestState,
+    checks: run.prChecks as PullRequestChecks,
   }
 }
 
@@ -1840,11 +1849,21 @@ export async function getRunPullRequest(runId: string): Promise<RunPullRequest |
   const ttl = cached && !isPullRequestLive(cached.state) ? PR_SETTLED_TTL_MS : PR_LIVE_TTL_MS
   if (run.prCheckedAt && Date.now() - run.prCheckedAt < ttl) return cached
 
-  const fresh = await git.pullRequestForBranchAsync(run.cwd)
-  // A branch that lost its PR (deleted, or the run moved branches) clears the
-  // cache; a probe that simply failed also clears it rather than showing stale.
-  persistRunPullRequest(runId, fresh)
-  return fresh
+  // `headBranch` is captured before the finalization hook can release the
+  // workspace to another run. Rows from before that column existed retain the
+  // starting branch, which is a safe identity; never inspect today's mutable
+  // checkout for a completed legacy run.
+  const branch = run.headBranch.trim() || run.baseBranch.trim()
+  const fresh = await git.pullRequestForBranchAsync(run.cwd, branch)
+  if (fresh.kind === 'error') {
+    // Keep a previously good cache intact. Throwing lets React Query expose the
+    // probe failure while retaining stale data during a refetch.
+    throw new Error(fresh.reason)
+  }
+  // Only an authoritative empty list clears the cache. A successful PR result
+  // replaces it, including state transitions such as open → merged.
+  persistRunPullRequest(runId, fresh.kind === 'found' ? fresh.pullRequest : null)
+  return fresh.kind === 'found' ? fresh.pullRequest : null
 }
 
 /** Drop the TTL so the next read re-probes — used after opening a PR. */

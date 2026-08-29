@@ -144,6 +144,8 @@ export type RunRow = {
   sessionId: string
   /** Git branch the run's cwd was on when the run started. */
   baseBranch: string
+  /** Git branch the run finished on, captured before workspace reuse can change it. */
+  headBranch: string
   /**
    * Immutable object-db commit of the working tree (incl. uncommitted/untracked)
    * at run start. Diffs/commits/discards for the run are scoped to the delta
@@ -173,7 +175,8 @@ export type RunRow = {
   /** When the user last opened this run; agent messages after it read as unread. */
   lastReadAt: number
   /**
-   * Last known pull request for the run's branch — cached from `gh pr view` so
+   * Last known pull request for the run's named head branch — cached from
+   * `gh pr list --state all` so
    * the chip paints before (and without) a network round trip. `prNumber` 0
    * means "no PR seen yet"; `prState` is one of lib/pullRequest.ts's states.
    */
@@ -592,7 +595,8 @@ export function getDb(): Database.Database {
       startedAt INTEGER NOT NULL,
       finishedAt INTEGER,
       sessionId TEXT NOT NULL DEFAULT '',
-      baseBranch TEXT NOT NULL DEFAULT ''
+      baseBranch TEXT NOT NULL DEFAULT '',
+      headBranch TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -692,6 +696,7 @@ function addColumn(db: Database.Database, table: string, column: string, ddl: st
 function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'sessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'baseBranch', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'runs', 'headBranch', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'baseSnapshot', "TEXT NOT NULL DEFAULT ''")
   // Links a run/task to its workspace row. Kept alongside cwd (not instead of
   // it) — cwd remains the source of truth for git operations, workspaceId is

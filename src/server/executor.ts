@@ -218,6 +218,27 @@ function runtimeSupportsLastResume(bin: string) {
   return (bin.split(/[\\/]/).pop() ?? bin).includes('codex')
 }
 
+/** A detached HEAD is not a branch that `gh pr view` can resolve reliably. */
+function namedBranch(cwd: string): string {
+  const branch = currentBranch(cwd)
+  return branch && branch !== 'HEAD' ? branch : ''
+}
+
+function persistRunHeadBranch(runId: string, cwd: string): void {
+  const db = getDb()
+  const run = db.prepare('SELECT headBranch FROM runs WHERE id = ?').get(runId) as
+    | { headBranch: string }
+    | undefined
+  const finishedBranch = cwd ? namedBranch(cwd) : ''
+  const branchChanged = (run?.headBranch ?? '') !== finishedBranch
+  db.prepare('UPDATE runs SET headBranch = ? WHERE id = ?').run(finishedBranch, runId)
+  if (branchChanged) {
+    db.prepare(
+      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+    ).run(runId)
+  }
+}
+
 function publishRunStatus(runId: string, status: string, exitCode: number | null) {
   const db = getDb()
   const run = db.prepare('SELECT sessionId, runtimeId FROM runs WHERE id = ?').get(runId) as
@@ -368,11 +389,11 @@ export function startRun(input: StartRunInput): string {
     throw new Error(`The "${input.runtime.label}" runtime does not support resuming a conversation`)
   }
 
-  const baseBranch = currentBranch(cwd)
+  const baseBranch = namedBranch(cwd)
 
   db.prepare(
-    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
-     VALUES (@id, @taskId, @taskName, @runtimeId, @trigger, 'running', @command, @cwd, @workspaceId, NULL, NULL, '', '', @startedAt, NULL, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
+    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, headBranch, baseSnapshot, model, effort, runtimeMode)
+     VALUES (@id, @taskId, @taskName, @runtimeId, @trigger, 'running', @command, @cwd, @workspaceId, NULL, NULL, '', '', @startedAt, NULL, @sessionId, @baseBranch, @headBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
   ).run({
     id: runId,
     taskId: input.taskId,
@@ -385,6 +406,9 @@ export function startRun(input: StartRunInput): string {
     startedAt: now,
     sessionId,
     baseBranch,
+    // Seed with the starting branch so a live run has a stable identity too;
+    // finalizeRun replaces it with the branch actually used by the agent.
+    headBranch: baseBranch,
     baseSnapshot: captureBaseSnapshot(cwd),
     model,
     effort,
@@ -490,8 +514,8 @@ export function adoptNativeChat(input: {
 
   const runtimeMode = parseRuntimeMode(input.runtimeMode ?? DEFAULT_RUNTIME_MODE)
   db.prepare(
-    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
-     VALUES (@id, NULL, @taskName, @runtimeId, 'chat', 'success', @command, @cwd, @workspaceId, NULL, 0, '', '', @startedAt, @finishedAt, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
+    `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, headBranch, baseSnapshot, model, effort, runtimeMode)
+     VALUES (@id, NULL, @taskName, @runtimeId, 'chat', 'success', @command, @cwd, @workspaceId, NULL, 0, '', '', @startedAt, @finishedAt, @sessionId, @baseBranch, @headBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
   ).run({
     id: runId,
     taskName: input.taskName,
@@ -504,7 +528,8 @@ export function adoptNativeChat(input: {
     startedAt: now,
     finishedAt: now,
     sessionId,
-    baseBranch: currentBranch(cwd),
+    baseBranch: namedBranch(cwd),
+    headBranch: namedBranch(cwd),
     // The diff a follow-up shows starts here, not at whatever the CLI did.
     baseSnapshot: captureBaseSnapshot(cwd),
     model: input.model?.trim() ?? '',
@@ -813,7 +838,7 @@ function spawnTurn(input: {
         messageId: assistantMsgId,
       })
       finalizeMessage(assistantMsgId, 'error', null, cwd)
-      finalizeRun(runId, 'error', null, 'crashed')
+      finalizeRun(runId, 'error', null, 'crashed', cwd)
       return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
     }
     publishRunLive(runId, {
@@ -863,7 +888,7 @@ function spawnTurn(input: {
       messageId: assistantMsgId,
     })
     finalizeMessage(assistantMsgId, 'error', null, cwd)
-    finalizeRun(runId, 'error', null, 'crashed')
+    finalizeRun(runId, 'error', null, 'crashed', cwd)
     return { userMessageId: userMsgId, assistantMessageId: assistantMsgId }
   }
 
@@ -1739,10 +1764,26 @@ function finalizeRun(
   status: 'success' | 'error',
   code: number | null,
   verdict: RunVerdict,
+  cwd: string,
 ) {
-  getDb()
-    .prepare('UPDATE runs SET status = ?, exitCode = ?, verdict = ?, finishedAt = ? WHERE id = ?')
-    .run(status, code, verdict, Date.now(), runId)
+  const db = getDb()
+  const run = db.prepare('SELECT headBranch FROM runs WHERE id = ?').get(runId) as
+    | { headBranch: string }
+    | undefined
+  const finishedBranch = namedBranch(cwd)
+  // If the agent moved (or detached) the checkout, an older PR cache belongs
+  // to the old branch. Drop it before the workspace can be reused by another
+  // run. Store the empty string for a detached/missing checkout rather than
+  // inferring a branch later from whatever reuses this workspace.
+  const branchChanged = (run?.headBranch ?? '') !== finishedBranch
+  db.prepare(
+    'UPDATE runs SET status = ?, exitCode = ?, verdict = ?, finishedAt = ?, headBranch = ? WHERE id = ?',
+  ).run(status, code, verdict, Date.now(), finishedBranch, runId)
+  if (branchChanged) {
+    db.prepare(
+      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+    ).run(runId)
+  }
   publishRunStatus(runId, status, code)
   publishActivityLive({ type: 'run_changed', runId, status, verdict })
   // A queued follow-up means the conversation is not over: it takes the
@@ -1820,11 +1861,12 @@ function completeCancelledRun(runId: string): void {
   const pending = cancellationMap().get(runId)
   if (!pending) return
   if (liveMap().has(runId) || verifyingMap().has(runId)) return
-  const row = getDb().prepare('SELECT pid FROM runs WHERE id = ?').get(runId) as
-    | { pid: number | null }
+  const row = getDb().prepare('SELECT pid, cwd FROM runs WHERE id = ?').get(runId) as
+    | { pid: number | null; cwd: string }
     | undefined
   if (isPidAlive(row?.pid)) return
 
+  persistRunHeadBranch(runId, row?.cwd ?? '')
   // Keep the row running while a cancellation is in flight. This prevents a
   // terminal status from being mistaken for a free workspace by any caller.
   // The reservation is still useful for the verification-only/no-pid case and
@@ -2131,7 +2173,7 @@ async function concludeTurn(input: {
     })
   }
 
-  finalizeRun(input.runId, input.status, input.exitCode, verdict)
+  finalizeRun(input.runId, input.status, input.exitCode, verdict, input.cwd)
 }
 
 /** Latest verification results for a run, newest pass only. */
@@ -2306,6 +2348,7 @@ export function cancelRunsForTask(taskId: string): number {
 type OrphanRow = {
   id: string
   pid: number | null
+  cwd: string
   workspaceId: string
   trigger: string
   taskName: string
@@ -2313,6 +2356,7 @@ type OrphanRow = {
 
 function markOrphanTerminal(row: OrphanRow, now: number, note: string): void {
   const db = getDb()
+  persistRunHeadBranch(row.id, row.cwd)
   db.prepare(
     "UPDATE runs SET status = 'error', verdict = 'crashed', finishedAt = ?, stderr = stderr || ? WHERE id = ? AND status = 'running'",
   ).run(now, note, row.id)
@@ -2355,7 +2399,9 @@ function releaseOrphanReservationAfterExit(
 export function reconcileOrphanRuns(): { marked: number; killed: number } {
   const db = getDb()
   const orphans = db
-    .prepare("SELECT id, pid, workspaceId, trigger, taskName FROM runs WHERE status = 'running'")
+    .prepare(
+      "SELECT id, pid, cwd, workspaceId, trigger, taskName FROM runs WHERE status = 'running'",
+    )
     .all() as OrphanRow[]
 
   let killed = 0
