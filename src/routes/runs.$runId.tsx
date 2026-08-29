@@ -139,7 +139,13 @@ function RunDetail() {
     enabled: showRight || confirmUndoAll,
   })
 
-  const { data: pullRequest } = useRunPullRequest(runId)
+  const pullRequestQuery = useRunPullRequest(runId)
+  const pullRequest = pullRequestQuery.data
+  const pullRequestError = pullRequestQuery.error
+    ? pullRequestQuery.error instanceof Error
+      ? pullRequestQuery.error.message
+      : String(pullRequestQuery.error)
+    : null
 
   const markRead = useMarkRunRead()
   const sendMessage = useSendMessage(runId)
@@ -593,6 +599,7 @@ function RunDetail() {
                 running={run?.status === 'running'}
                 checkResults={checkResults}
                 pullRequest={pullRequest ?? null}
+                pullRequestError={pullRequestError}
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}

@@ -22,7 +22,7 @@ import {
   missingOriginRemoteMessage,
 } from '../lib/gitActionGate.ts'
 import { parseGitForEachRef, type GitBranchRow } from '../lib/gitBranches.ts'
-import { parseGhPullRequest, type RunPullRequest } from '../lib/pullRequest.ts'
+import { parseGhPullRequestListResult, type RunPullRequest } from '../lib/pullRequest.ts'
 import {
   NO_RUN_COMMITS,
   undoCommitsBlockedReason,
@@ -904,6 +904,133 @@ export function discardHunk(
 }
 
 const GH_STATUS_TTL_MS = 60_000
+/** Keep a broken gh/network from holding the run detail request forever. */
+export const GH_PROBE_TIMEOUT_MS = 10_000
+const GH_KILL_GRACE_MS = 250
+const GH_CLOSE_FALLBACK_MS = 1_000
+/** PR metadata is tiny; never let a broken CLI fill the run request's heap. */
+const GH_MAX_BUFFER = 1 * 1024 * 1024
+const GH_PR_FIELDS = 'number,url,title,state,isDraft,statusCheckRollup'
+
+export type PullRequestProbeResult =
+  | { kind: 'found'; pullRequest: RunPullRequest }
+  | { kind: 'none' }
+  | { kind: 'error'; reason: string }
+
+type GhCommandResult = {
+  status: number | null
+  stdout: string
+  stderr: string
+  timedOut?: boolean
+}
+
+export type GhCommandRunner = (
+  cwd: string,
+  args: string[],
+  timeoutMs: number,
+) => Promise<GhCommandResult>
+
+export type PullRequestProbeOptions = {
+  /** Test seam for deterministic gh outcomes; production uses a child process. */
+  run?: GhCommandRunner
+  /** Test seam for the cached auth check. */
+  ghStatus?: () => Promise<{ installed: boolean; authenticated: boolean }>
+  /** Test seam for repositories without creating a real git checkout. */
+  isRepo?: (cwd: string) => boolean
+  timeoutMs?: number
+}
+
+function runGhCommand(cwd: string, args: string[], timeoutMs: number): Promise<GhCommandResult> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn> | null = null
+    let settled = false
+    let closed = false
+    let terminating = false
+    let stdout = ''
+    let stderr = ''
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    let killTimer: ReturnType<typeof setTimeout> | null = null
+    let closeFallbackTimer: ReturnType<typeof setTimeout> | null = null
+    let pendingTermination: GhCommandResult | null = null
+
+    const finish = (result: GhCommandResult) => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      if (killTimer) clearTimeout(killTimer)
+      if (closeFallbackTimer) clearTimeout(closeFallbackTimer)
+      resolve(result)
+    }
+
+    const terminate = (result: GhCommandResult) => {
+      if (terminating || settled) return
+      terminating = true
+      pendingTermination = result
+      if (!child || closed) return
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        // The process may have exited between the close check and kill.
+      }
+      killTimer = setTimeout(() => {
+        if (closed || !child || settled) return
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // The process is already gone.
+        }
+        // Node normally emits `close` after SIGKILL. Keep a bounded fallback
+        // for a broken child/stdio implementation, but never resolve before
+        // SIGKILL has been attempted.
+        closeFallbackTimer = setTimeout(() => {
+          if (closed || settled) return
+          finish(pendingTermination ?? { status: null, stdout, stderr })
+        }, GH_CLOSE_FALLBACK_MS)
+      }, GH_KILL_GRACE_MS)
+    }
+
+    try {
+      child = spawn('gh', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+      child.stdout?.setEncoding('utf8')
+      child.stderr?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => {
+        if (settled || terminating) return
+        if (stdout.length + chunk.length > GH_MAX_BUFFER) {
+          terminate({ status: null, stdout: '', stderr: 'gh returned too much output' })
+          return
+        }
+        stdout += chunk
+      })
+      child.stderr?.on('data', (chunk: string) => {
+        if (settled || terminating) return
+        if (stderr.length + chunk.length > GH_MAX_BUFFER) {
+          terminate({ status: null, stdout: '', stderr: 'gh returned too much output' })
+          return
+        }
+        stderr += chunk
+      })
+      child.on('error', (error) => {
+        if (settled || terminating) return
+        pendingTermination = { status: null, stdout, stderr: `${stderr}\n${String(error)}` }
+      })
+      child.on('close', (status) => {
+        closed = true
+        finish(
+          pendingTermination ?? {
+            status,
+            stdout,
+            stderr,
+          },
+        )
+      })
+      timeout = setTimeout(() => {
+        terminate({ status: null, stdout, stderr, timedOut: true })
+      }, timeoutMs)
+    } catch (error) {
+      finish({ status: null, stdout, stderr: `${stderr}\n${String(error)}` })
+    }
+  })
+}
 let ghStatusCache: { at: number; value: { installed: boolean; authenticated: boolean } } | null =
   null
 
@@ -920,7 +1047,12 @@ export function ghStatus(): { installed: boolean; authenticated: boolean } {
       ghStatusCache = { at: now, value }
       return value
     }
-    const auth = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' })
+    const auth = spawnSync('gh', ['auth', 'status'], {
+      encoding: 'utf8',
+      maxBuffer: GH_MAX_BUFFER,
+      timeout: GH_PROBE_TIMEOUT_MS,
+      killSignal: 'SIGTERM',
+    })
     const value = { installed: true, authenticated: auth.status === 0 }
     ghStatusCache = { at: now, value }
     return value
@@ -943,11 +1075,8 @@ export async function ghStatusAsync(): Promise<{ installed: boolean; authenticat
       ghStatusCache = { at: now, value }
       return value
     }
-    const value = await new Promise<{ installed: boolean; authenticated: boolean }>((resolve) => {
-      const child = spawn('gh', ['auth', 'status'], { stdio: ['ignore', 'ignore', 'ignore'] })
-      child.on('error', () => resolve({ installed: true, authenticated: false }))
-      child.on('close', (code) => resolve({ installed: true, authenticated: code === 0 }))
-    })
+    const auth = await runGhCommand(process.cwd(), ['auth', 'status'], GH_PROBE_TIMEOUT_MS)
+    const value = { installed: true, authenticated: auth.status === 0 && !auth.timedOut }
     ghStatusCache = { at: now, value }
     return value
   } catch {
@@ -1138,36 +1267,57 @@ export function hasUnpushedWork(repoPath: string): {
 }
 
 /**
- * Look up the pull request for the branch checked out in `cwd`, if any.
+ * Look up a pull request by its persisted head branch.
  *
- * `gh pr view` resolves the PR from the current branch, so this finds PRs the
- * agent opened on its own just as well as ones opened from the workspace panel.
- * Returns null when there is no PR, no remote, or gh is unavailable.
+ * `gh pr list --state all` can still find merged/closed PRs after the local
+ * branch is deleted, and unlike `gh pr view` it has an explicit no-result
+ * response that does not require parsing localized error text.
  */
-export async function pullRequestForBranchAsync(cwd: string): Promise<RunPullRequest | null> {
-  if (!isRepo(cwd)) return null
-  const gh = await ghStatusAsync()
-  if (!gh.installed || !gh.authenticated) return null
+function ghErrorReason(output: GhCommandResult): string {
+  if (output.timedOut) return 'gh pull request lookup timed out'
+  const detail = `${output.stderr}\n${output.stdout}`.trim().replace(/\s+/g, ' ')
+  if (!detail) return 'gh pull request lookup failed'
+  const bounded = detail.length > 500 ? `${detail.slice(0, 500)}…` : detail
+  return `gh pull request lookup failed: ${bounded}`
+}
 
-  const out = await new Promise<{ ok: boolean; stdout: string }>((resolve) => {
-    try {
-      const child = spawn(
-        'gh',
-        ['pr', 'view', '--json', 'number,url,title,state,isDraft,statusCheckRollup'],
-        { cwd, stdio: ['ignore', 'pipe', 'ignore'] },
-      )
-      let stdout = ''
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (chunk: string) => {
-        stdout += chunk
-        if (stdout.length > MAX_BUFFER) child.kill('SIGTERM')
-      })
-      child.on('error', () => resolve({ ok: false, stdout: '' }))
-      child.on('close', (code) => resolve({ ok: code === 0, stdout }))
-    } catch {
-      resolve({ ok: false, stdout: '' })
-    }
-  })
-  if (!out.ok) return null
-  return parseGhPullRequest(out.stdout)
+/** Look up a PR for the supplied branch without reading the mutable checkout HEAD. */
+export async function pullRequestForBranchAsync(
+  cwd: string,
+  branch: string,
+  options: PullRequestProbeOptions = {},
+): Promise<PullRequestProbeResult> {
+  const repo = options.isRepo ?? isRepo
+  if (!repo(cwd)) return { kind: 'error', reason: 'the run workspace is not a git repository' }
+  const named = branch.trim()
+  if (!named || named === 'HEAD') {
+    return { kind: 'error', reason: 'run has no named head branch' }
+  }
+
+  let gh: { installed: boolean; authenticated: boolean }
+  try {
+    gh = await (options.ghStatus ?? ghStatusAsync)()
+  } catch {
+    return { kind: 'error', reason: 'could not determine gh authentication status' }
+  }
+  if (!gh.installed) return { kind: 'error', reason: ghNotInstalledMessage() }
+  if (!gh.authenticated) return { kind: 'error', reason: ghNotAuthenticatedMessage() }
+
+  const run = options.run ?? runGhCommand
+  let out: GhCommandResult
+  try {
+    out = await run(
+      cwd,
+      ['pr', 'list', '--head', named, '--state', 'all', '--limit', '1', '--json', GH_PR_FIELDS],
+      options.timeoutMs ?? GH_PROBE_TIMEOUT_MS,
+    )
+  } catch {
+    return { kind: 'error', reason: 'gh pull request lookup failed' }
+  }
+  if (out.status !== 0) {
+    return { kind: 'error', reason: ghErrorReason(out) }
+  }
+  const parsed = parseGhPullRequestListResult(out.stdout)
+  if (parsed.kind === 'none') return parsed
+  return parsed.kind === 'found' ? parsed : { kind: 'error', reason: parsed.reason }
 }

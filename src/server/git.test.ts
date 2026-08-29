@@ -13,6 +13,7 @@ import {
   discard,
   discardHunk,
   fileDiff,
+  pullRequestForBranchAsync,
   push,
   resetWorktree,
   resolveCommit,
@@ -262,5 +263,104 @@ describe('push / createPullRequest origin gate', () => {
       () => createPullRequest({ cwd, title: 't', body: 'b' }),
       (err: Error) => err.message === missingOriginRemoteMessage(),
     )
+  })
+})
+
+function ghPullRequest(state: string, isDraft = false): string {
+  return JSON.stringify([
+    {
+      number: 7,
+      url: 'https://github.com/example/project/pull/7',
+      title: 'Ship it',
+      state,
+      isDraft,
+      statusCheckRollup: [],
+    },
+  ])
+}
+
+describe('pullRequestForBranchAsync', () => {
+  it('probes the exact persisted branch, including settled PR states', async () => {
+    const branches: string[] = []
+    for (const [state, draft, expected] of [
+      ['OPEN', false, 'open'],
+      ['OPEN', true, 'draft'],
+      ['MERGED', false, 'merged'],
+      ['CLOSED', false, 'closed'],
+    ] as const) {
+      const result = await pullRequestForBranchAsync('/old/worktree', 'feature/finished', {
+        isRepo: () => true,
+        ghStatus: async () => ({ installed: true, authenticated: true }),
+        run: async (_cwd, args) => {
+          branches.push(args[3] ?? '')
+          return { status: 0, stdout: ghPullRequest(state, draft), stderr: '' }
+        },
+      })
+      assert.equal(result.kind, 'found')
+      if (result.kind === 'found') assert.equal(result.pullRequest.state, expected)
+    }
+    assert.deepEqual(branches, [
+      'feature/finished',
+      'feature/finished',
+      'feature/finished',
+      'feature/finished',
+    ])
+  })
+
+  it('treats an empty list as authoritative none', async () => {
+    const result = await pullRequestForBranchAsync('repo', 'feature/no-pr', {
+      isRepo: () => true,
+      ghStatus: async () => ({ installed: true, authenticated: true }),
+      run: async () => ({ status: 0, stdout: '[]', stderr: '' }),
+    })
+    assert.deepEqual(result, { kind: 'none' })
+  })
+
+  it('reports missing repository, branch, gh and auth as errors', async () => {
+    const noRepo = await pullRequestForBranchAsync('missing', 'feature/x', {
+      isRepo: () => false,
+    })
+    assert.equal(noRepo.kind, 'error')
+
+    const noBranch = await pullRequestForBranchAsync('repo', '', { isRepo: () => true })
+    assert.equal(noBranch.kind, 'error')
+
+    const noGh = await pullRequestForBranchAsync('repo', 'feature/x', {
+      isRepo: () => true,
+      ghStatus: async () => ({ installed: false, authenticated: false }),
+    })
+    assert.equal(noGh.kind, 'error')
+
+    const noAuth = await pullRequestForBranchAsync('repo', 'feature/x', {
+      isRepo: () => true,
+      ghStatus: async () => ({ installed: true, authenticated: false }),
+    })
+    assert.equal(noAuth.kind, 'error')
+  })
+
+  it('reports timeout, nonzero and malformed gh results as errors', async () => {
+    const common = {
+      isRepo: () => true,
+      ghStatus: async () => ({ installed: true, authenticated: true }),
+    }
+    const timeout = await pullRequestForBranchAsync('repo', 'feature/x', {
+      ...common,
+      run: async () => ({ status: null, stdout: '', stderr: '', timedOut: true }),
+    })
+    assert.match(timeout.kind === 'error' ? timeout.reason : '', /timed out/)
+
+    const failed = await pullRequestForBranchAsync('repo', 'feature/x', {
+      ...common,
+      run: async () => ({ status: 1, stdout: '', stderr: 'network down' }),
+    })
+    assert.match(failed.kind === 'error' ? failed.reason : '', /network down/)
+
+    for (const stdout of ['bad json', 'null', '{}', '[null, null]']) {
+      const malformed = await pullRequestForBranchAsync('repo', 'feature/x', {
+        ...common,
+        run: async () => ({ status: 0, stdout, stderr: '' }),
+      })
+      assert.equal(malformed.kind, 'error', stdout)
+    }
   })
 })
