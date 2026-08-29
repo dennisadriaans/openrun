@@ -1812,9 +1812,9 @@ function onRunFinalized(runId: string) {
 
 /**
  * Finish cancellation only after no child, verification pass, or follow-up
- * can still write to the workspace. The database status is changed up front
- * so the child stops doing normal conclusion work, but this reservation keeps
- * the workspace lock held until the OS confirms the process is gone.
+ * can still write to the workspace. The in-memory cancellation marker is set
+ * up front so the child stops normal conclusion work; the database stays
+ * `running` until this function confirms the process and checks are gone.
  */
 function completeCancelledRun(runId: string): void {
   const pending = cancellationMap().get(runId)
@@ -1983,12 +1983,13 @@ async function concludeTurn(input: {
 
   const timedOut = run.timedOut === 1
   const settings = input.unattended ? verificationSettings(run.taskId) : NO_VERIFICATION
+  const cancellationRequested = run.status === 'cancelled' || cancellationMap().has(input.runId)
 
   let results: CheckResultRow[] = []
   // Only a clean turn is worth verifying — a crashed or over-budget agent has
   // already told us the answer, and running the test suite anyway just delays
   // the failure the user is waiting on.
-  if (input.status === 'success' && !timedOut && settings.verifyEnabled) {
+  if (input.status === 'success' && !timedOut && settings.verifyEnabled && !cancellationRequested) {
     const defs = checksForWorkspace(run.workspaceId)
     if (defs.length > 0) {
       const controller = new AbortController()
@@ -2230,7 +2231,6 @@ export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boole
   const verification = verifyingMap().get(runId)
   if (verification) {
     verification.abort()
-    verifyingMap().delete(runId)
   }
 
   live?.requestStop?.()

@@ -24,8 +24,26 @@ import type { RuntimeRow, TaskRow, WorkspaceRow } from './db'
 import { ghStatus } from './git'
 import { checkRuntimeInstalled } from './runtimePath.ts'
 import { nativeSessionExists } from './nativeSessions.ts'
+import { checksForWorkspace } from './checks.ts'
 import { checkWorkspace } from './workspaceHealth'
 import { getUnattendedWorkspaceOwner } from './workspaces.ts'
+
+const VERIFICATION_DISABLED_MESSAGE =
+  'Unattended verification is disabled. Enable verification and configure at least one project check before arming scheduled or webhook runs.'
+const VERIFICATION_CHECKS_MISSING_MESSAGE =
+  'Unattended automation needs at least one configured verification check. Add a project check before arming scheduled or webhook runs.'
+
+/** Shared mutation/fire error so an automation cannot be armed unverified. */
+export function unattendedVerificationRefusal(input: {
+  workspaceId: string
+  verifyEnabled: number | boolean
+}): string | null {
+  if (!input.verifyEnabled) return VERIFICATION_DISABLED_MESSAGE
+  if (checksForWorkspace(input.workspaceId).length === 0) {
+    return VERIFICATION_CHECKS_MISSING_MESSAGE
+  }
+  return null
+}
 
 /** The two automation columns the AFK rules read. */
 export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth'>
@@ -58,6 +76,11 @@ export function unattendedRefusalFor(input: {
  */
 export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | null {
   if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
+  const verificationRefusal = unattendedVerificationRefusal({
+    workspaceId: task.workspaceId,
+    verifyEnabled: task.verifyEnabled,
+  })
+  if (verificationRefusal) return verificationRefusal
   const checked = checkWorkspace(task.workspaceId)
   if (!checked) return 'Automation workspace is not ready.'
   if (!isWorkspaceReady(checked.workspace.status)) return 'Automation workspace is not ready.'

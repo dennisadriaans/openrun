@@ -67,6 +67,7 @@ export function executeCheck(input: {
     let output = ''
     let settled = false
     let timedOut = false
+    let aborted = false
 
     const finish = (outcome: CheckOutcome, exitCode: number | null) => {
       if (settled) return
@@ -110,9 +111,14 @@ export function executeCheck(input: {
     }, input.timeoutMs)
 
     const onAbort = () => {
+      if (settled) return
       output += '\n[checks] cancelled\n'
+      aborted = true
+      // Do not resolve until the child emits `close`. The caller owns the
+      // workspace lock for the whole verification pass; resolving here would
+      // let cancellation release that lock while the check process (or one of
+      // its grandchildren) is still writing to the worktree.
       stop()
-      finish('skipped', null)
     }
     input.signal?.addEventListener('abort', onAbort, { once: true })
 
@@ -133,6 +139,7 @@ export function executeCheck(input: {
     })
 
     child.on('close', (code) => {
+      if (aborted) return finish('skipped', null)
       if (timedOut) return finish('timeout', code)
       finish(code === 0 ? 'passed' : 'failed', code)
     })

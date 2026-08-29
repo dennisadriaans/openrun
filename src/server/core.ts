@@ -83,7 +83,11 @@ import * as git from './git'
 import { isPullRequestLive, type RunPullRequest } from '../lib/pullRequest'
 import { supportsResume, runtimeKind } from './resume'
 import { bootScheduler, syncTask, unscheduleTask } from './scheduler'
-import { unattendedRefusal, unattendedRefusalFor } from './unattendedPreflight'
+import {
+  unattendedRefusal,
+  unattendedRefusalFor,
+  unattendedVerificationRefusal,
+} from './unattendedPreflight'
 import type { TurnEventRow } from '../lib/turnEvents'
 import { parseTurnUsage, type TurnUsage } from '../lib/turnUsage'
 import { assistantTextFromEvents } from './turnEvents'
@@ -357,13 +361,13 @@ function assertTaskRuntimeOnPath(runtimeId: string): void {
   assertRuntimeOnPath(runtime.bin)
 }
 
-/** Unattended verification needs at least one configured check to be meaningful. */
-function assertUnattendedVerificationConfigured(workspaceId: string): void {
-  if (checksForWorkspace(workspaceId).length === 0) {
-    throw new Error(
-      'Cannot enable unattended automation without verification checks. Add a green project check or keep this automation paused; unverified outcomes require an explicit restore or clear.',
-    )
-  }
+/** Unattended verification must be enabled and have a project check. */
+function assertUnattendedVerificationConfigured(
+  workspaceId: string,
+  verifyEnabled: number | boolean = true,
+): void {
+  const refusal = unattendedVerificationRefusal({ workspaceId, verifyEnabled })
+  if (refusal) throw new Error(refusal)
 }
 
 function nativeSessionValidForTask(task: {
@@ -971,7 +975,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
 
   const unattendedTask = Boolean(cron.trim() || webhookIntegrationId)
   if (input.enabled && unattendedTask) {
-    assertUnattendedVerificationConfigured(workspaceId)
+    assertUnattendedVerificationConfigured(workspaceId, verifyEnabled)
     const owner = getUnattendedWorkspaceOwner(workspaceId, tid)
     if (owner) throw new Error(workspaceOwnerMessage(owner.name))
   }
@@ -1066,7 +1070,7 @@ export function updateTaskWebhook(input: {
   // operation. Do not let this narrow update bypass ownership or the AFK
   // preflight enforced by the full task form and Enable button.
   if (row.enabled === 1 && webhookIntegrationId) {
-    assertUnattendedVerificationConfigured(row.workspaceId)
+    assertUnattendedVerificationConfigured(row.workspaceId, row.verifyEnabled)
     const owner = getUnattendedWorkspaceOwner(row.workspaceId, row.id)
     if (owner) throw new Error(workspaceOwnerMessage(owner.name))
     const runtime = getRuntime(row.runtimeId)
@@ -1098,7 +1102,7 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
     assertSchedulableCron(task.cron)
     assertWorkspaceId(task.workspaceId)
     if (task.cron.trim() || task.webhookIntegrationId.trim()) {
-      assertUnattendedVerificationConfigured(task.workspaceId)
+      assertUnattendedVerificationConfigured(task.workspaceId, task.verifyEnabled)
     }
     // Inspect the worktree, not just the row: arming an automation against a
     // workspace whose directory is gone used to succeed, and every fire after

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
@@ -32,7 +32,7 @@ const { closeDb, getDb } = (await vite.ssrLoadModule(
 const { enqueueRun, drainWorkspace, listQueue } = (await vite.ssrLoadModule(
   '/src/server/runQueue.ts',
 )) as typeof import('./runQueue.ts')
-const { cancelRun, reconcileOrphanRuns } = (await vite.ssrLoadModule(
+const { cancelRun, reconcileOrphanRuns, runTask } = (await vite.ssrLoadModule(
   '/src/server/executor.ts',
 )) as typeof import('./executor.ts')
 
@@ -60,8 +60,20 @@ function seed() {
     db.prepare(
       `INSERT INTO projects
          (id, name, slug, path, defaultBranch, remoteUrl, managed, setupCommand, checks, createdAt)
-       VALUES (?, ?, ?, ?, 'main', '', 0, '', '[]', 1)`,
-    ).run(id, id, id, path)
+       VALUES (?, ?, ?, ?, 'main', '', 0, '', ?, 1)`,
+    ).run(
+      id,
+      id,
+      id,
+      path,
+      JSON.stringify([
+        {
+          id: 'queue-check',
+          name: 'queue check',
+          command: `${JSON.stringify(process.execPath)} -e "process.exit(0)"`,
+        },
+      ]),
+    )
   }
   db.prepare(
     `INSERT INTO workspaces
@@ -88,7 +100,7 @@ function seed() {
         resumeSessionLabel, fireOnce, scheduledAt, requireIsolation, requireGhAuth,
         createdAt, updatedAt, lastRunAt)
      VALUES ('queue-task', 'Moved task', '', 'queue-runtime', 'work', ?, 'workspace-old', '* * * * *', 1,
-             '', '', '', '[]', '{}', 0, 0, 0, '', '', 0, 0, 0, 0, 1, 1, NULL)`,
+             '', '', '', '[]', '{}', 1, 0, 0, '', '', 0, 0, 0, 0, 1, 1, NULL)`,
   ).run(oldRepo)
   db.prepare(
     `INSERT INTO runs
@@ -158,6 +170,36 @@ describe('server pending-run queue', () => {
     throw new Error('moved queued run did not finish')
   })
 
+  it('fails a moved fire when the destination fails its final preflight', () => {
+    seed()
+    assert.equal(
+      enqueueRun({
+        taskId: 'queue-task',
+        workspaceId: 'workspace-old',
+        trigger: 'schedule',
+      }).queued,
+      true,
+    )
+    getDb().prepare("UPDATE runs SET status = 'error' WHERE id = 'busy-run'").run()
+    getDb()
+      .prepare("UPDATE tasks SET workspaceId = ?, cwd = ? WHERE id = 'queue-task'")
+      .run('workspace-new', newRepo)
+    // Workspace A was healthy when the fire queued. The drain must inspect B,
+    // including its verification policy, before it can call runTask.
+    getDb().prepare("UPDATE projects SET checks = '[]' WHERE id = 'project-new'").run()
+
+    drainWorkspace('workspace-old')
+    assert.equal(
+      (
+        getDb().prepare("SELECT COUNT(*) AS n FROM runs WHERE taskId = 'queue-task'").get() as {
+          n: number
+        }
+      ).n,
+      0,
+    )
+    assert.equal(listQueue('workspace-new').length, 0)
+  })
+
   it('quarantines an unattended run when cancellation has no child handle', async () => {
     seed()
     assert.equal(cancelRun('cancel-run'), false)
@@ -203,6 +245,82 @@ describe('server pending-run queue', () => {
     }
     child.kill('SIGKILL')
     throw new Error('cancelled child did not finish cleanup')
+  })
+
+  it('keeps a workspace and its queue held until aborted verification closes', async () => {
+    seed()
+    getDb().prepare("UPDATE runs SET status = 'error' WHERE id = 'cancel-run'").run()
+    const started = join(root, 'verification-started')
+    const checkScript = join(root, 'slow-verification.js')
+    writeFileSync(
+      checkScript,
+      `require('fs').writeFileSync(${JSON.stringify(started)}, 'started')
+process.on('SIGTERM', () => setTimeout(() => process.exit(0), 800))
+setTimeout(() => {}, 30_000)
+`,
+    )
+    const db = getDb()
+    db.prepare('UPDATE projects SET checks = ? WHERE id = ?').run(
+      JSON.stringify([
+        {
+          id: 'slow-check',
+          name: 'slow check',
+          command: `${JSON.stringify(process.execPath)} ${JSON.stringify(checkScript)}`,
+        },
+      ]),
+      'project-old',
+    )
+    db.prepare(
+      "UPDATE tasks SET workspaceId = 'workspace-cancel', cwd = ?, verifyEnabled = 1 WHERE id = 'queue-task'",
+    ).run(oldRepo)
+    const task = db.prepare("SELECT * FROM tasks WHERE id = 'queue-task'").get() as Parameters<
+      typeof runTask
+    >[0]
+    const runtime = db
+      .prepare("SELECT * FROM runtimes WHERE id = 'queue-runtime'")
+      .get() as Parameters<typeof runTask>[1]
+    const runId = runTask(task, runtime, 'webhook')
+    const queued = enqueueRun({
+      taskId: task.id,
+      workspaceId: task.workspaceId,
+      trigger: 'webhook',
+    })
+    assert.equal(queued.queued, true)
+
+    const startDeadline = Date.now() + 3000
+    while (!existsSync(started) && Date.now() < startDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.equal(existsSync(started), true)
+    assert.equal(cancelRun(runId), true)
+
+    // The abort signal is delivered immediately, but the check deliberately
+    // stays alive for 800ms. Neither the terminal row nor queue drain may run
+    // during that interval.
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(
+      (db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }).status,
+      'running',
+    )
+    assert.equal(listQueue(task.workspaceId).length, 1)
+
+    const deadline = Date.now() + 7000
+    while (Date.now() < deadline) {
+      const status = (
+        db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+      ).status
+      if (status === 'cancelled') break
+      await new Promise((resolve) => setTimeout(resolve, 30))
+    }
+    assert.equal(
+      (db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }).status,
+      'cancelled',
+    )
+    // This executor-only fixture does not install core's finalized hook. A
+    // drain is safe now, and the terminal preflight removes the quarantined
+    // queued fire; importantly it was not possible during verification.
+    drainWorkspace(task.workspaceId)
+    assert.equal(listQueue(task.workspaceId).length, 0)
   })
 
   it('quarantines scheduled orphan rows during restart reconciliation', () => {
