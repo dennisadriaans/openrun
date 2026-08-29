@@ -1175,8 +1175,7 @@ export function TaskForm({
       return
     }
     const eligible = (allWorkspaces ?? []).filter(
-      (workspace) =>
-        workspace.projectId === pid && workspace.kind === 'worktree',
+      (workspace) => workspace.projectId === pid && workspace.kind === 'worktree',
     )
     set('workspaceId', pickDefaultWorkspace(eligible)?.id ?? '')
   }
@@ -1215,15 +1214,7 @@ export function TaskForm({
         unattended: unattendedDraft,
         requireIsolation,
       }),
-    [
-      gitBranches,
-      projectWorkspaces,
-      tasks,
-      v.id,
-      v.workspaceId,
-      unattendedDraft,
-      requireIsolation,
-    ],
+    [gitBranches, projectWorkspaces, tasks, v.id, v.workspaceId, unattendedDraft, requireIsolation],
   )
 
   const selectBranch = async (id: string) => {

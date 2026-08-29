@@ -117,9 +117,7 @@ describe('projectBranchChoices', () => {
         { name: 'main', lastCommitAt: 2, current: true, remote: false },
         { name: 'feat', lastCommitAt: 1, current: false, remote: false },
       ],
-      workspaces: [
-        { id: 'ws-feat', branch: 'feat', kind: 'worktree', status: 'ready' },
-      ],
+      workspaces: [{ id: 'ws-feat', branch: 'feat', kind: 'worktree', status: 'ready' }],
     })
     assert.equal(
       rows.some((row) => row.branch === 'main'),

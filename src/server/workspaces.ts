@@ -785,9 +785,7 @@ export function resolveWorkspacePath(workspaceId: string): string {
   if (!workspace) throw new Error('Workspace not found')
   const project = getProject(workspace.projectId)
   if (workspace.kind !== 'worktree') {
-    throw new Error(
-      'Pick an isolated worktree. Agents cannot run in the primary checkout.',
-    )
+    throw new Error('Pick an isolated worktree. Agents cannot run in the primary checkout.')
   }
   // Chat already refused non-ready workspaces; automations used to only check
   // that an id was present and then spawn into a half-baked creating/error tree.

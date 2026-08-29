@@ -115,10 +115,7 @@ function NewRun() {
   const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
   const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
-    () =>
-      (allWorkspaces ?? []).filter(
-        (w) => w.status !== 'archived' && w.kind === 'worktree',
-      ),
+    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived' && w.kind === 'worktree'),
     [allWorkspaces],
   )
   const branchChoices = useMemo(
