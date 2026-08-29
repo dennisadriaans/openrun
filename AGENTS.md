@@ -228,6 +228,94 @@ a standalone route.
   characters**. Skip the body when the subject says it all; add one only for the *why* the
   diff cannot show, wrapped at 80. One shippable slice per commit and per PR.
 
+## Pull requests
+
+**Branch first.** Never commit on `main`. Branch names are `<type>/<slug>` using
+the commit type vocabulary — `feat/bulk-run-delete`, `fix/turnstile-verify`. No
+tool-generated names such as `cursor/…`.
+
+**The title is the commit.** `main` takes squashed PRs only, and the squash uses
+the PR *title* verbatim — so the title, not the branch's commits, is what lands.
+It must satisfy every commit rule above.
+
+**PR body — always these three sections, in this order.** No extra headings, no
+preamble. `.github/pull_request_template.md` is this shape already; fill it in,
+do not restructure it.
+
+```markdown
+## Summary
+- What changed, from a user's point of view. One bullet per shippable idea,
+  two to four bullets. Say what the change *does*, not which files moved.
+
+Closes #12
+Closes #13
+
+## Test plan
+- [ ] A step a reviewer can actually perform, with the route and the expected result
+- [ ] One line per behaviour worth checking, including the edge case you fixed
+```
+
+- **Summary** is bullets, not prose. Even a one-line fix gets one bullet.
+- **Related issues** are bare `Closes #N` lines directly under the summary
+  bullets, one per line, no heading of their own. Use `Refs #N` when the PR
+  advances an issue without ending it. No issue? Drop the lines; never leave a
+  bare `Closes #` with nothing after it.
+- **Test plan** is unchecked `- [ ]` boxes describing manual verification —
+  which route, which runtime, what you expect to see. It is not the CI list: CI
+  already runs `pnpm test`, `pnpm typecheck` and `pnpm build`, and repeating them
+  here buries the steps a human must actually do. Tick a box only once you have
+  performed it.
+
+Reference shape: <https://github.com/dennisadriaans/openrun/pull/34>.
+
+The gates that used to live in the template are still hard rules, enforced in
+review and by CI rather than by a checkbox: one shippable slice per PR; a
+user-facing change carries a `changelog.d/` entry in the negative-relief voice;
+a new rule module in `src/lib/` carries a colocated `*.test.ts`; a new refuse
+condition is mirrored in the matching gate module; `src/routeTree.gen.ts` is
+regenerated, never hand-edited; nothing new runs off the user's machine.
+
+**Never credit an agent.** No commit, PR title, PR body, branch name, issue,
+issue comment, review comment, or `changelog.d/` entry mentions Claude, Claude
+Code, Codex, Cursor, Grok, Gemini, Copilot, or any other assistant — not in
+prose, not in a footer, not in a trailer. Strip all of these before they land:
+
+- `Co-authored-by: Claude …`, `Co-authored-by: Cursor …`, and any other
+  assistant co-author trailer
+- `🤖 Generated with [Claude Code](…)` and `Made with [Cursor](…)` footers
+- session or agent links (`claude.ai/code/session_…`, `cursor.com/agents/…`)
+- Cursor's `<!-- CURSOR_AGENT_PR_BODY_BEGIN -->` block and its PR footer images
+
+Commit and push as the authenticated GitHub account: `git config user.name` and
+`user.email` are the human's, `gh auth status` is that same account, and a
+co-author trailer names only a *person* who worked on the change. The history is
+the author's own work record; a tool footer in it is noise that outlives the
+tool. (Runtime names in *product* code, docs and changelog entries are of course
+fine — this rule is about crediting the agent that wrote the diff.)
+
+A human co-author is still welcome:
+
+```
+Co-authored-by: Some Person <person@example.com>
+```
+
+
+**Which agent reads what.** The rules live in this file. Everything else is a
+thin pointer or a setting, so a change goes here — never into six copies.
+
+| Agent | How it picks this file up |
+| --- | --- |
+| Codex CLI | Reads `AGENTS.md` natively: `~/.codex/AGENTS.md`, then every directory from the git root down to the cwd, closest last. One file per directory, 32 KiB total (`project_doc_max_bytes`). No pointer file. |
+| Grok Build (`grok`) | Reads the `AGENTS.md` family natively, plus `CLAUDE.md` and — for compatibility — `.claude/rules/` and `.cursor/rules/`. No pointer file. |
+| Cursor | Reads root and nested `AGENTS.md`. Do not add `.cursor/rules/*.mdc` copies of this file. |
+| GitHub Copilot | Reads `AGENTS.md` (coding agent, and VS Code via `chat.useAgentsMdFile`). `.github/copilot-instructions.md` is a pointer for the surfaces that look there first. |
+| Claude Code | Reads `CLAUDE.md`, **never** `AGENTS.md`. So `CLAUDE.md` is a single `@AGENTS.md` import — Anthropic's documented way to share one file between agents. |
+| Gemini CLI | Defaults to `GEMINI.md`. `.gemini/settings.json` sets `context.fileName` to `["AGENTS.md", "GEMINI.md"]`, so it loads this file; workspace settings beat `~/.gemini/settings.json`. |
+
+There is no `GROK.md`, no `GEMINI.md`, and no `.cursor/rules/` copy of this
+file. A pointer (`CLAUDE.md`, `.github/copilot-instructions.md`) is a
+one-paragraph import, never a restatement.
+
 ## Gotchas
 
 - `src/routeTree.gen.ts` is **generated**. Never hand-edit it, and don't resolve conflicts in
