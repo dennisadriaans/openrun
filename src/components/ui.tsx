@@ -301,7 +301,7 @@ export function Button({
     primary:
       'bg-[var(--base)] hover:bg-[color-mix(in_oklab,var(--base)_88%,transparent)] text-[var(--actionLabel)] border border-transparent',
     danger:
-      'bg-transparent hover:bg-hover text-tier-secondary hover:text-danger border border-border',
+      'bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] text-danger border border-[color-mix(in_oklab,var(--danger)_48%,transparent)] hover:bg-[color-mix(in_oklab,var(--danger)_22%,transparent)] hover:border-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger disabled:bg-[color-mix(in_oklab,var(--danger)_6%,transparent)] disabled:text-[color-mix(in_oklab,var(--danger)_55%,transparent)] disabled:border-[color-mix(in_oklab,var(--danger)_25%,transparent)]',
     ghost:
       'bg-transparent hover:bg-hover text-tier-quaternary hover:text-foreground border border-transparent',
   }
