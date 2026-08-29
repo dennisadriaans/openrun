@@ -34,6 +34,7 @@ import {
 } from '../lib/checks'
 import { assertFolderName } from '../lib/folderName'
 import { assertWorkspaceReady } from '../lib/workspaceReady'
+import { missingWorkspaceDirMessage } from '../lib/workspaceHealth.ts'
 import {
   openrunHome,
   forgetDeletedProjectPath,
@@ -295,6 +296,9 @@ export function addProject(input: AddProjectInput): ProjectRow {
       status: 'ready',
       setupLog: '',
       setupExitCode: null,
+      blockedKind: '',
+      blockedReason: '',
+      blockedAt: 0,
       createdAt: now,
       archivedAt: null,
     }
@@ -516,6 +520,9 @@ export function createWorkspace(input: {
     status: 'creating',
     setupLog: '',
     setupExitCode: null,
+    blockedKind: '',
+    blockedReason: '',
+    blockedAt: 0,
     createdAt: now,
     archivedAt: null,
   }
@@ -647,6 +654,17 @@ export function resolveWorkspacePath(workspaceId: string): string {
   // Chat already refused non-ready workspaces; automations used to only check
   // that an id was present and then spawn into a half-baked creating/error tree.
   assertWorkspaceReady(workspace.status)
+  // …and `ready` is only a record of what we last did to the directory. When
+  // the worktree has since been removed, spawning into it fails with a bare
+  // `spawn <cli> ENOENT` that reads as a missing CLI. Demote the row so it
+  // stops being offered, and say what actually happened.
+  if (!existsSync(workspace.path)) {
+    const message = missingWorkspaceDirMessage(workspace.path)
+    getDb()
+      .prepare("UPDATE workspaces SET status = 'error', setupLog = ? WHERE id = ?")
+      .run(message, workspace.id)
+    throw new Error(message)
+  }
   return workspace.path
 }
 

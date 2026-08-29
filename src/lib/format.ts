@@ -189,3 +189,22 @@ export const CRON_PRESETS: Array<{ label: string; value: string }> = [
   { label: 'Weekdays 8am', value: '0 8 * * 1-5' },
   { label: 'Monday 9am', value: '0 9 * * 1' },
 ]
+
+/** A one-shot stores a cron only to carry its time of day; never call it "Daily". */
+export function describeSchedule(task: {
+  cron: string
+  fireOnce?: number | boolean
+  scheduledAt?: number
+}): string {
+  const base = describeCron(task.cron)
+  if (!task.fireOnce) return base
+  if (task.scheduledAt && task.scheduledAt > 0)
+    return `Once ${new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(task.scheduledAt))}`
+  const time = /(\d{2}:\d{2})$/.exec(base)?.[1]
+  return time ? `Once at ${time}` : base
+}

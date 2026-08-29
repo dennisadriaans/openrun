@@ -276,6 +276,9 @@ export async function handleListTasks(): Promise<MobileResult> {
     // Why Run now / Enable would refuse, or null when they are clear. Sent so
     // the phone can explain a disabled control instead of failing on tap.
     blockedReason: runNowBlockedReason(task),
+    // Why the *schedule* would refuse even though Run now is fine — a shared
+    // checkout, a contaminated worktree, an unusable gh login.
+    unattendedBlockedReason: task.unattendedBlockedReason,
   }))
   return ok({ tasks })
 }

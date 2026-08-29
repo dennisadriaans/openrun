@@ -35,6 +35,7 @@ import {
   useRemoveRun,
   useRuntimes,
   useRunWorkspace,
+  useRunPullRequest,
   useStartChat,
   useQueuedMessageActions,
   useSendMessage,
@@ -137,6 +138,8 @@ function RunDetail() {
     streamHealthy,
     enabled: showRight || confirmUndoAll,
   })
+
+  const { data: pullRequest } = useRunPullRequest(runId)
 
   const markRead = useMarkRunRead()
   const sendMessage = useSendMessage(runId)
@@ -547,6 +550,7 @@ function RunDetail() {
                 pending={false}
                 running={run?.status === 'running'}
                 checkResults={checkResults}
+                pullRequest={pullRequest ?? null}
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}

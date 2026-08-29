@@ -47,6 +47,8 @@ import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
 import { isSupervised, supportsSupervised } from '../lib/supervisedPolicy'
 import { ComposerModelControls, RuntimePicker, type RuntimeOption } from './ComposerControls'
+import { PullRequestChip } from './PullRequestChip'
+import type { RunPullRequest } from '../lib/pullRequest'
 import {
   RUNTIME_SWITCH_NOTE_POINTS,
   RUNTIME_SWITCH_NOTE_TITLE,
@@ -1192,6 +1194,7 @@ export function Chat({
   onFlushQueue,
   workspaceId,
   onNewChat,
+  pullRequest,
 }: {
   messages: ChatMessage[]
   /** Pulse the transcript scroller while conversation is still in flight. */
@@ -1269,6 +1272,8 @@ export function Chat({
   workspaceId?: string
   /** What `/clear` does — the route owns navigation. */
   onNewChat?: () => void
+  /** PR on the run's branch, if any — shown as a strip above the composer. */
+  pullRequest?: RunPullRequest | null
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -1624,6 +1629,11 @@ export function Chat({
       >
         <div className="chat-composer-horizontal-inset pointer-events-auto relative">
           <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
+            {pullRequest ? (
+              <div className="relative z-[6] mx-auto -mb-[2px] w-[92%]">
+                <PullRequestChip pr={pullRequest} />
+              </div>
+            ) : null}
             {changedFiles && changedFiles.length > 0 && onReviewFile ? (
               <div className="relative mx-auto -mb-[2px] w-[92%]">
                 <FilesChanged
@@ -1653,7 +1663,8 @@ export function Chat({
             <Composer
               className={
                 (changedFiles && changedFiles.length > 0 && onReviewFile) ||
-                queuedMessages.length > 0
+                queuedMessages.length > 0 ||
+                pullRequest
                   ? 'relative z-10 w-full'
                   : 'w-full pt-2'
               }

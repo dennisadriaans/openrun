@@ -8,12 +8,14 @@
  */
 import parser from 'cron-parser'
 import { assertArgsTemplate } from '../lib/argsTemplate'
-import { parseChecks } from '../lib/checks'
+import { CHECK_TIMEOUT_MS, parseChecks } from '../lib/checks'
 import { normalizeCron } from '../lib/cron'
 import { assertRunTimeoutMinutes, resolveRunTimeoutMs } from '../lib/runBudget'
 import { assertTaskPrompt, hasTaskPrompt } from '../lib/taskPrompt'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
+import { requiresGhAuth, unattendedBlockedReason } from '../lib/unattendedGate.ts'
+import { workspaceHealthBlockedReason, type WorkspaceHealth } from '../lib/workspaceHealth.ts'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
 import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
@@ -39,6 +41,7 @@ import {
   forgetDeletedRuntimeId,
   getDb,
   rememberDeletedRuntimeId,
+  slugify,
   type CheckResultRow,
   type MessageRow,
   type RuntimeRow,
@@ -60,7 +63,7 @@ import {
   setRunFinalizedHook,
   startRun,
 } from './executor'
-import { listCheckResults } from './checks'
+import { checksForWorkspace, executeCheck, listCheckResults } from './checks'
 import { notifyRunFinished } from './notify'
 import { clearQueueForTask, drainWorkspace, listQueue, queueDepthByTask } from './runQueue'
 import {
@@ -72,8 +75,10 @@ import {
 import type { ApprovalDecision } from '../lib/claudeControl'
 import * as files from './files'
 import * as git from './git'
+import { isPullRequestLive, type RunPullRequest } from '../lib/pullRequest'
 import { supportsResume, runtimeKind } from './resume'
 import { bootScheduler, syncTask, unscheduleTask } from './scheduler'
+import { unattendedRefusalFor } from './unattendedPreflight'
 import type { TurnEventRow } from '../lib/turnEvents'
 import { parseTurnUsage, type TurnUsage } from '../lib/turnUsage'
 import { assistantTextFromEvents } from './turnEvents'
@@ -83,7 +88,22 @@ import {
   type PreviewCommandInput,
   type PreviewCommandResult,
 } from './commandPreview'
-import { getProject, getWorkspace, listWorkspaces, resolveWorkspacePath } from './workspaces'
+import {
+  assertWorkspaceFree,
+  createWorkspace,
+  getProject,
+  getWorkspace,
+  listWorkspaces,
+  resolveWorkspacePath,
+} from './workspaces'
+import {
+  blockWorkspace,
+  cachedWorkspaceHealth,
+  checkWorkspace,
+  clearWorkspaceBlock,
+  restoreWorkspace,
+  type RestoreResult,
+} from './workspaceHealth'
 import { saveAttachment } from './attachments.ts'
 import {
   openrunToolServer,
@@ -627,6 +647,23 @@ export type TaskWithMeta = TaskRow & {
   effectiveTimeoutMs: number
   /** Most recent scheduled-fire outcome, including fires that made no run. */
   lastScheduleFire: ScheduleFireRow | null
+  /** 'main' (the user's shared checkout) or 'worktree'; '' when unresolved. */
+  workspaceKind: string
+  /**
+   * What is physically on disk for the workspace right now — directory
+   * present, still a worktree, on its configured branch, clean. Null when the
+   * workspace id does not resolve. See lib/workspaceHealth.ts.
+   */
+  workspaceHealth: WorkspaceHealth | null
+  /** True when this automation will reach for GitHub and so needs `gh`. */
+  requiresGh: boolean
+  ghInstalled: boolean
+  ghAuthenticated: boolean
+  /**
+   * Why an unattended (schedule / webhook) fire would refuse, or null when it
+   * may proceed. Attended Run now is judged by `runNowBlockedReason` instead.
+   */
+  unattendedBlockedReason: string | null
 }
 
 function decorate(
@@ -645,8 +682,33 @@ function decorate(
   const promptOk = hasTaskPrompt(task.prompt)
   const resumeOk = nativeSessionValidForTask(task)
   const project = workspace ? getProject(workspace.projectId) : undefined
+  // Physical health is read, not repaired, here: `decorate` runs on every list
+  // render, and demoting a row as a side effect of drawing a table would make
+  // a transient NFS/rename hiccup permanent. The fire and arm paths call
+  // `checkWorkspace`, which does demote.
+  const health = workspace ? cachedWorkspaceHealth(workspace) : null
+  const gh = git.ghStatus()
+  const requiresGh = requiresGhAuth({
+    canOpenPrs: runtime?.canOpenPrs === 1,
+    requireGhAuth: task.requireGhAuth === 1,
+  })
   return {
     ...task,
+    workspaceKind: workspace?.kind ?? '',
+    workspaceHealth: health,
+    requiresGh,
+    ghInstalled: gh.installed,
+    ghAuthenticated: gh.authenticated,
+    unattendedBlockedReason: workspace
+      ? unattendedBlockedReason({
+          workspaceKind: workspace.kind,
+          requireIsolation: task.requireIsolation === 1,
+          health,
+          requiresGh,
+          ghInstalled: gh.installed,
+          ghAuthenticated: gh.authenticated,
+        })
+      : null,
     checkCount: parseChecks(project?.checks).length,
     effectiveTimeoutMs: resolveRunTimeoutMs(task.timeoutMs),
     lastScheduleFire: (scheduleFires ?? latestScheduleFires([task.id]))[task.id] ?? null,
@@ -778,6 +840,10 @@ export type TaskInput = {
   fireOnce?: boolean
   /** Absolute epoch milliseconds for a one-shot schedule. */
   scheduledAt?: number
+  /** Require an app-managed worktree for unattended fires (default on). */
+  requireIsolation?: boolean
+  /** Refuse to arm or fire unless `gh` is installed and authenticated. */
+  requireGhAuth?: boolean
 }
 
 export function upsertTask(input: TaskInput): TaskWithMeta {
@@ -860,6 +926,18 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     input.resumeSessionLabel !== undefined
       ? input.resumeSessionLabel.trim()
       : (existingRow?.resumeSessionLabel ?? '')
+  const requireIsolation =
+    input.requireIsolation !== undefined
+      ? input.requireIsolation
+        ? 1
+        : 0
+      : (existingRow?.requireIsolation ?? 1)
+  const requireGhAuth =
+    input.requireGhAuth !== undefined
+      ? input.requireGhAuth
+        ? 1
+        : 0
+      : (existingRow?.requireGhAuth ?? 0)
   const fireOnce =
     input.fireOnce !== undefined ? (input.fireOnce ? 1 : 0) : (existingRow?.fireOnce ?? 0)
   const requestedScheduledAt = Number(input.scheduledAt ?? 0)
@@ -876,9 +954,25 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
 
   if (input.enabled) assertNativeResume({ resumeSessionId, runtimeId: input.runtimeId, cwd })
 
+  // Saving as enabled arms the schedule, so it answers to the same AFK rules
+  // as the Enable toggle — otherwise the form is a way around them.
+  if (input.enabled) {
+    const checked = checkWorkspace(workspaceId)
+    const runtime = getRuntime(input.runtimeId)
+    if (checked && runtime) {
+      const refused = unattendedRefusalFor({
+        task: { requireIsolation, requireGhAuth },
+        runtime,
+        workspace: checked.workspace,
+        health: checked.health,
+      })
+      if (refused) throw new Error(refused)
+    }
+  }
+
   db.prepare(
-    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, scheduledAt, createdAt, updatedAt, lastRunAt)
-     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @scheduledAt, @createdAt, @updatedAt, NULL)
+    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, scheduledAt, requireIsolation, requireGhAuth, createdAt, updatedAt, lastRunAt)
+     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @scheduledAt, @requireIsolation, @requireGhAuth, @createdAt, @updatedAt, NULL)
      ON CONFLICT(id) DO UPDATE SET
        name=@name, description=@description, runtimeId=@runtimeId, prompt=@prompt,
        cwd=@cwd, workspaceId=@workspaceId, cron=@cron, enabled=@enabled,
@@ -888,6 +982,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
        maxRepairAttempts=@maxRepairAttempts, timeoutMs=@timeoutMs,
        resumeSessionId=@resumeSessionId, resumeSessionLabel=@resumeSessionLabel,
        fireOnce=@fireOnce, scheduledAt=@scheduledAt,
+       requireIsolation=@requireIsolation, requireGhAuth=@requireGhAuth,
        updatedAt=@updatedAt`,
   ).run({
     id: tid,
@@ -911,6 +1006,8 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     resumeSessionLabel,
     fireOnce,
     scheduledAt,
+    requireIsolation,
+    requireGhAuth,
     createdAt: existingRow?.createdAt ?? now,
     updatedAt: now,
   })
@@ -965,8 +1062,11 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
   if (enabled) {
     assertSchedulableCron(task.cron)
     assertWorkspaceId(task.workspaceId)
-    const workspace = getWorkspace(task.workspaceId)
-    assertWorkspaceReady(workspace?.status)
+    // Inspect the worktree, not just the row: arming an automation against a
+    // workspace whose directory is gone used to succeed, and every fire after
+    // it recorded an unexplained crash instead of one visible refusal.
+    const checked = checkWorkspace(task.workspaceId)
+    assertWorkspaceReady(checked?.workspace.status)
     assertTaskRuntimeOnPath(task.runtimeId)
     // Same as Create / Save — don't arm a schedule that would fire an empty prompt.
     assertTaskPrompt(task.prompt)
@@ -975,6 +1075,20 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
       runtimeId: task.runtimeId,
       cwd: task.cwd,
     })
+    // Arming means "run this while nobody is watching" — hold it to the AFK
+    // rules now rather than at 03:20 tomorrow morning.
+    if (checked) {
+      const runtime = getRuntime(task.runtimeId)
+      const refused = runtime
+        ? unattendedRefusalFor({
+            task,
+            runtime,
+            workspace: checked.workspace,
+            health: checked.health,
+          })
+        : null
+      if (refused) throw new Error(refused)
+    }
   }
   db.prepare('UPDATE tasks SET enabled = ?, updatedAt = ? WHERE id = ?').run(
     enabled ? 1 : 0,
@@ -1018,9 +1132,14 @@ export function runTaskNow(taskId: string): { runId: string } {
     | undefined
   if (!task) throw new Error('Task not found')
   assertWorkspaceId(task.workspaceId)
-  // Fail before startRun inserts a row — same readiness gate as chat.
-  const workspace = getWorkspace(task.workspaceId)
-  assertWorkspaceReady(workspace?.status)
+  // Fail before startRun inserts a row — same readiness gate as chat, plus the
+  // physical check that keeps a vanished worktree from surfacing as ENOENT.
+  const checked = checkWorkspace(task.workspaceId)
+  assertWorkspaceReady(checked?.workspace.status)
+  if (checked) {
+    const fatal = workspaceHealthBlockedReason(checked.health, { unattended: false })
+    if (fatal) throw new Error(fatal)
+  }
   const runtime = getRuntime(task.runtimeId)
   if (!runtime) throw new Error('Runtime not found for task')
   // Legacy blank prompts used to spawn a silent no-op — refuse before insert.
@@ -1046,6 +1165,148 @@ export function runTaskNow(taskId: string): { runId: string } {
     resumeSessionLabel: task.resumeSessionLabel,
   })
   return { runId }
+}
+
+/**
+ * Give an automation its own app-managed worktree on a dedicated branch, and
+ * repoint it there.
+ *
+ * The AFK isolation rule refuses unattended fires against a project's shared
+ * main checkout, and the fix is mechanical — create a worktree, move the task
+ * onto it. Doing that by hand across a backlog of automations is where people
+ * give up and switch isolation off instead, so it is one call.
+ */
+export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
+  const db = getDb()
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
+  if (!task) throw new Error('Task not found')
+
+  const current = getWorkspace(assertWorkspaceId(task.workspaceId))
+  if (!current) throw new Error('Workspace not found')
+  if (current.kind === 'worktree') {
+    throw new Error('This automation already has its own worktree.')
+  }
+  const project = getProject(current.projectId)
+  if (!project) throw new Error('Project not found')
+
+  // Branch name has to be unique per automation, not per project: two
+  // automations sharing one branch share one worktree, which is the shared
+  // checkout problem again with extra steps.
+  const base = slugify(task.name) || 'automation'
+  const branch = `openrun/${base}-${task.id.split('_').pop() ?? Date.now().toString(36)}`
+
+  const workspace = createWorkspace({
+    projectId: project.id,
+    branch,
+    fromBranch: project.defaultBranch,
+  })
+
+  db.prepare('UPDATE tasks SET workspaceId = ?, cwd = ?, updatedAt = ? WHERE id = ?').run(
+    workspace.id,
+    workspace.path,
+    Date.now(),
+    taskId,
+  )
+  syncTask(taskId)
+  return getTask(taskId)!
+}
+
+/**
+ * Throw away everything in an automation's worktree and put it back on its
+ * configured branch, lifting the quarantine a failed run left behind.
+ * Refuses on a `kind='main'` workspace — that is the user's own checkout.
+ */
+export function restoreTaskWorkspace(taskId: string): RestoreResult {
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as
+    | TaskRow
+    | undefined
+  if (!task) throw new Error('Task not found')
+  return restoreWorkspace(assertWorkspaceId(task.workspaceId))
+}
+
+/** Same, addressed by workspace id — for the Projects panel. */
+export function restoreWorkspaceById(workspaceId: string): RestoreResult {
+  return restoreWorkspace(assertWorkspaceId(workspaceId))
+}
+
+/**
+ * Lift a quarantine without touching the files — "I looked at what that run
+ * left behind and it is fine to build on." Restore is the other answer.
+ */
+export function clearTaskWorkspaceQuarantine(taskId: string): TaskWithMeta {
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as
+    | TaskRow
+    | undefined
+  if (!task) throw new Error('Task not found')
+  clearWorkspaceBlock(assertWorkspaceId(task.workspaceId))
+  return getTask(taskId)!
+}
+
+export type BaselineResult = {
+  ok: boolean
+  /** Per-check outcomes, in the order they ran. */
+  checks: Array<{ name: string; command: string; outcome: string; output: string }>
+  /** Refusal or failure summary; empty when the baseline is green. */
+  detail: string
+}
+
+/**
+ * Run the project's verification checks against a workspace *before* anything
+ * is armed against it, and record the result as a quarantine when they are
+ * red.
+ *
+ * An automation armed on top of a red baseline cannot produce a trustworthy
+ * verdict: its own run comes back `failed-checks` for breakage it did not
+ * cause, and the real regression stays invisible. Running the checks once, up
+ * front, is what makes "verified" mean something.
+ */
+export async function runWorkspaceBaseline(workspaceId: string): Promise<BaselineResult> {
+  const id = assertWorkspaceId(workspaceId)
+  const checked = checkWorkspace(id)
+  if (!checked) throw new Error('Workspace not found')
+  assertWorkspaceReady(checked.workspace.status)
+  assertWorkspaceFree(id)
+
+  const defs = checksForWorkspace(id)
+  if (defs.length === 0) {
+    // Nothing configured is not the same as green: leave any existing block
+    // alone and say so, rather than silently blessing the workspace.
+    return {
+      ok: false,
+      checks: [],
+      detail:
+        'This project has no verification checks configured, so there is no baseline to establish. Add checks on the project before arming unattended automations.',
+    }
+  }
+
+  const outcomes: BaselineResult['checks'] = []
+  const failures: string[] = []
+  for (const def of defs) {
+    const result = await executeCheck({
+      command: def.command,
+      cwd: checked.workspace.path,
+      timeoutMs: CHECK_TIMEOUT_MS,
+    })
+    outcomes.push({
+      name: def.name,
+      command: def.command,
+      outcome: result.outcome,
+      output: result.output,
+    })
+    if (result.outcome === 'failed' || result.outcome === 'timeout') {
+      failures.push(`${def.name} (${def.command}) ${result.outcome}`)
+      break
+    }
+  }
+
+  if (failures.length > 0) {
+    const detail = `Baseline is red before any agent has run: ${failures.join('; ')}. Fix the workspace, then re-run the baseline.`
+    blockWorkspace(id, 'baseline', detail)
+    return { ok: false, checks: outcomes, detail }
+  }
+
+  clearWorkspaceBlock(id)
+  return { ok: true, checks: outcomes, detail: '' }
 }
 
 /** Most recent non-archived run in a workspace, or null when none exist yet. */
@@ -1434,6 +1695,65 @@ export function getConversation(runId: string) {
   }
 }
 
+/**
+ * Pull request attached to a run, cached on the run row.
+ *
+ * The probe shells out to `gh`, so it is rate-limited per run rather than run
+ * on every workspace poll. A merged or closed PR stops moving, so it is only
+ * re-probed on the slow interval; a live one refreshes often enough to catch a
+ * merge shortly after it happens.
+ */
+const PR_LIVE_TTL_MS = 30_000
+const PR_SETTLED_TTL_MS = 10 * 60_000
+
+function cachedRunPullRequest(run: RunRow): RunPullRequest | null {
+  if (!run.prNumber || !run.prUrl) return null
+  return {
+    number: run.prNumber,
+    url: run.prUrl,
+    title: run.prTitle,
+    state: (run.prState || 'open') as RunPullRequest['state'],
+    checks: (run.prChecks || 'none') as RunPullRequest['checks'],
+  }
+}
+
+function persistRunPullRequest(runId: string, pr: RunPullRequest | null) {
+  getDb()
+    .prepare(
+      `UPDATE runs SET prNumber = @prNumber, prUrl = @prUrl, prTitle = @prTitle,
+       prState = @prState, prChecks = @prChecks, prCheckedAt = @prCheckedAt WHERE id = @id`,
+    )
+    .run({
+      id: runId,
+      prNumber: pr?.number ?? 0,
+      prUrl: pr?.url ?? '',
+      prTitle: pr?.title ?? '',
+      prState: pr?.state ?? '',
+      prChecks: pr?.checks ?? '',
+      prCheckedAt: Date.now(),
+    })
+}
+
+export async function getRunPullRequest(runId: string): Promise<RunPullRequest | null> {
+  const run = getRun(runId)
+  if (!run) return null
+
+  const cached = cachedRunPullRequest(run)
+  const ttl = cached && !isPullRequestLive(cached.state) ? PR_SETTLED_TTL_MS : PR_LIVE_TTL_MS
+  if (run.prCheckedAt && Date.now() - run.prCheckedAt < ttl) return cached
+
+  const fresh = await git.pullRequestForBranchAsync(run.cwd)
+  // A branch that lost its PR (deleted, or the run moved branches) clears the
+  // cache; a probe that simply failed also clears it rather than showing stale.
+  persistRunPullRequest(runId, fresh)
+  return fresh
+}
+
+/** Drop the TTL so the next read re-probes — used after opening a PR. */
+export function invalidateRunPullRequest(runId: string) {
+  getDb().prepare('UPDATE runs SET prCheckedAt = 0 WHERE id = ?').run(runId)
+}
+
 /** Files / repo / gh for the run detail right panel — deferred from chat load. */
 export async function getRunWorkspace(runId: string) {
   const run = getRun(runId)
@@ -1744,12 +2064,14 @@ export function openPullRequest(input: {
     base = project?.defaultBranch
   }
 
-  return git.createPullRequest({
+  const result = git.createPullRequest({
     cwd: run.cwd,
     title: input.title,
     body: input.body,
     base,
   })
+  invalidateRunPullRequest(input.runId)
+  return result
 }
 
 // ---------------------------------------------------------------------------

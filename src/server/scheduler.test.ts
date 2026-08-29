@@ -11,7 +11,9 @@ const appRoot = process.cwd()
 const root = mkdtempSync(join(tmpdir(), 'openrun-scheduler-'))
 const repo = join(root, 'repo')
 mkdirSync(repo)
-execFileSync('git', ['init', '-q'], { cwd: repo })
+// -b main: the workspace row says `main`, and a runner whose git defaults to
+// `master` would read as branch drift and refuse the unattended fire.
+execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
 execFileSync('git', ['config', 'user.email', 'scheduler@example.test'], { cwd: repo })
 execFileSync('git', ['config', 'user.name', 'Scheduler Test'], { cwd: repo })
 execFileSync('git', ['commit', '--allow-empty', '-qm', 'initial'], { cwd: repo })
@@ -60,9 +62,10 @@ function seedTask(id: string, scheduledAt: number) {
        (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled,
         model, effort, webhookIntegrationId, webhookEvents, webhookFilters,
         verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId,
-        resumeSessionLabel, fireOnce, scheduledAt, createdAt, updatedAt, lastRunAt)
+        resumeSessionLabel, fireOnce, scheduledAt, requireIsolation, requireGhAuth,
+        createdAt, updatedAt, lastRunAt)
      VALUES (?, 'One shot', '', 'test-shell', 'work', ?, 'workspace-1', '* * * * *', 1,
-             '', '', '', '[]', '{}', 0, 0, 0, '', '', 1, ?, 1, 1, NULL)`,
+             '', '', '', '[]', '{}', 0, 0, 0, '', '', 1, ?, 0, 0, 1, 1, NULL)`,
   ).run(id, repo, scheduledAt)
 }
 

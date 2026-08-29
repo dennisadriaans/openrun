@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDb, type CheckResultRow, type MessageRow, type RuntimeRow, type TaskRow } from './db'
@@ -42,6 +42,8 @@ import {
   type TurnEventRow,
 } from './turnEvents'
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
+import { recordRunOutcomeForWorkspace } from './workspaceHealth'
+import { missingRunCwdMessage } from '../lib/workspaceHealth.ts'
 import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
@@ -62,6 +64,7 @@ import { withPrCapability } from '../lib/prCapability'
 import { buildHandoffPrompt, handoffSystemNote, type HandoffMessage } from '../lib/handoffPrompt.ts'
 import { isRuntimeSwitch, resolveSwitchMode, resolveSwitchModel } from '../lib/runtimeSwitch.ts'
 import { cachedModelsForBin } from './modelCatalog.ts'
+import { describeEffectiveTurnSettings } from '../lib/runSettingsDebug.ts'
 import { detectGhFailure } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { nativeSessionExists } from './nativeSessions'
@@ -283,6 +286,7 @@ export function startRun(input: StartRunInput): string {
   } else {
     cwd = input.cwd && input.cwd.trim().length > 0 ? input.cwd : process.cwd()
   }
+  assertRunCwdExists(cwd)
 
   // Claude and Grok let us choose the session id up front, which avoids having
   // to parse it back out of the output before the user can send a follow-up.
@@ -350,6 +354,8 @@ export function startRun(input: StartRunInput): string {
     throw new Error(`The "${input.runtime.label}" runtime does not support resuming a conversation`)
   }
 
+  const baseBranch = currentBranch(cwd)
+
   db.prepare(
     `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, baseSnapshot, model, effort, runtimeMode)
      VALUES (@id, @taskId, @taskName, @runtimeId, @trigger, 'running', @command, @cwd, @workspaceId, NULL, NULL, '', '', @startedAt, NULL, @sessionId, @baseBranch, @baseSnapshot, @model, @effort, @runtimeMode)`,
@@ -364,7 +370,7 @@ export function startRun(input: StartRunInput): string {
     workspaceId: input.workspaceId ?? '',
     startedAt: now,
     sessionId,
-    baseBranch: currentBranch(cwd),
+    baseBranch,
     baseSnapshot: captureBaseSnapshot(cwd),
     model,
     effort,
@@ -373,6 +379,29 @@ export function startRun(input: StartRunInput): string {
 
   if (input.taskId) {
     db.prepare('UPDATE tasks SET lastRunAt = ? WHERE id = ?').run(now, input.taskId)
+  }
+
+  // Automation runs get a settings stub read back off the argv the CLI is about
+  // to receive, so a setting that silently failed to reach it is visible in the
+  // transcript instead of being echoed back from the automation row.
+  if (input.taskId && input.trigger !== 'chat' && input.trigger !== 'planner') {
+    db.prepare(
+      `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, createdAt, finishedAt)
+       VALUES (?, ?, 'system', ?, '', '', 'success', NULL, '', ?, ?)`,
+    ).run(
+      randomId('msg'),
+      runId,
+      describeEffectiveTurnSettings({
+        bin: input.runtime.bin,
+        args: turn.args,
+        extraEnv: turn.extraEnv,
+        prompt: turn.acpPrompt,
+        branch: baseBranch,
+        cwd,
+      }),
+      now - 2,
+      now - 2,
+    )
   }
 
   if (resumeSessionId) {
@@ -448,6 +477,7 @@ export function sendFollowUp(input: {
       }
     | undefined
   if (!run) throw new Error('Run not found')
+  assertRunCwdExists(run.cwd)
   if (!input.internal && run.status === 'running') {
     throw new Error('This run is still working — wait for it to finish')
   }
@@ -587,6 +617,11 @@ function handoffChangedFiles(cwd: string, baseSnapshot: string): string[] {
  * answer for *this* run: the CLI inherits it and passes it down to any MCP
  * server it spawns, so the tools need no handshake of their own.
  */
+/** Refuse before spawn when the run's working directory is not on disk. */
+function assertRunCwdExists(cwd: string): void {
+  if (!existsSync(cwd)) throw new Error(missingRunCwdMessage(cwd))
+}
+
 function turnEnv(runId: string, extraEnv?: Record<string, string>): Record<string, string> {
   return {
     ...(extraEnv ?? {}),
@@ -1873,6 +1908,22 @@ async function concludeTurn(input: {
         messageId: input.assistantMessageId,
       })
     }
+  }
+
+  // An unattended run owns its workspace's fitness for the next unattended
+  // run: a bad verdict quarantines it so the following automation refuses the
+  // worktree instead of inheriting the broken tree it left behind, and a good
+  // one lifts an earlier quarantine. Attended turns are excluded — a human is
+  // looking at the result and does not need the workspace taken away.
+  if (input.unattended) {
+    const taskName = db.prepare('SELECT taskName FROM runs WHERE id = ?').get(input.runId) as
+      | { taskName: string }
+      | undefined
+    recordRunOutcomeForWorkspace({
+      workspaceId: run.workspaceId,
+      taskName: taskName?.taskName ?? 'a scheduled run',
+      verdict,
+    })
   }
 
   finalizeRun(input.runId, input.status, input.exitCode, verdict)

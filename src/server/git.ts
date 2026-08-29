@@ -22,6 +22,7 @@ import {
   missingOriginRemoteMessage,
 } from '../lib/gitActionGate.ts'
 import { parseGitForEachRef, type GitBranchRow } from '../lib/gitBranches.ts'
+import { parseGhPullRequest, type RunPullRequest } from '../lib/pullRequest.ts'
 import {
   NO_RUN_COMMITS,
   undoCommitsBlockedReason,
@@ -739,6 +740,34 @@ export function commit(cwd: string, message: string, paths?: string[]): { sha: s
   return { sha: git(cwd, ['rev-parse', '--short', 'HEAD']).stdout.trim() }
 }
 
+/**
+ * Put a worktree back on `branch` at `origin/<branch>` (or the local branch
+ * when there is no remote), throwing away uncommitted and untracked files —
+ * and, when the branch is on a remote, any commits that were never pushed.
+ * Only ever called against an app-managed worktree; `restoreWorkspace` refuses
+ * to do this to the user's own checkout.
+ */
+export function resetWorktree(cwd: string, branch: string): void {
+  if (!isRepo(cwd)) throw new Error('Not a git repository')
+  if (!branch.trim()) throw new Error('A branch is required to restore a worktree')
+
+  // Reset before checkout: a dirty tree makes `git checkout` refuse when the
+  // branches differ in the files that are dirty.
+  gitOrThrow(cwd, ['reset', '--hard'])
+  // No -x: ignored files are the worktree's installed dependencies, .env and
+  // build caches. Removing those turns a restore into a re-setup.
+  gitOrThrow(cwd, ['clean', '-fd'])
+
+  if (currentBranch(cwd) !== branch) {
+    gitOrThrow(cwd, ['checkout', branch])
+  }
+
+  const remote = git(cwd, ['rev-parse', '--verify', '--quiet', `origin/${branch}`])
+  if (remote.ok && remote.stdout.trim()) {
+    gitOrThrow(cwd, ['reset', '--hard', `origin/${branch}`])
+  }
+}
+
 /** Create and switch to a new branch. */
 export function createBranch(cwd: string, name: string) {
   gitOrThrow(cwd, ['checkout', '-b', name])
@@ -1098,4 +1127,39 @@ export function hasUnpushedWork(repoPath: string): {
 } {
   const info = repoInfo(repoPath)
   return { dirty: info.dirty, ahead: info.ahead, branch: info.branch }
+}
+
+/**
+ * Look up the pull request for the branch checked out in `cwd`, if any.
+ *
+ * `gh pr view` resolves the PR from the current branch, so this finds PRs the
+ * agent opened on its own just as well as ones opened from the workspace panel.
+ * Returns null when there is no PR, no remote, or gh is unavailable.
+ */
+export async function pullRequestForBranchAsync(cwd: string): Promise<RunPullRequest | null> {
+  if (!isRepo(cwd)) return null
+  const gh = await ghStatusAsync()
+  if (!gh.installed || !gh.authenticated) return null
+
+  const out = await new Promise<{ ok: boolean; stdout: string }>((resolve) => {
+    try {
+      const child = spawn(
+        'gh',
+        ['pr', 'view', '--json', 'number,url,title,state,isDraft,statusCheckRollup'],
+        { cwd, stdio: ['ignore', 'pipe', 'ignore'] },
+      )
+      let stdout = ''
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk
+        if (stdout.length > MAX_BUFFER) child.kill('SIGTERM')
+      })
+      child.on('error', () => resolve({ ok: false, stdout: '' }))
+      child.on('close', (code) => resolve({ ok: code === 0, stdout }))
+    } catch {
+      resolve({ ok: false, stdout: '' })
+    }
+  })
+  if (!out.ok) return null
+  return parseGhPullRequest(out.stdout)
 }
