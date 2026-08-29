@@ -140,7 +140,15 @@ export function trimTranscript(
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i]!
     if (kept.length >= maxTurns) break
-    if (kept.length > 0 && events + turn.events.length > maxEvents) break
+    const remaining = maxEvents - events
+    if (remaining <= 0) break
+    if (turn.events.length > remaining) {
+      // Keep the newest part of an oversized turn, including its final event
+      // when possible. A single turn must not defeat the global event cap.
+      kept.unshift({ ...turn, events: turn.events.slice(-remaining) })
+      events += remaining
+      break
+    }
     kept.unshift(turn)
     events += turn.events.length
   }

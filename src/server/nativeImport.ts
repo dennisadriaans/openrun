@@ -8,8 +8,8 @@
  * Nothing here spawns anything: importing is a read of the CLI's own session
  * file, independent of whether that session can still be resumed.
  */
-import { getDb } from './db'
-import { readNativeTranscript } from './nativeTranscript'
+import { getDb } from './db.ts'
+import { readNativeTranscript } from './nativeTranscript.ts'
 import { resumedNativeChatStub, type NativeSessionKind } from '../lib/nativeSessions.ts'
 import { omittedTurnsNote, trimTranscript } from '../lib/nativeTranscript.ts'
 
@@ -22,6 +22,58 @@ export type NativeImportResult = {
   turns: number
   /** Timestamp of the oldest imported message, for the run's startedAt. */
   startedAt: number
+}
+
+export type ImportTimestampInput = { sourceAt?: number | null }
+
+function validSourceTimestamp(value: number | null | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  return Math.trunc(value)
+}
+
+/**
+ * Allocate unique message/event timestamps before the adoption boundary.
+ *
+ * Valid source timestamps retain their relative order and their millisecond
+ * values whenever there is room. Missing, duplicate, decreasing, or invalid
+ * values are clamped to the next available millisecond. If a source timestamp
+ * lies in the future, the complete sequence is shifted backwards as one unit;
+ * this preserves its spacing while keeping every imported row before `before`.
+ */
+export function allocateImportTimestamps(
+  rows: readonly ImportTimestampInput[],
+  before: number,
+): number[] {
+  if (!Number.isFinite(before)) throw new Error('Native transcript import needs a finite boundary.')
+  if (rows.length === 0) return []
+
+  const boundary = Math.trunc(before)
+  const limit = boundary - 1
+  const firstSourceIndex = rows.findIndex((row) => validSourceTimestamp(row.sourceAt) !== undefined)
+  const firstSource =
+    firstSourceIndex >= 0 ? validSourceTimestamp(rows[firstSourceIndex]?.sourceAt) : undefined
+  let clock = firstSource === undefined ? limit - rows.length : firstSource - firstSourceIndex - 1
+
+  const raw: number[] = []
+  for (const row of rows) {
+    const source = validSourceTimestamp(row.sourceAt)
+    const wanted = source ?? clock + 1
+    clock = Math.max(clock + 1, wanted)
+    raw.push(clock)
+  }
+
+  const shift = Math.min(0, limit - clock)
+  const allocated = raw.map((value) => value + shift)
+  for (let i = 0; i < allocated.length; i += 1) {
+    const value = allocated[i]!
+    if (!Number.isSafeInteger(value) || value >= boundary) {
+      throw new Error('Native transcript import produced an invalid timestamp sequence.')
+    }
+    if (i > 0 && value <= allocated[i - 1]!) {
+      throw new Error('Native transcript import produced an ambiguous timestamp sequence.')
+    }
+  }
+  return allocated
 }
 
 /**
@@ -54,19 +106,30 @@ export function importNativeTranscript(input: {
      VALUES (@id, @messageId, @runId, @seq, @kind, @payload, @createdAt)`,
   )
 
-  const first = turns[0]?.promptAt ?? 0
-  const limit = input.before - 1
-  // Source timestamps, kept strictly increasing so `ORDER BY createdAt` cannot
-  // interleave a turn, and capped so the caller's next row still comes last.
-  let clock = (first > 0 ? first : input.before) - 2
-  const at = (ms: number): number => {
-    const wanted = Number.isFinite(ms) && ms > 0 ? ms : 0
-    clock = Math.min(Math.max(clock + 1, wanted), limit)
-    return clock
+  const timestampRows: ImportTimestampInput[] = []
+  timestampRows.push({})
+  if (dropped > 0) timestampRows.push({})
+  for (const turn of turns) {
+    if (turn.prompt) timestampRows.push({ sourceAt: turn.promptAt })
+    if (turn.events.length > 0) {
+      timestampRows.push({ sourceAt: turn.endedAt })
+      for (const _event of turn.events) timestampRows.push({ sourceAt: turn.endedAt })
+    }
+  }
+  const timestamps = allocateImportTimestamps(timestampRows, input.before)
+  let timestampIndex = 0
+  const seenTimestamps = new Set<number>()
+  const at = (): number => {
+    const createdAt = timestamps[timestampIndex++]
+    if (createdAt === undefined || seenTimestamps.has(createdAt)) {
+      throw new Error('Native transcript import produced an ambiguous timestamp sequence.')
+    }
+    seenTimestamps.add(createdAt)
+    return createdAt
   }
 
   const note = (text: string) => {
-    const createdAt = at(0)
+    const createdAt = at()
     insertMessage.run({
       id: newId('msg'),
       runId: input.runId,
@@ -85,7 +148,7 @@ export function importNativeTranscript(input: {
 
     for (const turn of turns) {
       if (turn.prompt) {
-        const createdAt = at(turn.promptAt)
+        const createdAt = at()
         insertMessage.run({
           id: newId('msg'),
           runId: input.runId,
@@ -100,7 +163,7 @@ export function importNativeTranscript(input: {
       if (turn.events.length === 0) continue
 
       const messageId = newId('msg')
-      const createdAt = at(turn.endedAt)
+      const createdAt = at()
       insertMessage.run({
         id: messageId,
         runId: input.runId,
@@ -113,6 +176,7 @@ export function importNativeTranscript(input: {
         finishedAt: createdAt,
       })
       turn.events.forEach((event, seq) => {
+        const eventCreatedAt = at()
         insertEvent.run({
           id: newId('ev'),
           messageId,
@@ -120,12 +184,12 @@ export function importNativeTranscript(input: {
           seq,
           kind: event.kind,
           payload: JSON.stringify(event.payload),
-          createdAt,
+          createdAt: eventCreatedAt,
         })
       })
     }
   })
   write()
 
-  return { turns: turns.length, startedAt: first > 0 ? first : input.before }
+  return { turns: turns.length, startedAt: timestamps[0] ?? input.before - 1 }
 }
