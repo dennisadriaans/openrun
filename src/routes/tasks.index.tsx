@@ -140,7 +140,7 @@ function TasksPage() {
                 title={
                   selectableIds.length === 0 ? 'No automations to select' : 'Select all automations'
                 }
-                className="relative z-10 size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="list-selection-checkbox relative z-10 disabled:cursor-not-allowed disabled:opacity-40"
                 onChange={(event) => {
                   event.stopPropagation()
                   const checked = event.currentTarget.checked
@@ -189,7 +189,7 @@ function TasksPage() {
                     disabled={deleteTasks.isPending}
                     aria-label={`Select ${t.name}`}
                     title={`Select ${t.name}`}
-                    className="size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="list-selection-checkbox disabled:cursor-not-allowed disabled:opacity-40"
                     onChange={(event) => {
                       event.stopPropagation()
                       setSelectedIds((selected) =>

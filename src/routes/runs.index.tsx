@@ -169,7 +169,7 @@ function RunsPage() {
                         ? 'No deletable runs on this page'
                         : 'Select all deletable runs on this page'
                     }
-                    className="relative z-10 size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="list-selection-checkbox relative z-10 disabled:cursor-not-allowed disabled:opacity-40"
                     onChange={(event) => {
                       event.stopPropagation()
                       const checked = event.currentTarget.checked
@@ -214,7 +214,7 @@ function RunsPage() {
                         disabled={busy || deleteRuns.isPending}
                         aria-label={`Select ${r.chatTitle}`}
                         title={busy ? 'Cancel the run before deleting' : `Select ${r.chatTitle}`}
-                        className="size-3 accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="list-selection-checkbox disabled:cursor-not-allowed disabled:opacity-40"
                         onChange={(event) => {
                           event.stopPropagation()
                           setSelectedIds((selected) =>
