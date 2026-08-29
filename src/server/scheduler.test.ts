@@ -11,7 +11,9 @@ const appRoot = process.cwd()
 const root = mkdtempSync(join(tmpdir(), 'openrun-scheduler-'))
 const repo = join(root, 'repo')
 mkdirSync(repo)
-execFileSync('git', ['init', '-q'], { cwd: repo })
+// -b main: the workspace row says `main`, and a runner whose git defaults to
+// `master` would read as branch drift and refuse the unattended fire.
+execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
 execFileSync('git', ['config', 'user.email', 'scheduler@example.test'], { cwd: repo })
 execFileSync('git', ['config', 'user.name', 'Scheduler Test'], { cwd: repo })
 execFileSync('git', ['commit', '--allow-empty', '-qm', 'initial'], { cwd: repo })
