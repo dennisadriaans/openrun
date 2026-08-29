@@ -195,7 +195,7 @@ Neither hook may open an `EventSource` of its own.
 | Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
 | Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` |
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
-| Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree `internal/SECRETS.md` |
+| Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
 | Open-core boundary (what is free vs. commercial) | `lib/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |
 | Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `components/ui.tsx` |
