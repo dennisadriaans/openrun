@@ -323,8 +323,10 @@ one-paragraph import, never a restatement.
   `pnpm generate-routes`: the standalone router-cli currently emits a different `Register`
   block from the Vite plugin, dropping the `config` entry that types the `src/start.ts`
   instance. The plugin's output is authoritative.
-- `data/openrun.db` is git-ignored and created on first run; delete it to reset all state.
-  App-managed clones and worktrees live in `~/.openrun` (`OPENRUN_HOME` overrides).
+- Runs, automations, and the rest of app state live in `~/.openrun/openrun.db`
+  (`OPENRUN_HOME` overrides the whole directory). Delete that file to reset.
+  A leftover `data/openrun.db` in a checkout is moved there on first boot.
+  App-managed clones and worktrees live under the same home directory.
 - The scheduler and both live pub/sub registries are **module singletons guarded on
   `globalThis`** so they survive Vite HMR. Don't re-instantiate them per call.
 - `db.ts` migrations are additive-only (`addColumn` diffs `table_info`; SQLite has no
