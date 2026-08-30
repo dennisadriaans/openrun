@@ -166,7 +166,9 @@ function BranchSwitcher({
                 <button
                   type="button"
                   onClick={() => void copyBranch(ws.id, ws.branch)}
-                  aria-label={copiedId === ws.id ? `Copied branch ${ws.branch}` : `Copy branch ${ws.branch}`}
+                  aria-label={
+                    copiedId === ws.id ? `Copied branch ${ws.branch}` : `Copy branch ${ws.branch}`
+                  }
                   title={copiedId === ws.id ? 'Copied' : 'Copy branch name'}
                   className={`absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 group-hover/workspace:opacity-100 ${
                     copiedId === ws.id
