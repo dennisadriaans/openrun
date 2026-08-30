@@ -1,10 +1,12 @@
 import { useNavigate } from '@tanstack/react-router'
-import { ChevronDown, ChevronRight, GitBranch, Search } from 'lucide-react'
+import { ChevronDown, GitBranch, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { relativeTime } from '../../lib/format'
 import { useRuns } from '../../lib/queries'
 import { groupThreadLensRuns } from '../../lib/threadLens'
+import { truncateNavTitle } from '../../lib/truncateLabel.ts'
 import { ProviderIcon } from '../ProviderIcons'
+import { Tooltip } from '../ui'
 
 /** Change this default to `plain` to remove the wallet-card affordance only. */
 export const DEFAULT_THREAD_SELECTOR_APPEARANCE: 'stack' | 'plain' = 'stack'
@@ -94,8 +96,7 @@ export function ThreadStack({
   }
 
   return (
-    <div ref={rootRef} className="relative flex min-w-0 items-center gap-1.5">
-      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40" />
+    <div ref={rootRef} className="relative min-w-0">
       <div className="relative min-w-0">
         {appearance === 'stack' && currentThreads.length > 1 ? (
           <>
@@ -105,34 +106,39 @@ export function ThreadStack({
             ) : null}
           </>
         ) : null}
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-          className={`relative flex min-w-0 max-w-[min(30rem,42vw)] items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] ${
-            open ? 'bg-secondary' : 'bg-background'
-          }`}
-        >
-          <ProviderIcon kind={runtimeKind(runtimeId, runtimeLabel)} className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate">{title}</span>
-          {hasUnreadCurrentThread ? (
-            <span
-              role="img"
-              aria-label="New activity in another conversation"
-              title="New activity in another conversation"
-              className="size-1.5 shrink-0 rounded-full bg-accent"
+        <Tooltip content={title} disabled={open} placement="bottom">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            className={`relative flex w-full min-w-0 max-w-44 items-center gap-1 overflow-hidden rounded-md px-2 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] sm:max-w-56 ${
+              open ? 'bg-secondary' : 'bg-background'
+            }`}
+          >
+            <ProviderIcon
+              kind={runtimeKind(runtimeId, runtimeLabel)}
+              className="size-3.5 shrink-0"
             />
-          ) : null}
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground/60" />
-        </button>
+            <span className="min-w-0 flex-1 truncate">{truncateNavTitle(title)}</span>
+            {hasUnreadCurrentThread ? (
+              <span
+                role="img"
+                aria-label="New activity in another conversation"
+                title="New activity in another conversation"
+                className="size-1.5 shrink-0 rounded-full bg-accent"
+              />
+            ) : null}
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
 
       {open ? (
         <div
           role="dialog"
           aria-label="Conversation context"
-          className="absolute left-3 top-full z-50 mt-2 w-[min(34rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border bg-elevated shadow-2xl shadow-black/40"
+          className="absolute left-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border bg-elevated shadow-2xl shadow-black/40"
         >
           <div className="relative border-b border-border p-2.5">
             <Search className="absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -140,7 +146,7 @@ export function ThreadStack({
               ref={inputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search conversations…"
+              placeholder="Search this worktree, or type to reach others…"
               aria-label="Search conversations"
               className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-12 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring/50"
             />
@@ -151,17 +157,19 @@ export function ThreadStack({
           <div className="max-h-[min(30rem,65vh)] overflow-y-auto p-2">
             {groups.map((group) => (
               <section key={group.key} className="not-first:mt-2">
-                <h3 className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                  {group.kind === 'workspace' ? <GitBranch className="size-3" /> : null}
-                  {group.label}
-                  {group.runs.some((item) => item.unread) ? (
-                    <span
-                      aria-label="New activity in this worktree"
-                      title="New activity in this worktree"
-                      className="size-1.5 rounded-full bg-accent"
-                    />
-                  ) : null}
-                </h3>
+                {query.trim() || group.kind !== 'current' ? (
+                  <h3 className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    {group.kind === 'workspace' ? <GitBranch className="size-3" /> : null}
+                    {group.label}
+                    {group.runs.some((item) => item.unread) ? (
+                      <span
+                        aria-label="New activity in this worktree"
+                        title="New activity in this worktree"
+                        className="size-1.5 rounded-full bg-accent"
+                      />
+                    ) : null}
+                  </h3>
+                ) : null}
                 {group.runs.map((item) => (
                   <button
                     key={item.id}
@@ -184,10 +192,13 @@ export function ThreadStack({
                         className="size-1.5 shrink-0 rounded-full bg-accent"
                       />
                     ) : null}
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                    <span
+                      className="max-w-[4.5rem] shrink-0 truncate text-[11px] text-muted-foreground"
+                      title={item.runtimeLabel}
+                    >
                       {item.runtimeLabel}
                     </span>
-                    <span className="w-12 shrink-0 text-right text-[11px] text-muted-foreground/70">
+                    <span className="w-10 shrink-0 text-right text-[11px] text-muted-foreground/70">
                       {relativeTime(item.startedAt).replace(' ago', '')}
                     </span>
                   </button>

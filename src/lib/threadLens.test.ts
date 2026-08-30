@@ -21,7 +21,7 @@ const run = (
 })
 
 describe('groupThreadLensRuns', () => {
-  it('puts the current worktree before sibling worktrees and recent projects', () => {
+  it('lists only the current worktree until you search', () => {
     const groups = groupThreadLensRuns(
       [
         run('other', 'ws-c', 'project-b', 4),
@@ -29,6 +29,26 @@ describe('groupThreadLensRuns', () => {
         run('one', 'ws-a', 'project-a', 2),
       ],
       { workspaceId: 'ws-a', projectId: 'project-a' },
+    )
+    assert.deepEqual(
+      groups.map((group) => group.kind),
+      ['current'],
+    )
+    assert.deepEqual(
+      groups[0]?.runs.map((item) => item.id),
+      ['one'],
+    )
+  })
+
+  it('reaches sibling worktrees and other projects when searching', () => {
+    const groups = groupThreadLensRuns(
+      [
+        run('other', 'ws-c', 'project-b', 4),
+        run('sibling', 'ws-b', 'project-a', 3),
+        run('one', 'ws-a', 'project-a', 2),
+      ],
+      { workspaceId: 'ws-a', projectId: 'project-a' },
+      'thread',
     )
     assert.deepEqual(
       groups.map((group) => group.kind),

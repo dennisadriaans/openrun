@@ -11,6 +11,8 @@ import { Check, ChevronDown, ChevronRight, GitBranch, Plus } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WorkspaceWithMeta } from '../../fns'
 import { fetchLatestRunForWorkspace, useRuns } from '../../lib/queries'
+import { truncateBranchLabel } from '../../lib/truncateLabel.ts'
+import { Tooltip } from '../ui'
 
 const BRANCH_PAGE_SIZE = 5
 
@@ -95,34 +97,37 @@ function BranchSwitcher({
   }
 
   return (
-    <div ref={ref} className="relative min-w-0 max-w-[36%] shrink">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          if (!open) setVisibleCount(BRANCH_PAGE_SIZE)
-          setOpen((v) => !v)
-        }}
-        title={current.path}
-        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] disabled:opacity-40 ${
-          muted ? 'text-muted-foreground' : 'font-medium text-foreground'
-        }`}
-      >
-        <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-        <span className="mono min-w-0 truncate">{current.branch}</span>
-        {unreadWorkspaceIds.has(current.id) ? (
-          <span
-            role="img"
-            aria-label="New activity in this worktree"
-            title="New activity in this worktree"
-            className="size-1.5 shrink-0 rounded-full bg-accent"
-          />
-        ) : null}
-        {current.kind === 'main' ? (
-          <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
-        ) : null}
-        <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-      </button>
+    <div ref={ref} className="relative">
+      <Tooltip content={current.branch} disabled={open || disabled} placement="bottom">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            if (!open) setVisibleCount(BRANCH_PAGE_SIZE)
+            setOpen((v) => !v)
+          }}
+          className={`flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] disabled:opacity-40 ${
+            muted ? 'text-muted-foreground' : 'font-medium text-foreground'
+          }`}
+        >
+          <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+          <span className="mono min-w-0 flex-1 truncate">
+            {truncateBranchLabel(current.branch)}
+          </span>
+          {unreadWorkspaceIds.has(current.id) ? (
+            <span
+              role="img"
+              aria-label="New activity in this worktree"
+              title="New activity in this worktree"
+              className="size-1.5 shrink-0 rounded-full bg-accent"
+            />
+          ) : null}
+          {current.kind === 'main' ? (
+            <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
+          ) : null}
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+        </button>
+      </Tooltip>
 
       {open ? (
         <div className="absolute left-0 top-full z-40 mt-1.5 min-w-56 overflow-hidden rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40">
@@ -241,18 +246,19 @@ export function WorkspaceBreadcrumb({
         </>
       ) : branchLabel ? (
         <>
-          <Segment
-            className={`flex max-w-[36%] shrink items-center gap-1.5 ${
-              runTitle ? 'text-muted-foreground' : 'font-medium text-foreground'
-            }`}
-            title={branchLabel}
-          >
-            <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-            <span className="mono min-w-0 truncate">{branchLabel}</span>
-            {isMainCheckout ? (
-              <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
-            ) : null}
-          </Segment>
+          <Tooltip content={branchLabel} placement="bottom">
+            <Segment
+              className={`flex max-w-44 shrink items-center gap-1.5 sm:max-w-52 ${
+                runTitle ? 'text-muted-foreground' : 'font-medium text-foreground'
+              }`}
+            >
+              <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+              <span className="mono min-w-0 truncate">{truncateBranchLabel(branchLabel)}</span>
+              {isMainCheckout ? (
+                <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
+              ) : null}
+            </Segment>
+          </Tooltip>
           {runTitle ? <Separator /> : null}
         </>
       ) : null}
@@ -263,7 +269,12 @@ export function WorkspaceBreadcrumb({
         </Segment>
       ) : null}
 
-      {trailing ? <span className="shrink-0">{trailing}</span> : null}
+      {trailing ? (
+        <>
+          <Separator />
+          <span className="min-w-0 shrink">{trailing}</span>
+        </>
+      ) : null}
     </nav>
   )
 }

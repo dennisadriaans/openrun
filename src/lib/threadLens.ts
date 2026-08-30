@@ -18,20 +18,24 @@ export type ThreadLensGroup = {
   runs: ThreadLensRun[]
 }
 
-/** Order conversations spatially: current worktree, sibling worktrees, then projects. */
+/**
+ * Conversations for the header picker. An empty query is this worktree only;
+ * a search reaches sibling worktrees and other projects.
+ */
 export function groupThreadLensRuns(
   runs: ThreadLensRun[],
   current: { workspaceId: string; projectId: string },
   query = '',
 ): ThreadLensGroup[] {
   const needle = query.trim().toLocaleLowerCase()
+  const scoped = needle ? runs : runs.filter((run) => run.workspaceId === current.workspaceId)
   const matching = needle
-    ? runs.filter((run) =>
+    ? scoped.filter((run) =>
         [run.chatTitle, run.runtimeLabel, run.workspaceBranch, run.projectName].some((value) =>
           value.toLocaleLowerCase().includes(needle),
         ),
       )
-    : runs
+    : scoped
   const sorted = [...matching].sort((a, b) => b.startedAt - a.startedAt)
   const groups: ThreadLensGroup[] = []
   const add = (group: ThreadLensGroup) => {
