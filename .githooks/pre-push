@@ -15,14 +15,9 @@ run_pnpm() {
   fi
 }
 
-status_before="$(git status --porcelain)"
-run_pnpm lint:fix
-status_after="$(git status --porcelain)"
-
-if [ "$status_before" != "$status_after" ]; then
-  echo "pre-push: pnpm lint:fix rewrote files. Commit them and push again." >&2
-  git status --short >&2
+if ! run_pnpm lint; then
+  echo >&2
+  echo "pre-push: lint failed without changing your files." >&2
+  echo "Run 'pnpm lint:fix', review the fixes, then commit them before pushing." >&2
   exit 1
 fi
-
-run_pnpm lint
