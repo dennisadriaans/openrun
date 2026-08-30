@@ -34,9 +34,17 @@ test('a missing address is not loopback', () => {
 test('only the mobile API prefix matches', () => {
   assert.equal(isMobileApiPath('/api/mobile/me'), true)
   assert.equal(isMobileApiPath('/api/mobile/runs/run_1/stream'), true)
+  assert.equal(isMobileApiPath('/api/mobile/me?x=1'), true)
   assert.equal(isMobileApiPath('/api/activity/stream'), false)
   assert.equal(isMobileApiPath('/'), false)
   assert.equal(isMobileApiPath('/api/mobile'), false, 'prefix must be a path segment')
+})
+
+test('dot-dot and encoded traversal are not the mobile API', () => {
+  assert.equal(isMobileApiPath('/api/mobile/../api/runs/run_1/stream'), false)
+  assert.equal(isMobileApiPath('/api/mobile/%2e%2e/api/runs/run_1/stream'), false)
+  assert.equal(isMobileApiPath('/api/mobile/%2e%2e/%2e%2e/_serverFn/x'), false)
+  assert.equal(isMobileApiPath('//api/mobile/me'), false)
 })
 
 test('a path that merely mentions the prefix later does not match', () => {
