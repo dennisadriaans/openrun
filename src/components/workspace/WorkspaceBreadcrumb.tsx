@@ -10,7 +10,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Check, ChevronDown, ChevronRight, GitBranch, Plus } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WorkspaceWithMeta } from '../../fns'
-import { fetchLatestRunForWorkspace } from '../../lib/queries'
+import { fetchLatestRunForWorkspace, useRuns } from '../../lib/queries'
 
 const BRANCH_PAGE_SIZE = 5
 
@@ -40,12 +40,14 @@ function BranchSwitcher({
   disabled,
   muted,
   onRequestNewBranch,
+  unreadWorkspaceIds,
 }: {
   current: WorkspaceWithMeta
   workspaces: WorkspaceWithMeta[]
   disabled?: boolean
   muted?: boolean
   onRequestNewBranch?: () => void
+  unreadWorkspaceIds: ReadonlySet<string>
 }) {
   const [open, setOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -108,6 +110,14 @@ function BranchSwitcher({
       >
         <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         <span className="mono min-w-0 truncate">{current.branch}</span>
+        {unreadWorkspaceIds.has(current.id) ? (
+          <span
+            role="img"
+            aria-label="New activity in this worktree"
+            title="New activity in this worktree"
+            className="size-1.5 shrink-0 rounded-full bg-accent"
+          />
+        ) : null}
         {current.kind === 'main' ? (
           <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
         ) : null}
@@ -133,6 +143,14 @@ function BranchSwitcher({
             >
               <GitBranch className="size-3.5 shrink-0 opacity-70" />
               <span className="min-w-0 flex-1 truncate mono text-[12.5px]">{ws.branch}</span>
+              {unreadWorkspaceIds.has(ws.id) ? (
+                <span
+                  role="img"
+                  aria-label="New activity"
+                  title="New activity"
+                  className="size-1.5 shrink-0 rounded-full bg-accent"
+                />
+              ) : null}
               {ws.kind === 'main' ? (
                 <span className="text-[10px] text-muted-foreground">main</span>
               ) : null}
@@ -188,6 +206,10 @@ export function WorkspaceBreadcrumb({
   branchDisabled?: boolean
   onRequestNewBranch?: () => void
 }) {
+  const { data: runs = [] } = useRuns(undefined, false, { limit: 200 })
+  const unreadWorkspaceIds = new Set(
+    runs.filter((run) => run.unread && run.workspaceId).map((run) => run.workspaceId),
+  )
   const showSwitcher = Boolean(workspace && workspaces)
   const branchLabel = workspace?.branch ?? branch
 
@@ -213,6 +235,7 @@ export function WorkspaceBreadcrumb({
             disabled={branchDisabled}
             muted={Boolean(runTitle)}
             onRequestNewBranch={onRequestNewBranch}
+            unreadWorkspaceIds={unreadWorkspaceIds}
           />
           {runTitle ? <Separator /> : null}
         </>

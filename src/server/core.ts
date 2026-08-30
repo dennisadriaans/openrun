@@ -1621,6 +1621,10 @@ export type RunSummary = Omit<RunRow, 'stdout' | 'stderr'> & {
   activitySummary: string
   /** Agent wrote something after the user last opened the run. */
   unread: boolean
+  /** Hierarchy labels used by conversation navigation. Empty for legacy runs. */
+  projectId: string
+  projectName: string
+  workspaceBranch: string
 }
 
 function runsListWhere(opts?: { taskId?: string; includeArchived?: boolean }): {
@@ -1660,6 +1664,17 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   const ids = rows.map((row) => row.id)
   const placeholders = ids.map(() => '?').join(',')
   const db = getDb()
+  const workspaceById = new Map(
+    rows
+      .map((row) => row.workspaceId)
+      .filter(Boolean)
+      .map((workspaceId) => [workspaceId, getWorkspace(workspaceId)] as const),
+  )
+  const projectById = new Map(
+    [...workspaceById.values()]
+      .filter((workspace) => Boolean(workspace))
+      .map((workspace) => [workspace!.projectId, getProject(workspace!.projectId)] as const),
+  )
 
   const firstPrompt = new Map<string, string>()
   const promptRows = db
@@ -1699,6 +1714,8 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   }
 
   return rows.map((row) => {
+    const workspace = workspaceById.get(row.workspaceId)
+    const project = workspace ? projectById.get(workspace.projectId) : undefined
     const summary = runActivitySummary(eventsByRun.get(row.id) ?? [], {
       running: row.status === 'running' || row.status === 'queued',
     })
@@ -1712,6 +1729,9 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
       }),
       activitySummary: summary ?? '',
       unread: (lastAgentAt.get(row.id) ?? 0) > row.lastReadAt,
+      projectId: project?.id ?? '',
+      projectName: project?.name ?? '',
+      workspaceBranch: workspace?.branch ?? row.headBranch ?? row.baseBranch ?? '',
     }
   })
 }
@@ -1730,7 +1750,8 @@ export function listRuns(opts?: {
     .prepare(
       `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
               length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
-              archivedAt, verdict, repairAttempts, timedOut, lastReadAt
+              workspaceId, sessionId, baseBranch, headBranch, baseSnapshot, model, effort,
+              runtimeMode, archivedAt, verdict, repairAttempts, timedOut, lastReadAt
        FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset) as RunListRow[]

@@ -12,6 +12,7 @@ import * as fns from '../fns'
 import { Chat } from '../components/Chat'
 import { ChatDebugMenuItem } from '../components/chat/ChatDebugToggle'
 import { ContextMeter } from '../components/chat/ContextMeter'
+import { ThreadStack } from '../components/chat/ThreadStack'
 import { TerminalPaletteMenuItems } from '../components/chat/TerminalPalettePicker'
 import { useChatTheme } from '../components/chat/ChatThemeProvider'
 import { DiffPanel } from '../components/DiffPanel'
@@ -43,6 +44,7 @@ import {
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
 import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
+import { runListTitle } from '../lib/runPreview'
 import {
   NO_RUN_COMMITS,
   shortSha,
@@ -465,13 +467,14 @@ function RunDetail() {
             */}
             <header className="flex h-[var(--workspace-topbar-height,44px)] shrink-0 items-center gap-1.5 border-b border-border px-3">
               {!sidebarOpen ? <SidebarToggle /> : null}
-              <Link
-                to="/runs"
+              <button
+                type="button"
+                onClick={() => window.history.back()}
                 className="flex shrink-0 items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground"
                 title="Back to run history"
               >
                 <ArrowLeft className="h-4 w-4" />
-              </Link>
+              </button>
 
               <WorkspaceBreadcrumb
                 projectName={project?.name}
@@ -481,6 +484,22 @@ function RunDetail() {
                 workspaces={workspaces}
                 branchDisabled={booting}
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
+                trailing={
+                  run ? (
+                    <ThreadStack
+                      runId={run.id}
+                      title={runListTitle({
+                        trigger: run.trigger,
+                        taskName: run.taskName,
+                        prompt: firstPrompt,
+                      })}
+                      runtimeId={data?.runtime?.id ?? run.runtimeId}
+                      runtimeLabel={data?.runtime?.label ?? run.runtimeId}
+                      workspaceId={workspace?.id ?? run.workspaceId}
+                      projectId={project?.id ?? workspace?.projectId ?? ''}
+                    />
+                  ) : null
+                }
               />
 
               <div className="flex shrink-0 items-center gap-0.5">

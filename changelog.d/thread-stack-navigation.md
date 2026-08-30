@@ -1,0 +1,1 @@
+You no longer have to return to run history to move between conversations or discover which background chat finished: the run header now opens a searchable Project → Worktree → Conversation lens with new-activity dots on conversations and worktrees.
