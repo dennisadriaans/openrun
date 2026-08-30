@@ -162,7 +162,7 @@ Neither hook may open an `EventSource` of its own.
 | AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
 | Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts` |
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
-| Projects, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts` |
+| Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; `/runs/new` offers the primary checkout only for interactive chats, while automations remain worktree-only |
 | Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `lib/workspaceHealth.ts` (the codes + wording), `server/workspaceHealth.ts` (inspection, quarantine, restore) |
 | Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `lib/unattendedGate.ts` (the rules), `server/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |

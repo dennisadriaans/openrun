@@ -1,15 +1,18 @@
 import { useState, type FormEvent } from 'react'
+import type { GitBranchRow } from '../lib/gitBranches'
 import { Button, Field, inputClass, Modal } from './ui'
 
 export function NewWorkspaceModal({
   projectName,
   defaultBaseBranch,
+  baseBranches,
   pending,
   onClose,
   onCreate,
 }: {
   projectName: string
   defaultBaseBranch: string
+  baseBranches: GitBranchRow[]
   pending: boolean
   onClose: () => void
   onCreate: (input: { branch: string; fromBranch?: string }) => Promise<void>
@@ -17,6 +20,10 @@ export function NewWorkspaceModal({
   const [branch, setBranch] = useState('')
   const [baseBranch, setBaseBranch] = useState(defaultBaseBranch)
   const [error, setError] = useState<string | null>(null)
+  const branchChoices = [
+    defaultBaseBranch,
+    ...baseBranches.map((candidate) => candidate.name),
+  ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -50,15 +57,20 @@ export function NewWorkspaceModal({
             placeholder="e.g. automation/update-dependencies…"
           />
         </Field>
-        <Field label="Base branch" hint="only committed Git state is copied">
-          <input
+        <Field label="Base branch">
+          <select
             className={`${inputClass} mono text-[13px]`}
             name="new-workspace-base-branch"
-            autoComplete="off"
-            spellCheck={false}
             value={baseBranch}
             onChange={(event) => setBaseBranch(event.target.value)}
-          />
+          >
+            {branchChoices.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+                {candidate === defaultBaseBranch ? ' (default)' : ''}
+              </option>
+            ))}
+          </select>
         </Field>
         {error ? (
           <p aria-live="polite" className="text-ui-base text-danger">

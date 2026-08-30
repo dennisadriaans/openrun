@@ -45,7 +45,11 @@ after(async () => {
 describe('Git worktree reconciliation', () => {
   it('imports manually added worktrees and deletes removed unreferenced rows', () => {
     const project = workspaces.addProject({ mode: 'register', path: repo })
-    assert.deepEqual(workspaces.listWorkspaces(project.id), [])
+    const [main] = workspaces.listWorkspaces(project.id)
+    assert.equal(main?.kind, 'main')
+    assert.equal(main?.branch, 'main')
+    assert.equal(main?.path, realpathSync(repo))
+    assert.equal(workspaces.resolveWorkspacePath(main!.id), realpathSync(repo))
     assert.throws(
       () =>
         workspaces.createWorkspace({
@@ -60,15 +64,21 @@ describe('Git worktree reconciliation', () => {
       cwd: repo,
     })
     const imported = workspaces.listWorkspaces(project.id)
-    assert.equal(imported.length, 1)
-    assert.equal(imported[0]?.branch, 'feature/manual')
-    assert.equal(imported[0]?.path, realpathSync(manualWorktree))
+    assert.equal(imported.length, 2)
+    assert.equal(imported.find((row) => row.kind === 'worktree')?.branch, 'feature/manual')
+    assert.equal(
+      imported.find((row) => row.kind === 'worktree')?.path,
+      realpathSync(manualWorktree),
+    )
 
     execFileSync('git', ['worktree', 'remove', manualWorktree], { cwd: repo })
-    assert.deepEqual(workspaces.listWorkspaces(project.id), [])
+    assert.deepEqual(
+      workspaces.listWorkspaces(project.id).map((row) => row.kind),
+      ['main'],
+    )
     const count = getDb()
       .prepare('SELECT COUNT(*) AS count FROM workspaces WHERE projectId = ?')
       .get(project.id) as { count: number }
-    assert.equal(count.count, 0)
+    assert.equal(count.count, 1)
   })
 })
