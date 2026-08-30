@@ -7,7 +7,7 @@
  * switcher when workspaces are provided.
  */
 import { useNavigate } from '@tanstack/react-router'
-import { Check, ChevronDown, ChevronRight, GitBranch, Plus } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, GitBranch, Plus } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WorkspaceWithMeta } from '../../fns'
 import { fetchLatestRunForWorkspace } from '../../lib/queries'
@@ -49,8 +49,10 @@ function BranchSwitcher({
 }) {
   const [open, setOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(BRANCH_PAGE_SIZE)
   const ref = useRef<HTMLDivElement>(null)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -68,6 +70,12 @@ function BranchSwitcher({
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    }
+  }, [])
 
   const ready = workspaces.filter((w) => w.status === 'ready' || w.id === current.id)
   const visibleWorkspaces = ready.slice(0, visibleCount)
@@ -89,6 +97,17 @@ function BranchSwitcher({
       setOpen(false)
     } finally {
       setBusyId(null)
+    }
+  }
+
+  const copyBranch = async (workspaceId: string, branch: string) => {
+    try {
+      await navigator.clipboard.writeText(branch)
+      setCopiedId(workspaceId)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopiedId(null), 1000)
+    } catch {
+      // Clipboard access may be unavailable in an insecure browser context.
     }
   }
 
@@ -120,24 +139,49 @@ function BranchSwitcher({
             Workspaces
           </div>
           {visibleWorkspaces.map((ws) => (
-            <button
+            <div
               key={ws.id}
-              type="button"
-              disabled={busyId === ws.id}
-              onClick={() => void switchTo(ws)}
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+              className={`group/workspace flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors ${
                 ws.id === current.id
                   ? 'bg-secondary text-foreground'
                   : 'text-foreground/85 hover:bg-secondary/70'
               }`}
             >
-              <GitBranch className="size-3.5 shrink-0 opacity-70" />
-              <span className="min-w-0 flex-1 truncate mono text-[12.5px]">{ws.branch}</span>
+              <button
+                type="button"
+                disabled={busyId === ws.id}
+                onClick={() => void switchTo(ws)}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-wait"
+              >
+                <GitBranch className="size-3.5 shrink-0 opacity-70" />
+                <span className="min-w-0 flex-1 truncate mono text-[12.5px]">{ws.branch}</span>
+              </button>
               {ws.kind === 'main' ? (
                 <span className="text-[10px] text-muted-foreground">main</span>
               ) : null}
-              {ws.id === current.id ? <Check className="size-3.5 shrink-0" /> : null}
-            </button>
+              <span className="relative size-3.5 shrink-0">
+                {ws.id === current.id ? (
+                  <Check className="absolute inset-0 size-3.5 transition-opacity group-hover/workspace:opacity-0" />
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void copyBranch(ws.id, ws.branch)}
+                  aria-label={copiedId === ws.id ? `Copied branch ${ws.branch}` : `Copy branch ${ws.branch}`}
+                  title={copiedId === ws.id ? 'Copied' : 'Copy branch name'}
+                  className={`absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 group-hover/workspace:opacity-100 ${
+                    copiedId === ws.id
+                      ? 'text-success hover:text-success'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {copiedId === ws.id ? (
+                    <Check className="size-3.5" aria-hidden />
+                  ) : (
+                    <Copy className="size-3.5" aria-hidden />
+                  )}
+                </button>
+              </span>
+            </div>
           ))}
           {hasMore ? (
             <button
