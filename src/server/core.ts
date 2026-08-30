@@ -1524,12 +1524,25 @@ export async function runWorkspaceBaseline(workspaceId: string): Promise<Baselin
 }
 
 /** Most recent non-archived run in a workspace, or null when none exist yet. */
-export function getLatestRunForWorkspace(workspaceId: string): RunRow | null {
+export function getLatestRunForWorkspace(workspaceId: string): { id: string } | null {
   const row = getDb()
     .prepare(
-      'SELECT * FROM runs WHERE workspaceId = ? AND archivedAt IS NULL ORDER BY startedAt DESC LIMIT 1',
+      'SELECT id FROM runs WHERE workspaceId = ? AND archivedAt IS NULL ORDER BY startedAt DESC LIMIT 1',
     )
-    .get(workspaceId) as RunRow | undefined
+    .get(workspaceId) as { id: string } | undefined
+  return row ?? null
+}
+
+/** Most recent non-archived run in any of a project's worktrees. */
+export function getLatestRunForProject(projectId: string): { id: string } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT r.id FROM runs r
+       JOIN workspaces w ON w.id = r.workspaceId
+       WHERE w.projectId = ? AND r.archivedAt IS NULL
+       ORDER BY r.startedAt DESC LIMIT 1`,
+    )
+    .get(projectId) as { id: string } | undefined
   return row ?? null
 }
 
@@ -1655,6 +1668,9 @@ export function countRuns(opts?: {
 type RunListRow = Omit<RunRow, 'stdout' | 'stderr'> & {
   stdoutBytes: number
   stderrBytes: number
+  projectId: string | null
+  projectName: string | null
+  workspaceBranch: string | null
 }
 
 function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
@@ -1664,18 +1680,6 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   const ids = rows.map((row) => row.id)
   const placeholders = ids.map(() => '?').join(',')
   const db = getDb()
-  const workspaceById = new Map(
-    rows
-      .map((row) => row.workspaceId)
-      .filter(Boolean)
-      .map((workspaceId) => [workspaceId, getWorkspace(workspaceId)] as const),
-  )
-  const projectById = new Map(
-    [...workspaceById.values()]
-      .filter((workspace) => Boolean(workspace))
-      .map((workspace) => [workspace!.projectId, getProject(workspace!.projectId)] as const),
-  )
-
   const firstPrompt = new Map<string, string>()
   const promptRows = db
     .prepare(
@@ -1714,8 +1718,6 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   }
 
   return rows.map((row) => {
-    const workspace = workspaceById.get(row.workspaceId)
-    const project = workspace ? projectById.get(workspace.projectId) : undefined
     const summary = runActivitySummary(eventsByRun.get(row.id) ?? [], {
       running: row.status === 'running' || row.status === 'queued',
     })
@@ -1729,9 +1731,9 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
       }),
       activitySummary: summary ?? '',
       unread: (lastAgentAt.get(row.id) ?? 0) > row.lastReadAt,
-      projectId: project?.id ?? '',
-      projectName: project?.name ?? '',
-      workspaceBranch: workspace?.branch ?? row.headBranch ?? row.baseBranch ?? '',
+      projectId: row.projectId ?? '',
+      projectName: row.projectName ?? '',
+      workspaceBranch: row.workspaceBranch ?? row.headBranch ?? row.baseBranch ?? '',
     }
   })
 }
@@ -1748,14 +1750,86 @@ export function listRuns(opts?: {
   const { where, params } = runsListWhere(opts)
   const rows = getDb()
     .prepare(
-      `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
-              length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
-              workspaceId, sessionId, baseBranch, headBranch, baseSnapshot, model, effort,
-              runtimeMode, archivedAt, verdict, repairAttempts, timedOut, lastReadAt
-       FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
+      `WITH selected_runs AS (
+         SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
+                length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
+                workspaceId, sessionId, baseBranch, headBranch, baseSnapshot, model, effort,
+                runtimeMode, archivedAt, verdict, repairAttempts, timedOut, lastReadAt
+         FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?
+       )
+       SELECT r.*, w.projectId, p.name AS projectName, w.branch AS workspaceBranch
+       FROM selected_runs r
+       LEFT JOIN workspaces w ON w.id = r.workspaceId
+       LEFT JOIN projects p ON p.id = w.projectId
+       ORDER BY r.startedAt DESC`,
     )
     .all(...params, limit, offset) as RunListRow[]
   return decorateRunSummaries(rows)
+}
+
+export type ConversationNavigationRun = Pick<
+  RunSummary,
+  | 'id'
+  | 'chatTitle'
+  | 'runtimeId'
+  | 'runtimeLabel'
+  | 'startedAt'
+  | 'workspaceId'
+  | 'workspaceBranch'
+  | 'projectId'
+  | 'projectName'
+  | 'unread'
+>
+
+/** Minimal, unpaginated conversation index for the global header navigator. */
+export function listConversationNavigationRuns(): ConversationNavigationRun[] {
+  const labelById = new Map(listRuntimes().map((runtime) => [runtime.id, runtime.label] as const))
+  const rows = getDb()
+    .prepare(
+      `SELECT r.id, r.runtimeId, r.trigger, r.taskName, r.startedAt, r.workspaceId,
+              r.lastReadAt, w.branch AS workspaceBranch, w.projectId,
+              p.name AS projectName,
+              (SELECT content FROM messages
+               WHERE runId = r.id AND role = 'user'
+               ORDER BY createdAt ASC LIMIT 1) AS firstPrompt,
+              (SELECT MAX(createdAt) FROM messages
+               WHERE runId = r.id AND role = 'assistant') AS lastAgentAt
+       FROM runs r
+       LEFT JOIN workspaces w ON w.id = r.workspaceId
+       LEFT JOIN projects p ON p.id = w.projectId
+       WHERE r.archivedAt IS NULL
+       ORDER BY r.startedAt DESC`,
+    )
+    .all() as Array<{
+    id: string
+    runtimeId: string
+    trigger: string
+    taskName: string | null
+    startedAt: number
+    workspaceId: string
+    lastReadAt: number
+    workspaceBranch: string | null
+    projectId: string | null
+    projectName: string | null
+    firstPrompt: string | null
+    lastAgentAt: number | null
+  }>
+  return rows.map((row) => ({
+    id: row.id,
+    chatTitle: runListTitle({
+      trigger: row.trigger,
+      taskName: row.taskName ?? '',
+      prompt: row.firstPrompt ?? '',
+    }),
+    runtimeId: row.runtimeId,
+    runtimeLabel: resolveRuntimeLabel(labelById.get(row.runtimeId), row.runtimeId),
+    startedAt: row.startedAt,
+    workspaceId: row.workspaceId,
+    workspaceBranch: row.workspaceBranch ?? '',
+    projectId: row.projectId ?? '',
+    projectName: row.projectName ?? '',
+    unread: (row.lastAgentAt ?? 0) > row.lastReadAt,
+  }))
 }
 
 /** Verification results for a run, oldest pass first. */

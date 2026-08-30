@@ -18,6 +18,41 @@ export type ThreadLensGroup = {
   runs: ThreadLensRun[]
 }
 
+export function threadNavigationIndex(runs: ThreadLensRun[]): {
+  unreadWorkspaceIds: Set<string>
+  latestRunIdByWorkspace: Map<string, string>
+  latestRunIdByProject: Map<string, string>
+} {
+  const unreadWorkspaceIds = new Set<string>()
+  const latestRunIdByWorkspace = new Map<string, string>()
+  const latestRunIdByProject = new Map<string, string>()
+  for (const run of [...runs].sort((a, b) => b.startedAt - a.startedAt)) {
+    if (run.unread && run.workspaceId) unreadWorkspaceIds.add(run.workspaceId)
+    if (run.workspaceId && !latestRunIdByWorkspace.has(run.workspaceId)) {
+      latestRunIdByWorkspace.set(run.workspaceId, run.id)
+    }
+    if (run.projectId && !latestRunIdByProject.has(run.projectId)) {
+      latestRunIdByProject.set(run.projectId, run.id)
+    }
+  }
+  return { unreadWorkspaceIds, latestRunIdByWorkspace, latestRunIdByProject }
+}
+
+export function adjacentThreadId(
+  runs: ThreadLensRun[],
+  workspaceId: string,
+  runId: string,
+  direction: -1 | 1,
+): string | null {
+  const threads = runs
+    .filter((run) => run.workspaceId === workspaceId)
+    .sort((a, b) => b.startedAt - a.startedAt)
+  if (threads.length < 2) return null
+  const index = threads.findIndex((run) => run.id === runId)
+  if (index < 0) return null
+  return threads[(index + direction + threads.length) % threads.length]?.id ?? null
+}
+
 /**
  * Conversations for the header picker. An empty query is this worktree only;
  * a search reaches sibling worktrees and other projects.

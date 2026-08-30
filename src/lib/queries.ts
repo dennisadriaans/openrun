@@ -319,6 +319,15 @@ export function useRuns(
   })
 }
 
+export function useConversationNavigationRuns() {
+  const streamHealthy = useActivityStreamHealthy()
+  return useQuery({
+    queryKey: ['runs', 'conversation-navigation'],
+    queryFn: () => fns.listConversationNavigationRuns(),
+    refetchInterval: streamHealthy ? false : 3000,
+  })
+}
+
 export function useRunCount(taskId?: string, includeArchived = false) {
   return useQuery({
     queryKey: ['runs', 'count', taskId ?? 'all', includeArchived ? 'archived' : 'active'],
@@ -1087,6 +1096,10 @@ export function useStartChat() {
 
 export async function fetchLatestRunForWorkspace(workspaceId: string) {
   return fns.getLatestRunForWorkspace({ data: { workspaceId } })
+}
+
+export async function fetchLatestRunForProject(projectId: string) {
+  return fns.getLatestRunForProject({ data: { projectId } })
 }
 
 // --- Integrations ----------------------------------------------------------

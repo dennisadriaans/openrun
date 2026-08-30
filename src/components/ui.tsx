@@ -27,6 +27,8 @@ export function Tooltip({
 }) {
   const wrapRef = useRef<HTMLSpanElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number; below: boolean } | null>(null)
 
@@ -46,6 +48,7 @@ export function Tooltip({
     if (disabled || !content) return
     clear()
     timer.current = setTimeout(() => {
+      if (disabledRef.current || !content) return
       const el = wrapRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
@@ -65,7 +68,9 @@ export function Tooltip({
   }
 
   useEffect(() => {
-    if (disabled) setOpen(false)
+    if (!disabled) return
+    clear()
+    setOpen(false)
   }, [disabled])
   useEffect(() => () => clear(), [])
 

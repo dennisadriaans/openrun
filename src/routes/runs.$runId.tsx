@@ -467,16 +467,16 @@ function RunDetail() {
             */}
             <header className="flex h-[var(--workspace-topbar-height,44px)] shrink-0 items-center gap-1.5 border-b border-border px-3">
               {!sidebarOpen ? <SidebarToggle /> : null}
-              <button
-                type="button"
-                onClick={() => window.history.back()}
+              <Link
+                to="/runs"
                 className="flex shrink-0 items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground"
                 title="Back to run history"
               >
                 <ArrowLeft className="h-4 w-4" />
-              </button>
+              </Link>
 
               <WorkspaceBreadcrumb
+                projectId={project?.id}
                 projectName={project?.name}
                 branch={workspace?.branch}
                 isMainCheckout={workspace?.kind === 'main'}

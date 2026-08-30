@@ -2,11 +2,10 @@ import { useNavigate } from '@tanstack/react-router'
 import { ChevronDown, GitBranch, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { relativeTime } from '../../lib/format'
-import { useRuns } from '../../lib/queries'
-import { groupThreadLensRuns } from '../../lib/threadLens'
+import { useConversationNavigationRuns } from '../../lib/queries'
+import { adjacentThreadId, groupThreadLensRuns } from '../../lib/threadLens'
 import { truncateNavTitle } from '../../lib/truncateLabel.ts'
 import { ProviderIcon } from '../ProviderIcons'
-import { Tooltip } from '../ui'
 
 /** Change this default to `plain` to remove the wallet-card affordance only. */
 export const DEFAULT_THREAD_SELECTOR_APPEARANCE: 'stack' | 'plain' = 'stack'
@@ -38,7 +37,7 @@ export function ThreadStack({
   projectId: string
   appearance?: 'stack' | 'plain'
 }) {
-  const { data: runs = [] } = useRuns(undefined, false, { limit: 200 })
+  const { data: runs = [] } = useConversationNavigationRuns()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
@@ -74,16 +73,14 @@ export function ThreadStack({
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return
       const direction = event.key === '[' ? -1 : event.key === ']' ? 1 : 0
       if (!direction || currentThreads.length < 2) return
-      const index = currentThreads.findIndex((run) => run.id === runId)
-      const next =
-        currentThreads[(index + direction + currentThreads.length) % currentThreads.length]
-      if (!next) return
+      const nextId = adjacentThreadId(runs, workspaceId, runId, direction)
+      if (!nextId) return
       event.preventDefault()
-      void navigate({ to: '/runs/$runId', params: { runId: next.id } })
+      void navigate({ to: '/runs/$runId', params: { runId: nextId } })
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [currentThreads, navigate, runId])
+  }, [currentThreads.length, navigate, runId, runs, workspaceId])
 
   const select = (id: string, newWindow = false) => {
     setOpen(false)
@@ -106,32 +103,28 @@ export function ThreadStack({
             ) : null}
           </>
         ) : null}
-        <Tooltip content={title} disabled={open} placement="bottom">
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-            className={`relative flex w-full min-w-0 max-w-44 items-center gap-1 overflow-hidden rounded-md px-2 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] sm:max-w-56 ${
-              open ? 'bg-secondary' : 'bg-background'
-            }`}
-          >
-            <ProviderIcon
-              kind={runtimeKind(runtimeId, runtimeLabel)}
-              className="size-3.5 shrink-0"
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={title}
+          onClick={() => setOpen((value) => !value)}
+          className={`relative flex w-full min-w-0 max-w-44 items-center gap-1 overflow-hidden rounded-md px-2 py-1 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] sm:max-w-56 ${
+            open ? 'bg-secondary' : 'bg-background'
+          }`}
+        >
+          <ProviderIcon kind={runtimeKind(runtimeId, runtimeLabel)} className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{truncateNavTitle(title)}</span>
+          {hasUnreadCurrentThread ? (
+            <span
+              role="img"
+              aria-label="New activity in another conversation"
+              title="New activity in another conversation"
+              className="size-1.5 shrink-0 rounded-full bg-accent"
             />
-            <span className="min-w-0 flex-1 truncate">{truncateNavTitle(title)}</span>
-            {hasUnreadCurrentThread ? (
-              <span
-                role="img"
-                aria-label="New activity in another conversation"
-                title="New activity in another conversation"
-                className="size-1.5 shrink-0 rounded-full bg-accent"
-              />
-            ) : null}
-            <ChevronDown className="size-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
-          </button>
-        </Tooltip>
+          ) : null}
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+        </button>
       </div>
 
       {open ? (

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { groupThreadLensRuns, type ThreadLensRun } from './threadLens.ts'
+import {
+  adjacentThreadId,
+  groupThreadLensRuns,
+  threadNavigationIndex,
+  type ThreadLensRun,
+} from './threadLens.ts'
 
 const run = (
   id: string,
@@ -67,5 +72,34 @@ describe('groupThreadLensRuns', () => {
       groups.flatMap((group) => group.runs.map((item) => item.id)),
       ['two'],
     )
+  })
+
+  it('does not impose the old 200-conversation navigation boundary', () => {
+    const runs = Array.from({ length: 250 }, (_, index) =>
+      run(`run-${index}`, 'ws-a', 'project-a', index),
+    )
+    const groups = groupThreadLensRuns(runs, { workspaceId: 'ws-a', projectId: 'project-a' })
+    assert.equal(groups[0]?.runs.length, 250)
+    assert.equal(groups[0]?.runs[0]?.id, 'run-249')
+  })
+})
+
+describe('thread navigation', () => {
+  it('indexes the latest run and unread state independent of input order', () => {
+    const older = run('older', 'ws-a', 'project-a', 1)
+    older.unread = true
+    const latest = run('latest', 'ws-a', 'project-a', 3)
+    const other = run('other', 'ws-b', 'project-a', 2)
+    const index = threadNavigationIndex([older, latest, other])
+    assert.equal(index.latestRunIdByWorkspace.get('ws-a'), 'latest')
+    assert.equal(index.latestRunIdByProject.get('project-a'), 'latest')
+    assert.equal(index.unreadWorkspaceIds.has('ws-a'), true)
+  })
+
+  it('cycles within the current worktree and refuses a missing current run', () => {
+    const runs = [run('latest', 'ws-a', 'project-a', 3), run('older', 'ws-a', 'project-a', 1)]
+    assert.equal(adjacentThreadId(runs, 'ws-a', 'latest', 1), 'older')
+    assert.equal(adjacentThreadId(runs, 'ws-a', 'latest', -1), 'older')
+    assert.equal(adjacentThreadId(runs, 'ws-a', 'missing', 1), null)
   })
 })
