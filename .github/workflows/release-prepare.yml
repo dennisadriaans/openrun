@@ -1,0 +1,175 @@
+name: Release · prepare
+
+on:
+  # Retry hourly on Monday so a delayed/dropped 09:00 run does not skip the
+  # week. The cadence gate permits only the first successful release that day.
+  schedule:
+    - cron: '0 * * * 1'
+      timezone: Europe/Amsterdam
+  workflow_dispatch:
+    inputs:
+      ignore_cadence:
+        description: Prepare now, ignoring the configured cadence
+        type: boolean
+        default: false
+      allow_major:
+        description: Allow an automatic major release at or above 1.0
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure release author
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+      # Repair a release PR that merged after an earlier prepare job timed out,
+      # or a tag whose GitHub Release creation failed partway through.
+      - name: Reconcile pending release
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm release:publish
+
+      - name: Prepare
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ inputs.ignore_cadence }}" != "true" ]]; then
+            args+=(--respect-cadence)
+          fi
+          if [[ "${{ inputs.allow_major }}" == "true" ]]; then
+            args+=(--allow-major)
+          fi
+          pnpm release:prepare -- "${args[@]}"
+
+      - name: Push release branch
+        if: steps.release.outputs.prepared == 'true'
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+        run: git push --force-with-lease origin "$BRANCH"
+
+      - name: Open or resume release PR
+        if: steps.release.outputs.prepared != 'false'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.release.outputs.branch }}
+          TAG: ${{ steps.release.outputs.tag }}
+          REASON: ${{ steps.release.outputs.reason }}
+        run: |
+          url=$(gh pr list --head "$BRANCH" --state all --limit 1 --json url --jq '.[0].url // ""')
+          if [[ -n "$url" ]]; then
+            state=$(gh pr view "$url" --json state,mergedAt --jq 'if .mergedAt then "MERGED" else .state end')
+            if [[ "$state" == "CLOSED" ]]; then
+              gh pr reopen "$url"
+            fi
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "merged=$([[ "$state" == "MERGED" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo '## Summary'
+            echo ''
+            echo "- Prepare **$TAG** for release."
+            echo "- $REASON"
+            echo ''
+            echo '## Test plan'
+            echo ''
+            echo '- [ ] Confirm the version and generated changelog match the changes since the previous tag.'
+            echo '- [ ] Merge this PR and confirm the matching tag and GitHub Release are created.'
+          } > /tmp/pr-body.md
+          url=$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(release): $TAG" \
+            --body-file /tmp/pr-body.md)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "merged=false" >> "$GITHUB_OUTPUT"
+
+      # A PR opened by GITHUB_TOKEN does not trigger pull_request workflows.
+      # Run the same CI workflow explicitly on the release branch instead.
+      - name: Run CI for release branch
+        if: steps.release.outputs.prepared != 'false' && steps.pr.outputs.merged != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.release.outputs.branch }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Enable auto-merge
+        if: steps.release.outputs.prepared != 'false' && steps.pr.outputs.merged != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: gh pr merge "$PR_URL" --auto --squash
+
+      # A merge performed with GITHUB_TOKEN does not emit another workflow run,
+      # so the push trigger in release-publish.yml cannot observe this merge.
+      - name: Wait for release PR to merge
+        if: steps.release.outputs.prepared != 'false'
+        id: merge
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          while true; do
+            merged_at=$(gh pr view "$PR_URL" --json mergedAt --jq '.mergedAt // ""')
+            state=$(gh pr view "$PR_URL" --json state --jq .state)
+            if [[ -n "$merged_at" ]]; then
+              sha=$(gh pr view "$PR_URL" --json mergeCommit --jq '.mergeCommit.oid')
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            if [[ "$state" == "CLOSED" ]]; then
+              echo "Release PR closed without merging."
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Publish and verify merged release
+        if: steps.release.outputs.prepared != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ steps.merge.outputs.sha }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          git fetch origin "$MERGE_SHA"
+          git checkout --detach "$MERGE_SHA"
+          pnpm release:publish -- --expect="$TAG"
+
+      - name: Remove release branch
+        if: steps.release.outputs.prepared != 'false'
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+        run: git push origin --delete "$BRANCH" || true

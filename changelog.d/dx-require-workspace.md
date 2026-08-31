@@ -1,1 +1,0 @@
-You can no longer save, enable, or run an automation without a workspace — Create requires a repository, and legacy empty-workspace rows are flagged on the Automations list instead of silently spawning inside the Open Run app tree.

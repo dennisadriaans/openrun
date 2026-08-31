@@ -1,17 +1,18 @@
 /**
  * SQLite persistence layer.
  *
- * Everything is stored in a single local file (./data/openrun.db) so the whole
- * proof-of-concept is self-contained and requires no external services. This
- * module is server-only — it is never imported into client bundles (route
- * components reach it exclusively through server functions).
+ * App state (runs, automations, projects) lives in `~/.openrun/openrun.db`,
+ * next to the wrapping key and managed clones — one machine, one dataset,
+ * regardless of which checkout you boot from. `OPENRUN_HOME` relocates the
+ * whole directory. This module is server-only — it is never imported into
+ * client bundles (route components reach it exclusively through server
+ * functions).
  */
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, renameSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { dirname, resolve } from 'node:path'
 import { openrunEnv } from '../lib/openrunEnv.ts'
 import { RUNTIME_PRESETS } from '../lib/runtimePresets.ts'
 import { ensureProcessPathAugmented } from './userPath.ts'
@@ -418,11 +419,12 @@ export type WorkspaceRow = {
 // ---------------------------------------------------------------------------
 
 /**
- * Root directory for everything this app manages on disk (managed clones,
- * worktrees). Worktrees for a project always live under here rather than
- * inside the project's own repo directory — that keeps them out of the way
- * of the user's own editor/working copy and means removing a workspace never
- * risks touching files the user didn't ask us to manage.
+ * Root directory for everything this app manages on disk (the database,
+ * wrapping key, managed clones, worktrees). Worktrees for a project always
+ * live under here rather than inside the project's own repo directory — that
+ * keeps them out of the way of the user's own editor/working copy and means
+ * removing a workspace never risks touching files the user didn't ask us to
+ * manage.
  */
 export function openrunHome(): string {
   const fromEnv = openrunEnv('HOME')
@@ -443,6 +445,10 @@ export function openrunHome(): string {
   return next
 }
 
+export function openrunDbPath(): string {
+  return path.join(openrunHome(), 'openrun.db')
+}
+
 /** Filesystem/URL-safe slug for project and branch directory names. */
 export function slugify(s: string): string {
   return s
@@ -454,14 +460,14 @@ export function slugify(s: string): string {
 
 const DB_SIDECARS = ['-wal', '-shm'] as const
 
-/**
- * True when `file` is a SQLite database that no one ever finished setting up.
- *
- * A healthy boot seeds `runtimes` from `RUNTIME_PRESETS`, so an openable file
- * with no runtimes and no projects is the residue of a process that died
- * partway through `getDb()` — not something worth keeping.
- */
-function isAbandonedDatabase(file: string): boolean {
+type DatabaseCounts = {
+  runtimes: number
+  projects: number
+  runs: number
+  tasks: number
+}
+
+function databaseCounts(file: string): DatabaseCounts | null {
   let probe: Database.Database | null = null
   try {
     probe = new Database(file, { readonly: true, fileMustExist: true })
@@ -472,10 +478,14 @@ function isAbandonedDatabase(file: string): boolean {
       if (row.n === 0) return 0
       return (probe!.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n
     }
-    return counted('runtimes') === 0 && counted('projects') === 0
+    return {
+      runtimes: counted('runtimes'),
+      projects: counted('projects'),
+      runs: counted('runs'),
+      tasks: counted('tasks'),
+    }
   } catch {
-    // Unreadable or not SQLite at all — equally not worth keeping.
-    return true
+    return null
   } finally {
     try {
       probe?.close()
@@ -483,6 +493,26 @@ function isAbandonedDatabase(file: string): boolean {
       // Nothing to do; we only ever read.
     }
   }
+}
+
+/**
+ * True when `file` is a SQLite database that no one ever finished setting up.
+ *
+ * A healthy boot seeds `runtimes` from `RUNTIME_PRESETS`, so an openable file
+ * with no runtimes and no projects is the residue of a process that died
+ * partway through `getDb()` — not something worth keeping.
+ */
+function isAbandonedDatabase(file: string): boolean {
+  const counts = databaseCounts(file)
+  if (!counts) return true
+  return counts.runtimes === 0 && counts.projects === 0
+}
+
+/** Seeded presets only — never used for a project, automation, or run. */
+function isUnusedInstall(file: string): boolean {
+  const counts = databaseCounts(file)
+  if (!counts) return true
+  return counts.projects === 0 && counts.runs === 0 && counts.tasks === 0
 }
 
 function moveWithSidecars(from: string, to: string): void {
@@ -493,20 +523,22 @@ function moveWithSidecars(from: string, to: string): void {
 }
 
 /**
- * Adopt `data/agentops.db` under its new name, once.
+ * Move `legacy` onto `next`, once.
  *
- * The rename shipped with a read-only fallback ("use legacy if openrun.db is
- * absent"), which is a one-way trap: anything that creates an empty
- * `openrun.db` — a build served from a stale cwd, a boot killed mid-migration —
- * permanently hides a database full of real projects and runs, and the app
- * comes up looking factory-reset. So move the file instead of reading past it,
- * and refuse to let an abandoned stub shadow a legacy DB that still has data.
+ * A read-only fallback ("use the old file if the new one is absent") is a
+ * one-way trap: anything that creates an empty `openrun.db` — a build served
+ * from a stale cwd, a boot killed mid-migration — permanently hides a
+ * database full of real projects and runs, and the app comes up looking
+ * factory-reset. So move the file instead of reading past it, and refuse to
+ * let an abandoned stub shadow a legacy DB that still has data.
  */
 function adoptLegacyDatabase(next: string, legacy: string): string {
   if (!existsSync(legacy)) return next
 
   if (existsSync(next)) {
-    if (!isAbandonedDatabase(next)) return next
+    const nextYields =
+      isAbandonedDatabase(next) || (isUnusedInstall(next) && !isUnusedInstall(legacy))
+    if (!nextYields) return next
     try {
       moveWithSidecars(next, `${next}.abandoned-${Date.now()}`)
     } catch {
@@ -524,15 +556,31 @@ function adoptLegacyDatabase(next: string, legacy: string): string {
   return next
 }
 
+/**
+ * Canonical path, adopting a leftover checkout database if we have never
+ * written one under `OPENRUN_HOME`.
+ *
+ * Older builds stored `data/openrun.db` (and before that `data/agentops.db`)
+ * next to the process cwd, so each git worktree looked empty. First boot
+ * after the move picks that file up rather than starting from scratch.
+ */
+function resolveDatabasePath(): string {
+  const home = openrunHome()
+  if (!existsSync(home)) mkdirSync(home, { recursive: true, mode: 0o700 })
+
+  const next = openrunDbPath()
+  const cwdNext = path.resolve(process.cwd(), 'data', 'openrun.db')
+  const cwdLegacy = path.resolve(process.cwd(), 'data', 'agentops.db')
+  const fromCwd = existsSync(cwdNext) ? cwdNext : cwdLegacy
+  return adoptLegacyDatabase(next, fromCwd)
+}
+
 let _db: Database.Database | null = null
 
 export function getDb(): Database.Database {
   if (_db) return _db
 
-  const next = resolve(process.cwd(), 'data', 'openrun.db')
-  const legacy = resolve(process.cwd(), 'data', 'agentops.db')
-  if (!existsSync(dirname(next))) mkdirSync(dirname(next), { recursive: true })
-  const dbPath = adoptLegacyDatabase(next, legacy)
+  const dbPath = resolveDatabasePath()
 
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
