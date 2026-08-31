@@ -1256,7 +1256,7 @@ export function Chat({
           className="chat-composer-dock pointer-events-none absolute inset-x-0 bottom-0 z-20"
         >
           <div className="chat-composer-horizontal-inset pointer-events-auto relative">
-            <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
+            <div className="mx-auto flex w-full min-w-0 max-w-[51rem] flex-col items-stretch">
               {pullRequest ? (
                 <div className="relative z-[6] mx-auto -mb-[2px] w-[92%]">
                   <PullRequestChip pr={pullRequest} />

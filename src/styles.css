@@ -313,7 +313,7 @@ body {
   position: absolute;
   inset-inline: 0;
   bottom: 100%;
-  height: 3rem;
+  height: 6rem;
   pointer-events: none;
   content: '';
   background: linear-gradient(
