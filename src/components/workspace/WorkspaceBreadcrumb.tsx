@@ -27,7 +27,15 @@ function Separator() {
   return <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
 }
 
-function Segment({ children, className = '', title }: { children: ReactNode; className?: string; title?: string }) {
+function Segment({
+  children,
+  className = '',
+  title,
+}: {
+  children: ReactNode
+  className?: string
+  title?: string
+}) {
   return (
     <span className={`min-w-0 truncate ${className}`} title={title}>
       {children}
@@ -130,7 +138,8 @@ export function WorkspaceBreadcrumb({
   const navigate = useNavigate()
   const { data: projects = [] } = useProjects()
   const { data: runs = [] } = useConversationNavigationRuns()
-  const { unreadWorkspaceIds, latestRunIdByWorkspace, latestRunIdByProject } = threadNavigationIndex(runs)
+  const { unreadWorkspaceIds, latestRunIdByWorkspace, latestRunIdByProject } =
+    threadNavigationIndex(runs)
   const showSwitcher = workspaces !== undefined
   const branchLabel = workspace?.branch ?? branch
   const currentProjectId = projectId ?? workspace?.projectId ?? ''
@@ -169,7 +178,10 @@ export function WorkspaceBreadcrumb({
         </>
       ) : projectName ? (
         <>
-          <span className="min-w-0 max-w-[30%] shrink truncate text-muted-foreground" title={projectName}>
+          <span
+            className="min-w-0 max-w-[30%] shrink truncate text-muted-foreground"
+            title={projectName}
+          >
             {projectName}
           </span>
           {branchLabel || showSwitcher || runTitle || trailing ? <Separator /> : null}
@@ -200,7 +212,9 @@ export function WorkspaceBreadcrumb({
           >
             <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
             <span className="mono min-w-0 truncate">{truncateBranchLabel(branchLabel)}</span>
-            {isMainCheckout ? <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span> : null}
+            {isMainCheckout ? (
+              <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
+            ) : null}
           </Segment>
           {runTitle ? <Separator /> : null}
         </>
