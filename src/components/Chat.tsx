@@ -514,7 +514,10 @@ const UserMessage = memo(function UserMessage({
             ))}
           </div>
         ) : null}
-        <div className={`chat-user__text ${long && !expanded ? 'line-clamp-6' : ''}`}>{text}</div>
+        <ChatMarkdown
+          text={text}
+          className={`chat-user__text ${long && !expanded ? 'line-clamp-6' : ''}`}
+        />
         {long ? (
           <button
             type="button"
