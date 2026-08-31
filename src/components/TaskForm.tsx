@@ -1471,11 +1471,8 @@ export function TaskForm({
       {showNewWorkspace && selectedProject ? (
         <NewWorkspaceModal
           projectName={selectedProject.name}
-          defaultBaseBranch={
-            branchChoices.find((choice) => choice.id === v.workspaceId)?.branch ||
-            selectedProject.defaultBranch ||
-            ''
-          }
+          defaultBaseBranch={selectedProject.defaultBranch || ''}
+          baseBranches={gitBranches ?? []}
           pending={createWorkspace.isPending}
           onClose={() => setShowNewWorkspace(false)}
           onCreate={createNewWorkspace}

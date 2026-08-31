@@ -1027,6 +1027,11 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     assertTaskWorkspaceIdle(tid)
   }
 
+  const taskWorkspace = getWorkspace(workspaceId)
+  if (taskWorkspace?.kind === 'main') {
+    throw new Error('Pick an isolated worktree. Automations cannot run in the primary checkout.')
+  }
+
   // cwd stays the source of truth for git operations (executor, diff panel,
   // etc.) — resolve once here so cwd stays in sync with the workspace path.
   const cwd = resolveWorkspacePath(workspaceId)
