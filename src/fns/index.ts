@@ -241,6 +241,10 @@ export const listNativeSessions = createServerFn({ method: 'GET' })
 
 // --- Runs ------------------------------------------------------------------
 
+export const listRunningTaskIds = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listRunningTaskIds(),
+)
+
 export const listRuns = createServerFn({ method: 'GET' })
   .validator(
     (d: { taskId?: string; limit?: number; offset?: number; includeArchived?: boolean }) => d,

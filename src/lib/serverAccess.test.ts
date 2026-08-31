@@ -9,6 +9,7 @@ import {
   insecureHostWarning,
   isDocumentRequest,
   isLoopbackHost,
+  mergeAllowedHosts,
   parseAllowedHosts,
   serverBindRefusal,
   tokenRequiredForRequests,
@@ -205,6 +206,20 @@ test('allowed-host lists are parsed leniently', () => {
   assert.deepEqual(parseAllowedHosts('a.test, b.test:8080 ,,'), ['a.test', 'b.test'])
   assert.deepEqual(parseAllowedHosts(''), [])
   assert.deepEqual(parseAllowedHosts(undefined), [])
+})
+
+test('mergeAllowedHosts unions LAN IPs onto the configured list', () => {
+  assert.deepEqual(mergeAllowedHosts(['tunnel.example'], ['192.168.1.24', '10.0.0.5:3000']), [
+    'tunnel.example',
+    '192.168.1.24',
+    '10.0.0.5',
+  ])
+  const config = {
+    ...loopbackBind,
+    allowedHosts: mergeAllowedHosts([], ['192.168.1.24']),
+  }
+  assert.equal(hostHeaderRefusal(config, '192.168.1.24:3000'), null)
+  assert.ok(hostHeaderRefusal(config, 'evil.example'))
 })
 
 test('a published bind is not host-checked — it has names we cannot enumerate', () => {

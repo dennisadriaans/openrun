@@ -8,7 +8,9 @@ import {
   captureBaseSnapshot,
   changedFiles,
   changedFilesAsync,
+  cloneRepo,
   commit,
+  createBranch,
   createPullRequest,
   discard,
   discardHunk,
@@ -248,6 +250,18 @@ function parseHunkCount(diff: string): number {
   return diff.split('\n').filter((line) => line.startsWith('@@ ')).length
 }
 
+describe('git argv leading-dash refusal', () => {
+  it('createBranch refuses a name that starts with -', () => {
+    const cwd = makeRepo()
+    assert.throws(() => createBranch(cwd, '--help'), /Invalid branch name/)
+  })
+
+  it('cloneRepo refuses a URL that starts with -', () => {
+    const dest = join(makeRepo(), 'clone-dest')
+    assert.throws(() => cloneRepo({ url: '--upload-pack=true', dest }), /Invalid clone URL/)
+  })
+})
+
 describe('push / createPullRequest origin gate', () => {
   it('push refuses a repo with no origin remote', () => {
     const cwd = makeRepo()
@@ -362,5 +376,24 @@ describe('pullRequestForBranchAsync', () => {
       })
       assert.equal(malformed.kind, 'error', stdout)
     }
+  })
+})
+
+describe('fileDiff path confinement', () => {
+  it('diffs a file inside the workspace', () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'tracked.txt'), 'changed\n')
+    const diff = fileDiff(cwd, 'tracked.txt')
+    assert.match(diff, /changed/)
+  })
+
+  it('refuses a path that escapes the workspace', () => {
+    const cwd = makeRepo()
+    assert.throws(() => fileDiff(cwd, '../outside.ts'), /escapes/)
+  })
+
+  it('refuses an absolute path outside the workspace', () => {
+    const cwd = makeRepo()
+    assert.throws(() => fileDiff(cwd, '/etc/passwd'), /escapes/)
   })
 })

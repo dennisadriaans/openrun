@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fast PR Review"
+  short_description: "Write brief, actionable pull request comments"
+  default_prompt: "Review this pull request and return only brief, actionable comments."

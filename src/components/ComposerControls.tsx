@@ -3,7 +3,8 @@
  *
  * Layout adapted from the t3code chat composer footer (MIT, T3 Tools Inc.).
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useClickOutside } from '../hooks/useClickOutside'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -57,31 +58,6 @@ export type RuntimeOption = {
   models?: ModelOption[]
 }
 
-function useClickOutside(
-  open: boolean,
-  onClose: () => void,
-  triggerRef: RefObject<HTMLElement | null>,
-  menuRef: RefObject<HTMLElement | null>,
-) {
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
-      onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onPointer)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open, onClose, triggerRef, menuRef])
-}
-
 export function FooterMenu({
   label,
   title,
@@ -122,7 +98,7 @@ export function FooterMenu({
     maxHeight: number
   } | null>(null)
 
-  useClickOutside(open, () => setOpen(false), triggerRef, menuRef)
+  useClickOutside(open, () => setOpen(false), [triggerRef, menuRef])
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) {

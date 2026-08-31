@@ -1,4 +1,4 @@
-import { Check, ChevronDown, FolderGit2, GitBranch, Plus } from 'lucide-react'
+import { Check, ChevronDown, Copy, FolderGit2, GitBranch, Plus } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { truncateBranchLabel, truncateNavTitle } from '../../lib/truncateLabel.ts'
 
@@ -77,6 +77,7 @@ function NavigationItem({
   active,
   disabled,
   unread,
+  reserveTrailing,
   onSelect,
 }: {
   label: string
@@ -85,6 +86,7 @@ function NavigationItem({
   active?: boolean
   disabled?: boolean
   unread?: boolean
+  reserveTrailing?: boolean
   onSelect: () => void
 }) {
   return (
@@ -94,7 +96,7 @@ function NavigationItem({
       disabled={disabled}
       title={hint ?? label}
       onClick={onSelect}
-      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${reserveTrailing ? 'pr-8' : ''} ${
         active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
       }`}
     >
@@ -201,8 +203,28 @@ export function NavigationWorkspacePicker({
   onRequestNewBranch?: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selected = workspaces.find((workspace) => workspace.id === workspaceId)
   const visible = expanded ? workspaces : workspaces.slice(0, PAGE_SIZE)
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    },
+    [],
+  )
+
+  const copyBranch = async (workspace: NavigationWorkspace) => {
+    try {
+      await navigator.clipboard.writeText(workspace.branch)
+      setCopiedId(workspace.id)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopiedId(null), 1000)
+    } catch {
+      // Clipboard access may be unavailable in an insecure browser context.
+    }
+  }
   return (
     <NavigationMenu
       label={truncateBranchLabel(selected?.branch ?? 'Select branch')}
@@ -231,19 +253,42 @@ export function NavigationWorkspacePicker({
             Workspaces
           </div>
           {visible.map((workspace) => (
-            <NavigationItem
-              key={workspace.id}
-              label={workspace.branch}
-              hint={workspace.kind === 'main' ? 'main' : undefined}
-              icon={<GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />}
-              active={workspace.id === workspaceId}
-              disabled={busyId === workspace.id}
-              unread={unreadIds.has(workspace.id)}
-              onSelect={() => {
-                onChange(workspace.id)
-                close()
-              }}
-            />
+            <div key={workspace.id} className="group/workspace relative">
+              <NavigationItem
+                label={workspace.branch}
+                hint={workspace.kind === 'main' ? 'main' : undefined}
+                icon={<GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />}
+                active={workspace.id === workspaceId}
+                disabled={busyId === workspace.id}
+                unread={unreadIds.has(workspace.id)}
+                reserveTrailing
+                onSelect={() => {
+                  onChange(workspace.id)
+                  close()
+                }}
+              />
+              <button
+                type="button"
+                aria-label={
+                  copiedId === workspace.id
+                    ? `Copied branch ${workspace.branch}`
+                    : `Copy branch ${workspace.branch}`
+                }
+                title={copiedId === workspace.id ? 'Copied' : 'Copy branch name'}
+                onClick={() => void copyBranch(workspace)}
+                className={`absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 group-hover/workspace:opacity-100 ${
+                  copiedId === workspace.id
+                    ? 'text-success hover:text-success'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {copiedId === workspace.id ? (
+                  <Check className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <Copy className="size-3.5" aria-hidden="true" />
+                )}
+              </button>
+            </div>
           ))}
           {workspaces.length > PAGE_SIZE ? (
             <button

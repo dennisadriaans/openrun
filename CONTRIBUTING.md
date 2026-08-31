@@ -66,6 +66,8 @@ back, so they are worth knowing up front:
 
 - **Style is Biome's problem, not yours.** `biome.json` is the whole answer:
   single quotes, no semicolons, 100 columns. Run `pnpm lint:fix` and move on.
+  The pre-push hook only checks; it never rewrites the working tree while a push
+  is in progress.
   Two rule groups are switched off deliberately rather than silently: React's
   `useExhaustiveDependencies` / `noArrayIndexKey`, and most of the `a11y` group.
   Each needs per-site judgement, and turning them on across the existing UI is a

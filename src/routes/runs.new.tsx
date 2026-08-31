@@ -9,7 +9,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Composer } from '../components/Chat'
+import { Composer } from '../components/chat/Composer'
 import { RuntimePicker } from '../components/ComposerControls'
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
@@ -38,6 +38,7 @@ import {
   useNativeSessions,
   useCreateWorkspace,
   useOpenNativeChat,
+  useProjectBranches,
   useProjects,
   useRuntimes,
   usePlugins,
@@ -109,6 +110,7 @@ function NewRun() {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
+  const { data: gitBranches } = useProjectBranches(projectId || undefined)
   const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
   const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
@@ -125,7 +127,9 @@ function NewRun() {
   useEffect(() => {
     if (workspaces.some((w) => w.id === workspaceId)) return
     const preferred =
-      workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId) ?? workspaces[0]
+      workspaces.find(
+        (w) => w.kind === 'worktree' && isWorkspaceReady(w.status) && !w.activeRunId,
+      ) ?? workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId)
     setWorkspaceId(preferred?.id ?? '')
   }, [workspaces, workspaceId])
 
@@ -426,7 +430,8 @@ function NewRun() {
       {newWorkspaceOpen && project ? (
         <NewWorkspaceModal
           projectName={project.name}
-          defaultBaseBranch={workspace?.branch || project.defaultBranch || ''}
+          defaultBaseBranch={project.defaultBranch || ''}
+          baseBranches={gitBranches ?? []}
           pending={createWorkspace.isPending}
           onClose={() => setNewWorkspaceOpen(false)}
           onCreate={async (input) => {
