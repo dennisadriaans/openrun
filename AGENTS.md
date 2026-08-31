@@ -31,6 +31,10 @@ pnpm preview         # vite preview
 pnpm typecheck       # tsc --noEmit
 pnpm test            # unit tests
 pnpm generate-routes # tsr generate  (see the routeTree gotcha — prefer `pnpm build`)
+pnpm ship "feat(x): y" # branch off main, commit, push, open the PR
+pnpm release:plan    # read-only: what would the next release be?
+pnpm release:prepare # write the version + changelog onto release/vX.Y.Z (--dry-run to rehearse)
+pnpm release:publish # tag HEAD and create the GitHub Release (CI runs this)
 ```
 
 `pnpm test` is `node --experimental-strip-types --test "src/**/*.test.ts"` —
@@ -66,8 +70,9 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 **`EventSource` is not the judge of liveness — the heartbeat is.** A socket that dies while
 the machine sleeps stays `readyState === OPEN` and never fires `error`, which would pin
 `streamHealthy` to `true` and switch every fallback poll off for good. `lib/liveStream.ts`
-owns that: both SSE routes ping on `DEFAULT_PING_MS`, and a stream silent past
-`STALE_AFTER_MS` is closed and redialled. Change one of those constants and change the other.
+owns both constants: `SERVER_PING_MS` is the heartbeat both SSE factories import (they
+re-export it rather than declaring their own), and a stream silent past `STALE_AFTER_MS` —
+derived from it — is closed and redialled. Do not reintroduce a second copy of the period.
 Neither hook may open an `EventSource` of its own.
 
 ## Hard rules
@@ -137,6 +142,19 @@ Neither hook may open an `EventSource` of its own.
   everything else imports relatively. Follow the local file.
 - `tsconfig` is strict plus `noUnusedLocals` / `noUnusedParameters` /
   `noFallthroughCasesInSwitch` — an unused import fails `pnpm typecheck`.
+- **The PR title is release metadata, not a label.** `main` takes squashed PRs only and
+  the squash uses the title verbatim, so the title is the commit *and* the input the release
+  pipeline reads to compute the next version. `feat` ⇒ minor, `fix`/`perf`/`revert` ⇒ patch,
+  `!` ⇒ breaking, everything else ⇒ no release. Pick the type by what the change does for a
+  user, not by how the diff looks — a bug fix implemented as a refactor is still `fix`.
+  `.github/workflows/pr-title.yml` is a required check, and it runs the same
+  `validateCommitTitle` from `lib/release/conventional.ts` that `pnpm ship` runs locally, so
+  the two cannot drift.
+- **No model ever chooses a version.** Given a base version and a commit range the next
+  version is a pure function in `lib/release/`, with colocated tests. A breaking change below
+  1.0 is a *minor* — reaching 1.0 is a product decision, not a side effect of a `feat!`
+  merging — and past 1.0 an automatic major still needs an explicit opt-in. A range of only
+  docs and chores produces **no release**, rather than a meaningless patch.
 - **Interactive Cursor sessions.** Implement the asked change in the current
   checkout. Do **not** create a new branch, commit, push, or open a PR unless
   the user explicitly asks. Runtimes with "May open pull requests" enabled may
@@ -198,6 +216,9 @@ Neither hook may open an `EventSource` of its own.
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
 | Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
 | Open-core boundary (what is free vs. commercial) | `lib/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
+| Release pipeline: version maths, cadence, notes | `scripts/release/` (`semver.ts`, `conventional.ts`, `plan.ts`, `cadence.ts`, `notes.ts`) — all pure, all tested; IO in `scripts/release/index.ts`; runbook in `RELEASING.md` |
+| Why CI rejected a PR title, or a missing changelog entry | `lib/release/conventional.ts` (`validateCommitTitle`) → `scripts/check-title.ts`; `scripts/check-changelog.ts`; the `pr-title` workflow and the `changelog` job in `ci.yml` |
+| Cutting a release, or why one did not happen | `RELEASING.md`; `release.cadence` in `package.json`; `.github/workflows/release-prepare.yml` + `release-publish.yml` |
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |
 | Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `components/ui.tsx` |
 | Design tokens | `src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |
@@ -219,7 +240,13 @@ a standalone route.
   rule module gets a colocated test.
 - **`changelog.d/`** — one markdown file per shipped change, folded into `CHANGELOG.md` at
   release. Entries are user-facing and written in the negative-relief voice the existing file
-  uses: *"You no longer …"*. Match it.
+  uses: *"You no longer …"*. Match it. This is a **CI gate**, not a request: a `feat`, `fix`,
+  `perf`, `revert` or breaking PR without a fragment fails the `changelog entry` check. The
+  `changelog-entry` skill drafts one from the diff. Genuinely internal? Add the
+  `no changelog` label or `[skip changelog]` to the PR body.
+  Conventional subjects decide the *version*; fragments decide the *prose*. Keeping them
+  apart is why the version can be fully automatic without the changelog collapsing into a
+  list of commit subjects.
 - **Commits** — always [Conventional Commits](https://www.conventionalcommits.org):
   `type(scope): summary`. Types: `feat` `fix` `refactor` `perf` `docs` `test` `build` `ci`
   `chore`, `!` before the colon for a breaking change. Scope is the area, not the path —
@@ -265,6 +292,13 @@ Closes #13
   already runs `pnpm test`, `pnpm typecheck` and `pnpm build`, and repeating them
   here buries the steps a human must actually do. Tick a box only once you have
   performed it.
+
+**PR review comments are brief, natural, and useful.** Comment only on a specific
+actionable problem or a genuinely helpful optional improvement. Keep each comment
+to one or two short sentences; use `Nitpick: ...` for minor suggestions. Do not
+summarize the diff, restate the code, narrate checks, or post obvious observations
+such as "TypeScript is OK" or "tests pass." If there is nothing worth commenting
+on, say only `Looks good to me.`
 
 Reference shape: <https://github.com/dennisadriaans/openrun/pull/34>.
 
