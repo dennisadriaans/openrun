@@ -1,0 +1,108 @@
+name: Release · prepare
+
+on:
+  # Run broadly enough that package.json owns the real cadence and timezone.
+  # Weekly/daily/manual can therefore change without editing this workflow.
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      ignore_cadence:
+        description: Prepare now, ignoring the configured cadence
+        type: boolean
+        default: true
+      allow_major:
+        description: Allow an automatic major release at or above 1.0
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure release author
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Prepare
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ inputs.ignore_cadence }}" != "true" ]]; then
+            args+=(--respect-cadence)
+          fi
+          if [[ "${{ inputs.allow_major }}" == "true" ]]; then
+            args+=(--allow-major)
+          fi
+          pnpm release:prepare -- "${args[@]}"
+
+      - name: Push release branch
+        if: steps.release.outputs.prepared == 'true'
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+        run: git push --force-with-lease origin "$BRANCH"
+
+      - name: Open release PR
+        if: steps.release.outputs.prepared == 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.release.outputs.branch }}
+          TAG: ${{ steps.release.outputs.tag }}
+          REASON: ${{ steps.release.outputs.reason }}
+        run: |
+          url=$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(release): $TAG" \
+            --body "## Summary
+
+- Prepare **$TAG** for release.
+- $REASON
+
+## Test plan
+
+- [x] Release preparation ran lint, typecheck, tests and build.
+- [ ] Merge this PR to publish the tagged GitHub Release.")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # A PR opened by GITHUB_TOKEN does not trigger pull_request workflows.
+      # Run the same CI workflow explicitly on the release branch instead.
+      - name: Run CI for release branch
+        if: steps.release.outputs.prepared == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.release.outputs.branch }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Enable auto-merge
+        if: steps.release.outputs.prepared == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: gh pr merge "$PR_URL" --auto --squash
