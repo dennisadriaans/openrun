@@ -156,9 +156,13 @@ export function decodePairingQr(raw: string): PairingQrPayload | null {
   if (text.startsWith('agentops://') || text.startsWith('openrun://')) {
     try {
       const url = new URL(text)
+      if (url.hostname !== 'pair' || (url.pathname !== '' && url.pathname !== '/')) return null
       const base = url.searchParams.get('base')
       const code = url.searchParams.get('code')
-      if (base && code) return { base, code: normalizePairingCode(code) }
+      if (!base || !code) return null
+      const validated = validateBaseUrl(base)
+      if (!validated.ok) return null
+      return { base: validated.url, code: normalizePairingCode(code) }
     } catch {
       return null
     }
