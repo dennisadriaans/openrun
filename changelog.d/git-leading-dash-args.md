@@ -1,2 +1,1 @@
-- Clone URLs, branch names, and worktree refs that start with `-` are refused
-  instead of being passed to git as options.
+You no longer risk Git interpreting clone URLs, branch names, worktree refs, or filesystem paths as command options when Open Run passes them to Git.
