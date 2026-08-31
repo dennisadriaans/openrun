@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      expected_tag:
+        description: Fail unless this exact release is complete
+        type: string
+        required: false
 
 permissions:
   contents: write
@@ -41,7 +46,13 @@ jobs:
           pnpm test
           pnpm build
 
-      - name: Publish when HEAD is a release commit
+      - name: Reconcile release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: pnpm release:publish
+          EXPECTED_TAG: ${{ inputs.expected_tag }}
+        run: |
+          args=()
+          if [[ -n "$EXPECTED_TAG" ]]; then
+            args+=(--expect="$EXPECTED_TAG")
+          fi
+          pnpm release:publish -- "${args[@]}"

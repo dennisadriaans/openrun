@@ -168,7 +168,11 @@ export type CadenceVerdict = {
  * missed-by-four-minutes window would skip a whole week. Running twice in one
  * day is harmless — `prepare` is idempotent on the version it computes.
  */
-export function isReleaseDue(config: CadenceConfig, now: Date = new Date()): CadenceVerdict {
+export function isReleaseDue(
+  config: CadenceConfig,
+  now: Date = new Date(),
+  lastReleasedAt: Date | null = null,
+): CadenceVerdict {
   const zoned = zonedNow(now, config.timezone)
   const clock = `${String(zoned.hour).padStart(2, '0')}:${String(zoned.minute).padStart(2, '0')}`
   const where = `${clock} ${config.timezone}, ${zoned.weekday}`
@@ -194,6 +198,14 @@ export function isReleaseDue(config: CadenceConfig, now: Date = new Date()): Cad
       due: false,
       date: zoned.date,
       reason: `Too early: the window opens at ${config.time} ${config.timezone}, and it is ${clock}.`,
+    }
+  }
+
+  if (lastReleasedAt && zonedNow(lastReleasedAt, config.timezone).date === zoned.date) {
+    return {
+      due: false,
+      date: zoned.date,
+      reason: `A release already published in the ${zoned.date} ${config.timezone} window.`,
     }
   }
 
