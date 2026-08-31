@@ -47,12 +47,12 @@ export type ApnsConfig = {
  */
 export function apnsConfig(): ApnsConfig | null {
   const env = process.env
-  const keyPath = (env.OPENRUN_APNS_KEY_PATH ?? env.AGENTOPS_APNS_KEY_PATH)?.trim()
-  const keyId = (env.OPENRUN_APNS_KEY_ID ?? env.AGENTOPS_APNS_KEY_ID)?.trim()
-  const teamId = (env.OPENRUN_APNS_TEAM_ID ?? env.AGENTOPS_APNS_TEAM_ID)?.trim()
-  const topic = (env.OPENRUN_APNS_TOPIC ?? env.AGENTOPS_APNS_TOPIC)?.trim()
+  const keyPath = env.OPENRUN_APNS_KEY_PATH?.trim() || env.AGENTOPS_APNS_KEY_PATH?.trim()
+  const keyId = env.OPENRUN_APNS_KEY_ID?.trim() || env.AGENTOPS_APNS_KEY_ID?.trim()
+  const teamId = env.OPENRUN_APNS_TEAM_ID?.trim() || env.AGENTOPS_APNS_TEAM_ID?.trim()
+  const topic = env.OPENRUN_APNS_TOPIC?.trim() || env.AGENTOPS_APNS_TOPIC?.trim()
   if (!keyPath || !keyId || !teamId || !topic) return null
-  const envName = (env.OPENRUN_APNS_ENV ?? env.AGENTOPS_APNS_ENV)?.trim()
+  const envName = env.OPENRUN_APNS_ENV?.trim() || env.AGENTOPS_APNS_ENV?.trim()
   return {
     keyPath,
     keyId,
