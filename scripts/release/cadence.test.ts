@@ -66,6 +66,26 @@ test('weekly stays due later in the day, so a late cron does not skip a week', (
   assert.equal(isReleaseDue(weekly, new Date('2026-08-31T15:00:00Z')).due, true)
 })
 
+test('weekly allows only one published release on its release day', () => {
+  const now = new Date('2026-08-31T15:00:00Z')
+  const released = new Date('2026-08-31T07:15:00Z')
+  const verdict = isReleaseDue(weekly, now, released)
+  assert.equal(verdict.due, false)
+  assert.match(verdict.reason, /already published/)
+})
+
+test('a release from the previous week does not block the next window', () => {
+  const now = new Date('2026-09-07T07:00:00Z')
+  const released = new Date('2026-08-31T07:15:00Z')
+  assert.equal(isReleaseDue(weekly, now, released).due, true)
+})
+
+test('the release day is compared in the configured timezone', () => {
+  const now = new Date('2026-08-31T15:00:00Z')
+  const justBeforeAmsterdamMonday = new Date('2026-08-30T21:59:00Z')
+  assert.equal(isReleaseDue(weekly, now, justBeforeAmsterdamMonday).due, true)
+})
+
 test('weekly is not due before the window opens', () => {
   const verdict = isReleaseDue(weekly, new Date('2026-08-31T05:00:00Z'))
   assert.equal(verdict.due, false)

@@ -85,6 +85,25 @@ function tagExists(tag: string): boolean {
   return gitQuiet('tag', '--list', tag) === tag
 }
 
+function remoteTagTarget(tag: string): string | null {
+  const peeled = gitQuiet('ls-remote', '--tags', 'origin', `refs/tags/${tag}^{}`)
+  const direct = peeled || gitQuiet('ls-remote', '--tags', 'origin', `refs/tags/${tag}`)
+  return direct.split(/\s+/)[0] || null
+}
+
+function tagPublishedAt(tag: string | null): Date | null {
+  if (!tag) return null
+  const annotated = gitQuiet(
+    'for-each-ref',
+    '--format=%(taggerdate:iso-strict)',
+    `refs/tags/${tag}`,
+  )
+  const value = annotated || gitQuiet('log', '-1', '--format=%cI', tag)
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 /** Whether a branch already exists on `origin`, without needing it fetched. */
 function remoteBranchExists(branch: string): boolean {
   return gitQuiet('ls-remote', '--heads', 'origin', branch).includes(`refs/heads/${branch}`)
@@ -221,7 +240,12 @@ function commandPrepare(argv: string[]): number {
   // Cadence is checked before anything else so a non-release day costs one
   // `git` call and nothing more.
   if (argv.includes('--respect-cadence')) {
-    const verdict = isReleaseDue(parseCadence(readManifest().release))
+    const tag = latestTag()
+    const verdict = isReleaseDue(
+      parseCadence(readManifest().release),
+      new Date(),
+      tagPublishedAt(tag),
+    )
     if (!verdict.due) {
       console.log(verdict.reason)
       addSummary(`### No release\n\n${verdict.reason}`)
@@ -256,10 +280,13 @@ function commandPrepare(argv: string[]): number {
   // scheduled run would otherwise prepare the same version a second time.
   const branch = `release/${plan.tag}`
   if (remoteBranchExists(branch)) {
-    const message = `${branch} is already open — ${plan.tag} is prepared and waiting to merge.`
+    const message = `${branch} already exists — resuming preparation for ${plan.tag}.`
     console.log(message)
-    addSummary(`### No release\n\n${message}`)
-    setOutput('prepared', 'false')
+    addSummary(`### Resuming ${plan.tag}\n\n${message}`)
+    setOutput('prepared', 'existing')
+    setOutput('version', plan.next)
+    setOutput('tag', plan.tag)
+    setOutput('branch', branch)
     setOutput('reason', message)
     return 0
   }
@@ -347,14 +374,9 @@ function commandPublish(argv: string[]): number {
   if (!version) throw new ReleaseError('package.json has no "version" field.')
 
   const tag = toTag(version)
-
-  // Idempotency: publishing twice is a no-op, never a second artifact under
-  // the same version.
-  if (tagExists(tag)) {
-    console.log(`${tag} already exists — nothing to publish.`)
-    setOutput('published', 'false')
-    setOutput('tag', tag)
-    return 0
+  const expectedTag = argv.find((arg) => arg.startsWith('--expect='))?.slice('--expect='.length)
+  if (expectedTag && expectedTag !== tag) {
+    throw new ReleaseError(`Expected ${expectedTag}, but package.json identifies ${tag}.`)
   }
 
   const releaseCommit = gitQuiet('log', '--format=%H%x1f%s')
@@ -362,6 +384,8 @@ function commandPublish(argv: string[]): number {
     .map((line) => line.split('\x1f'))
     .find(([, subject = '']) => isReleaseCommitSubject(subject, tag))?.[0]
   if (!releaseCommit) {
+    if (expectedTag)
+      throw new ReleaseError(`No release commit for ${tag} exists in HEAD's history.`)
     console.log(`No release commit for ${tag} exists in HEAD's history — nothing to publish.`)
     setOutput('published', 'false')
     return 0
@@ -370,26 +394,68 @@ function commandPublish(argv: string[]): number {
   const notes = extractRelease(readFileSync(CHANGELOG, 'utf8'), version)
   if (!notes) throw new ReleaseError(`CHANGELOG.md has no "## v${version}" section to publish.`)
 
+  const existingTagTarget = remoteTagTarget(tag)
+  if (existingTagTarget) {
+    const target = existingTagTarget
+    if (target !== releaseCommit) {
+      throw new ReleaseError(
+        `${tag} points to ${target}, expected release commit ${releaseCommit}.`,
+      )
+    }
+  }
+
+  const releaseExists = Boolean(
+    run('gh', ['release', 'view', tag, '--json', 'tagName'], { allowFailure: true }),
+  )
+  if (existingTagTarget && releaseExists) {
+    console.log(`${tag} and its GitHub Release already exist at ${releaseCommit}.`)
+    setOutput('published', 'false')
+    setOutput('released', 'true')
+    setOutput('tag', tag)
+    setOutput('version', version)
+    return 0
+  }
+
   if (dryRun) {
     console.log(`Would tag ${tag} at ${releaseCommit} with:\n\n${notes}`)
     setOutput('published', 'false')
     return 0
   }
 
-  git('tag', '-a', tag, releaseCommit, '-m', `Open Run ${tag}`)
-  git('push', 'origin', tag)
+  if (!existingTagTarget) {
+    git('tag', '-f', '-a', tag, releaseCommit, '-m', `Open Run ${tag}`)
+    // Another publisher may win between the lookup and this push. Re-read the
+    // remote target below instead of turning that harmless race into a failure.
+    run('git', ['push', 'origin', tag], { allowFailure: true })
+    const target = remoteTagTarget(tag)
+    if (target !== releaseCommit) {
+      throw new ReleaseError(
+        target
+          ? `${tag} points to ${target}, expected release commit ${releaseCommit}.`
+          : `${tag} was not pushed to origin.`,
+      )
+    }
+  }
 
   const notesFile = join(ROOT, '.release-notes.md')
   writeFileSync(notesFile, notes)
   try {
-    run('gh', ['release', 'create', tag, '--title', `Open Run ${tag}`, '--notes-file', notesFile])
+    if (!releaseExists) {
+      run(
+        'gh',
+        ['release', 'create', tag, '--title', `Open Run ${tag}`, '--notes-file', notesFile],
+        { allowFailure: true },
+      )
+    }
   } finally {
     rmSync(notesFile, { force: true })
   }
 
-  console.log(`Published ${tag}.`)
+  run('gh', ['release', 'view', tag, '--json', 'tagName'])
+  console.log(`Published and verified ${tag} at ${releaseCommit}.`)
   addSummary(`### Published ${tag}\n\n${notes}`)
   setOutput('published', 'true')
+  setOutput('released', 'true')
   setOutput('tag', tag)
   setOutput('version', version)
   return 0
@@ -403,7 +469,7 @@ const USAGE = `Usage: pnpm release:<command>
   prepare  [--dry-run] [--skip-verify]          Write the release onto release/vX.Y.Z
            [--respect-cadence] [--allow-major]
            [--notes-from=both|fragments|unreleased]
-  publish  [--dry-run]                          Tag HEAD and create the GitHub Release
+  publish  [--dry-run] [--expect=vX.Y.Z]        Reconcile the tag and GitHub Release
 `
 
 function main(): number {

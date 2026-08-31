@@ -103,10 +103,10 @@ release being cut rather than stranded above it.
 The schedule decides **when to ask** whether a release exists, never which
 version gets created. `cadence` is `weekly`, `daily` or `manual`.
 
-The workflow's own cron is deliberately wider than the window, and the window
-stays open for the rest of the release day — a cron delayed by twenty minutes
-must not skip a week. Running twice in one day is harmless: the second run sees
-the open `release/vX.Y.Z` branch and stops.
+The workflow retries hourly on Monday. The window opens at 09:00 Amsterdam time,
+and the newest tag records whether that Monday's release already happened. A
+delayed or dropped 09:00 run can therefore recover later that day, while later
+runs cannot prepare a second release in the same window.
 
 Changing the cadence is a one-line edit to `package.json`. Daylight saving is
 handled by the timezone, not by hand-converting the hour to UTC twice a year.
@@ -122,10 +122,11 @@ opens the same release PR the schedule would have; merging it publishes.
 
 Every step is safe to re-run.
 
-- `prepare` refuses if the tag already exists, and stops if the release branch is
-  already open.
-- `publish` exits early if the tag exists, or if no matching release commit exists in
-  `HEAD`'s history. This lets a missed publish recover after later commits have landed.
+- `prepare` resumes an existing release branch and pull request after a partial
+  failure instead of treating their existence as completion.
+- `publish` reconciles the tag and GitHub Release independently. It repairs a
+  missing Release after a tag push, verifies the tag target, and can recover a
+  missed publish after later commits have landed.
   It never ships a second, different artifact under a version that already went out.
 - A failed publish is fixed by re-running the workflow, not by tagging by hand.
 
