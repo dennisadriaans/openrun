@@ -124,7 +124,8 @@ Every step is safe to re-run.
 
 - `prepare` refuses if the tag already exists, and stops if the release branch is
   already open.
-- `publish` exits early if the tag exists, or if `HEAD` is not a release commit.
+- `publish` exits early if the tag exists, or if no matching release commit exists in
+  `HEAD`'s history. This lets a missed publish recover after later commits have landed.
   It never ships a second, different artifact under a version that already went out.
 - A failed publish is fixed by re-running the workflow, not by tagging by hand.
 
