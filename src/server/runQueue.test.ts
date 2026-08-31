@@ -27,6 +27,8 @@ for (const [project, workspace, branch] of [
 }
 
 const cwdBefore = process.cwd()
+const previousHome = process.env.OPENRUN_HOME
+process.env.OPENRUN_HOME = join(root, '.openrun')
 process.chdir(root)
 const vite = await createServer({
   root: appRoot,
@@ -47,6 +49,8 @@ after(async () => {
   closeDb()
   await vite.close()
   process.chdir(cwdBefore)
+  if (previousHome === undefined) delete process.env.OPENRUN_HOME
+  else process.env.OPENRUN_HOME = previousHome
   rmSync(root, { recursive: true, force: true })
 })
 
