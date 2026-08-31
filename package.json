@@ -1,6 +1,7 @@
 {
   "name": "openrun",
   "private": true,
+  "version": "0.1.0",
   "description": "Schedule Claude Code, Codex, Grok and Gemini like cron jobs — on your machine, with no API keys.",
   "homepage": "https://openrun.sh",
   "repository": {
@@ -17,6 +18,12 @@
     "pnpm": ">=10"
   },
   "type": "module",
+  "release": {
+    "cadence": "weekly",
+    "day": "monday",
+    "time": "09:00",
+    "timezone": "Europe/Amsterdam"
+  },
   "imports": {
     "#/*": "./src/*"
   },
@@ -33,7 +40,11 @@
     "lint": "biome check src scripts",
     "lint:fix": "biome check --write src scripts",
     "format": "biome format --write src scripts",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "release:plan": "node --experimental-strip-types scripts/release.ts plan",
+    "release:prepare": "node --experimental-strip-types scripts/release.ts prepare",
+    "release:publish": "node --experimental-strip-types scripts/release.ts publish",
+    "ship": "node --experimental-strip-types scripts/ship.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
