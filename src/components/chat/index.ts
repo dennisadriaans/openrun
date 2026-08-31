@@ -27,4 +27,3 @@ export {
   type AttachmentUploader,
   type PendingAttachment,
 } from './ComposerAttachments'
-export { Composer } from './Composer'

@@ -92,16 +92,6 @@ function toRelative(root: string, absolute: string): string {
   return relative(rootReal, absolute).split(sep).join('/')
 }
 
-/** Same trust boundary as list/read/write; git pathspecs go through here too. */
-export function resolveInsideWorkspace(root: string, relPath: string): string {
-  return safeResolve(root, relPath)
-}
-
-/** Confined workspace-relative POSIX path, for git pathspecs and diffs. */
-export function workspaceRelPath(root: string, relPath: string): string {
-  return toRelative(root, safeResolve(root, relPath))
-}
-
 /**
  * List the direct children of `dir` (relative to the workspace root).
  *

@@ -15,7 +15,6 @@ import { ensureProcessPathAugmented, findOnPath } from './userPath.ts'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { workspaceRelPath } from './files.ts'
 import { extractHunkPatch, parseUnifiedDiff } from '../lib/diff.ts'
 import {
   ghNotAuthenticatedMessage,
@@ -719,20 +718,18 @@ export function isDirtySince(cwd: string, since?: string): boolean {
 export function fileDiff(cwd: string, path: string, since?: string): string {
   if (!isRepo(cwd)) return ''
 
-  // `--no-index` compares filesystem paths, so confine before any git call.
-  const rel = workspaceRelPath(cwd, path)
   const base = since && since.length > 0 ? since : 'HEAD'
-  const tracked = git(cwd, ['ls-files', '--error-unmatch', '--', rel]).ok
+  const tracked = git(cwd, ['ls-files', '--error-unmatch', '--', path]).ok
 
   if (!tracked) {
-    if (since && since.length > 0 && pathInTree(cwd, base, rel)) {
+    if (since && since.length > 0 && pathInTree(cwd, base, path)) {
       // Was in the snapshot (untracked at start); show delta from that blob.
-      return git(cwd, ['diff', base, '--', rel]).stdout
+      return git(cwd, ['diff', base, '--', path]).stdout
     }
     // --no-index exits 1 when files differ, which is the normal case here.
-    return git(cwd, ['diff', '--no-index', '--', '/dev/null', rel]).stdout
+    return git(cwd, ['diff', '--no-index', '--', '/dev/null', path]).stdout
   }
-  return git(cwd, ['diff', base, '-M', '--', rel]).stdout
+  return git(cwd, ['diff', base, '-M', '--', path]).stdout
 }
 
 // ---------------------------------------------------------------------------

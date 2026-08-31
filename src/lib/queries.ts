@@ -303,15 +303,6 @@ export function useCommandPreviewForRuntime(
 
 export const RUNS_PAGE_SIZE = 10
 
-export function useRunningTaskIds() {
-  const streamHealthy = useActivityStreamHealthy()
-  return useQuery({
-    queryKey: ['runs', 'runningTaskIds'],
-    queryFn: () => fns.listRunningTaskIds(),
-    refetchInterval: streamHealthy ? false : 3000,
-  })
-}
-
 export function useRuns(
   taskId?: string,
   includeArchived = false,

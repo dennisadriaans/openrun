@@ -14,8 +14,15 @@ import {
   Webhook,
   Zap,
 } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useClickOutside } from '../hooks/useClickOutside'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from './toast'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
@@ -110,6 +117,33 @@ const SCHEDULE_OPTIONS: Array<{
   { label: 'Weekly', value: '0 9 * * 1', icon: <CalendarDays className="h-3.5 w-3.5" /> },
   { label: 'Custom (cron)', value: 'custom', icon: <Code2 className="h-3.5 w-3.5" /> },
 ]
+
+function useClickOutside(
+  open: boolean,
+  onClose: () => void,
+  refs: Array<RefObject<HTMLElement | null>>,
+) {
+  const refsRef = useRef(refs)
+  refsRef.current = refs
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (refsRef.current.some((ref) => ref.current?.contains(target))) return
+      onClose()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+}
 
 function ChipSelect({
   label,

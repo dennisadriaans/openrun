@@ -4,11 +4,9 @@
  * Complements per-run tails in `runLive.ts`: dashboard / run history only need
  * coarse "a run started or finished" signals, not every log chunk.
  */
-import { SERVER_PING_MS } from '../lib/liveStream.ts'
 import type { ActivityLiveEvent } from '../lib/activityLive'
 
 export type { ActivityLiveEvent }
-export { SERVER_PING_MS }
 
 type Listener = (event: ActivityLiveEvent) => void
 
@@ -36,6 +34,8 @@ export function activityLiveSubscriberCount(): number {
   return listeners.size
 }
 
+const DEFAULT_PING_MS = 15_000
+
 /**
  * Build an SSE ReadableStream for app activity. Sends `hello`, then
  * `run_changed` frames, with periodic `ping` heartbeats.
@@ -45,7 +45,7 @@ export function createActivityLiveSseStream(opts: {
   pingMs?: number
 }): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
-  const pingMs = opts.pingMs ?? SERVER_PING_MS
+  const pingMs = opts.pingMs ?? DEFAULT_PING_MS
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
