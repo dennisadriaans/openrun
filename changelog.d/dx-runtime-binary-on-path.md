@@ -1,1 +1,0 @@
-You no longer get an orphan failed run with `spawn ENOENT` when a runtime CLI is missing — **Run now**, follow-ups, and scheduled starts refuse immediately with a clear “not found on PATH” error (and the automation form warns when the selected runtime isn’t installed).
