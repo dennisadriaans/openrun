@@ -15,6 +15,7 @@ import { ensureProcessPathAugmented, findOnPath } from './userPath.ts'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { workspaceRelPath } from './files.ts'
 import { extractHunkPatch, parseUnifiedDiff } from '../lib/diff.ts'
 import {
   ghNotAuthenticatedMessage,
@@ -56,6 +57,16 @@ export type RepoInfo = {
 }
 
 const MAX_BUFFER = 32 * 1024 * 1024
+
+/** Reject strings that git would treat as options rather than values. */
+function refuseLeadingDash(value: string, label: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) throw new Error(`${label} is required`)
+  if (trimmed.startsWith('-') || trimmed.includes('\0')) {
+    throw new Error(`Invalid ${label}`)
+  }
+  return trimmed
+}
 
 function gitEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...extra }
@@ -267,7 +278,7 @@ function untrackedLineStats(
   cwd: string,
   path: string,
 ): { additions: number; deletions: number; binary: boolean } {
-  const stat = git(cwd, ['diff', '--no-index', '--numstat', '/dev/null', path]).stdout
+  const stat = git(cwd, ['diff', '--no-index', '--numstat', '--', '/dev/null', path]).stdout
   const m = stat.match(/^(\d+|-)\t(\d+|-)\t/)
   const binary = m ? m[1] === '-' : false
   return {
@@ -657,7 +668,14 @@ export async function changedFilesAsync(cwd: string, since?: string): Promise<Di
   const untrackedPaths = untrackedRes.stdout.split('\0').filter((p) => p.length > 0)
   await Promise.all(
     untrackedPaths.map(async (path) => {
-      const statsRes = await gitAsync(cwd, ['diff', '--no-index', '--numstat', '/dev/null', path])
+      const statsRes = await gitAsync(cwd, [
+        'diff',
+        '--no-index',
+        '--numstat',
+        '--',
+        '/dev/null',
+        path,
+      ])
       const statMatch = statsRes.stdout.match(/^(\d+|-)\t(\d+|-)\t/)
       const binary = statMatch ? statMatch[1] === '-' : false
       const additions = binary || !statMatch ? 0 : Number(statMatch[1])
@@ -718,18 +736,20 @@ export function isDirtySince(cwd: string, since?: string): boolean {
 export function fileDiff(cwd: string, path: string, since?: string): string {
   if (!isRepo(cwd)) return ''
 
+  // `--no-index` compares filesystem paths, so confine before any git call.
+  const rel = workspaceRelPath(cwd, path)
   const base = since && since.length > 0 ? since : 'HEAD'
-  const tracked = git(cwd, ['ls-files', '--error-unmatch', '--', path]).ok
+  const tracked = git(cwd, ['ls-files', '--error-unmatch', '--', rel]).ok
 
   if (!tracked) {
-    if (since && since.length > 0 && pathInTree(cwd, base, path)) {
+    if (since && since.length > 0 && pathInTree(cwd, base, rel)) {
       // Was in the snapshot (untracked at start); show delta from that blob.
-      return git(cwd, ['diff', base, '--', path]).stdout
+      return git(cwd, ['diff', base, '--', rel]).stdout
     }
     // --no-index exits 1 when files differ, which is the normal case here.
-    return git(cwd, ['diff', '--no-index', '--', '/dev/null', path]).stdout
+    return git(cwd, ['diff', '--no-index', '--', '/dev/null', rel]).stdout
   }
-  return git(cwd, ['diff', base, '-M', '--', path]).stdout
+  return git(cwd, ['diff', base, '-M', '--', rel]).stdout
 }
 
 // ---------------------------------------------------------------------------
@@ -778,8 +798,10 @@ export function resetWorktree(cwd: string, branch: string, baseCommit: string): 
 
 /** Create and switch to a new branch. */
 export function createBranch(cwd: string, name: string) {
-  gitOrThrow(cwd, ['checkout', '-b', name])
-  return { branch: name }
+  const branch = refuseLeadingDash(name, 'branch name')
+  // `-b` consumes the next argv as the name, so `--` cannot sit between them.
+  gitOrThrow(cwd, ['checkout', '-b', branch])
+  return { branch }
 }
 
 /** Push the current branch, setting upstream when it has none. */
@@ -1182,11 +1204,16 @@ export function addWorktree(input: {
   baseRef: string
   newBranch: boolean
 }): void {
-  const { repoPath, branch, path, baseRef, newBranch } = input
+  const { repoPath, newBranch } = input
+  const branch = refuseLeadingDash(input.branch, 'branch name')
+  const baseRef = refuseLeadingDash(input.baseRef, 'base ref')
+  const path = input.path
+  if (!path.trim()) throw new Error('Worktree path is required')
+  if (path.startsWith('-') || path.includes('\0')) throw new Error('Invalid worktree path')
   if (newBranch) {
-    gitOrThrow(repoPath, ['worktree', 'add', '-b', branch, path, baseRef])
+    gitOrThrow(repoPath, ['worktree', 'add', '-b', branch, '--', path, baseRef])
   } else {
-    gitOrThrow(repoPath, ['worktree', 'add', path, branch])
+    gitOrThrow(repoPath, ['worktree', 'add', '--', path, branch])
   }
 }
 
@@ -1204,7 +1231,9 @@ export function removeWorktree(repoPath: string, path: string, force: boolean): 
  * prompt from a headless server process.
  */
 export function cloneRepo(input: { url: string; dest: string }): void {
-  const res = spawnSync('git', ['clone', input.url, input.dest], {
+  const url = refuseLeadingDash(input.url, 'clone URL')
+  const dest = refuseLeadingDash(input.dest, 'clone destination')
+  const res = spawnSync('git', ['clone', '--', url, dest], {
     encoding: 'utf8',
     maxBuffer: MAX_BUFFER,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' },

@@ -339,12 +339,6 @@ export function Composer({
 
           <div className="relative flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
             {leading}
-            {uploadAttachment ? (
-              <AttachmentButton
-                disabled={!canAttach || files.full}
-                onFiles={(picked) => files.addFiles(picked)}
-              />
-            ) : null}
             <ComposerModelControls
               models={models}
               model={model}
@@ -357,43 +351,53 @@ export function Composer({
               onRuntimeModeChange={onRuntimeModeChange}
             />
 
-            {running && onStop ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label="Stop"
-                title="Stop"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
-              >
-                <Square className="size-3.5 fill-current" />
-              </button>
-            ) : null}
-            {!running || canQueue ? (
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => submit()}
-                aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
-                title={running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
-              >
-                {pending ? (
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-                ) : running ? (
-                  <ListPlus className="size-3.5" />
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                    <path
-                      d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            ) : null}
+            <div className="flex shrink-0 items-center gap-1">
+              {running && onStop ? (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label="Stop"
+                  title="Stop"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
+                >
+                  <Square className="size-3.5 fill-current" />
+                </button>
+              ) : null}
+              {uploadAttachment ? (
+                <AttachmentButton
+                  disabled={!canAttach || files.full}
+                  onFiles={(picked) => files.addFiles(picked)}
+                />
+              ) : null}
+              {!running || canQueue ? (
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={() => submit()}
+                  aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
+                  title={
+                    running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined
+                  }
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
+                >
+                  {pending ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                  ) : running ? (
+                    <ListPlus className="size-3.5" />
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <path
+                        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

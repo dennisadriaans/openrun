@@ -897,6 +897,11 @@ export function Chat({
   const { prefs, remember } = usePickerPrefs()
   const [composerHeight, setComposerHeight] = useState(140)
   const composerOverlayRef = useRef<HTMLDivElement | null>(null)
+  const hasPrChip = Boolean(pullRequest)
+  const hasPrErrorStrip = Boolean(pullRequestError)
+  const hasFilesStrip = Boolean(changedFiles && changedFiles.length > 0 && onReviewFile)
+  const hasStripAboveFiles = hasPrChip || hasPrErrorStrip
+  const hasStripAboveQueue = hasStripAboveFiles || hasFilesStrip
   const [model, setModel] = useState(initialModel)
   const [effort, setEffort] = useState(initialEffort)
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
@@ -1252,7 +1257,7 @@ export function Chat({
             {pullRequestError ? (
               <div
                 role="alert"
-                className="relative z-[6] mx-auto -mb-[2px] w-[92%] truncate rounded-t-[16px] border border-b-0 border-border bg-elevated px-2.5 py-1.5 text-[12.5px] text-danger"
+                className={`relative z-[6] mx-auto -mb-[2px] w-[92%] truncate px-2.5 py-1.5 text-[12.5px] text-danger chat-composer-strip${hasPrChip ? ' chat-composer-strip-continued' : ' chat-composer-strip-top'}`}
                 title={pullRequestError}
               >
                 Pull request status unavailable: {pullRequestError}
@@ -1262,6 +1267,7 @@ export function Chat({
               <div className="relative mx-auto -mb-[2px] w-[92%]">
                 <FilesChanged
                   variant="composer"
+                  stackTop={!hasStripAboveFiles}
                   files={changedFiles}
                   activePath={activePath}
                   onSelect={onReviewFile}
@@ -1275,6 +1281,7 @@ export function Chat({
             {queuedMessages.length > 0 ? (
               <div className="relative z-[5] mx-auto -mb-[2px] w-[92%]">
                 <QueuedMessages
+                  stackTop={!hasStripAboveQueue}
                   queued={queuedMessages}
                   running={running}
                   busy={queueBusy}

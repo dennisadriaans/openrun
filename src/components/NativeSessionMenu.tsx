@@ -1,5 +1,6 @@
 import { Check, ChevronDown, ChevronRight, History, MessageSquare } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useClickOutside } from '../hooks/useClickOutside'
 import { createPortal } from 'react-dom'
 import { relativeTime } from '../lib/format'
 import {
@@ -11,33 +12,6 @@ import {
 import { loadNativeSessionPage } from '../lib/queries'
 import { ProviderIcon } from './ProviderIcons'
 import { Tooltip } from './ui'
-
-function useClickOutside(
-  open: boolean,
-  onClose: () => void,
-  refs: Array<RefObject<HTMLElement | null>>,
-) {
-  const refsRef = useRef(refs)
-  refsRef.current = refs
-
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (refsRef.current.some((ref) => ref.current?.contains(target))) return
-      onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onPointer)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open, onClose])
-}
 
 export function NativeSessionMenu({
   workspaceId,
