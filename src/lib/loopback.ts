@@ -27,7 +27,28 @@ export function isLoopbackAddress(address: string | undefined | null): boolean {
 /** Requests a non-loopback caller may make when the mobile surface is on. */
 export function isMobileApiPath(url: string | undefined | null): boolean {
   if (!url) return false
-  return url.startsWith('/api/mobile/')
+  // Node gives path + query. `//…` is protocol-relative — not a local path.
+  const raw = url.split(/[?#]/, 1)[0] ?? ''
+  if (!raw.startsWith('/') || raw.startsWith('//')) return false
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    return false
+  }
+  const parts: string[] = []
+  for (const part of decoded.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      if (parts.length === 0) return false
+      parts.pop()
+      continue
+    }
+    parts.push(part)
+  }
+  // Prefix must be a path segment: `/api/mobile/me`, not `/api/mobile` itself
+  // and not `/api/mobile/../api/runs/…` after `..` is applied.
+  return parts[0] === 'api' && parts[1] === 'mobile' && parts.length >= 3
 }
 
 /**
