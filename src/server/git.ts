@@ -1210,6 +1210,7 @@ export function addWorktree(input: {
   const path = input.path
   if (!path.trim()) throw new Error('Worktree path is required')
   if (path.startsWith('-') || path.includes('\0')) throw new Error('Invalid worktree path')
+  if (newBranch) {
     gitOrThrow(repoPath, ['worktree', 'add', '-b', branch, '--', path, baseRef])
   } else {
     gitOrThrow(repoPath, ['worktree', 'add', '--', path, branch])
