@@ -119,8 +119,8 @@ function isRegularNativeFileInside(file: string, directory: string, directChild 
  * time-of-check/read race and keeps a transcript id from redirecting reads
  * outside the directory the CLI owns.
  */
-function assertRegularNativeFile(file: string, directory: string, directChild = true): void {
-  if (existsSync(file) && !isRegularNativeFileInside(file, directory, directChild)) {
+function assertRegularNativeFile(file: string, directory: string): void {
+  if (existsSync(file) && !isRegularNativeFileInside(file, directory, true)) {
     throw new Error(UNSAFE_SESSION_FILE)
   }
 }
@@ -339,7 +339,7 @@ function listCodexFromJsonl(cwd: string): NativeSession[] {
   return filterSessionsForCwd(out, cwd)
 }
 
-export function codexSessionFile(sessionId: string): string | null {
+function findCodexJsonl(sessionId: string): string | null {
   const id = validateNativeSessionId(sessionId)
   const root = join(codexHome(), 'sessions')
   if (!existsSync(root)) return null
@@ -366,7 +366,7 @@ const codexAdapter: NativeSessionAdapter = {
     const id = validateNativeSessionId(sessionId)
     const fromIndex = listCodexFromSqlite(cwd)
     if (fromIndex.some((row) => row.sessionId === id)) return true
-    const file = codexSessionFile(id)
+    const file = findCodexJsonl(id)
     if (!file) return false
     try {
       const row = parseCodexJsonlPrefix(readPrefix(file, CODEX_PREFIX_BYTES), {
@@ -450,12 +450,6 @@ const grokAdapter: NativeSessionAdapter = {
   },
 }
 
-export function grokTranscriptFile(cwd: string, sessionId: string): string {
-  const id = validateNativeSessionId(sessionId)
-  const sessionDir = safeNativeSessionDirectory(grokDirFor(cwd), id)
-  return safeNativeSessionFile(sessionDir, 'chat_history', '.jsonl')
-}
-
 function agyRoot(): string {
   const override = process.env.ANTIGRAVITY_CLI_ROOT?.trim()
   return override ? resolve(override) : agyCliRoot(homeDir())
@@ -491,15 +485,6 @@ function listAgyFromHistory(): NativeSession[] {
 
 function agyConversationFile(sessionId: string): string {
   return safeNativeSessionFile(join(agyRoot(), 'conversations'), sessionId, '.db')
-}
-
-export function agyTranscriptFile(sessionId: string): string {
-  const id = validateNativeSessionId(sessionId)
-  const sessionDir = safeNativeSessionDirectory(join(agyRoot(), 'brain'), id)
-  const logsDir = join(sessionDir, '.system_generated', 'logs')
-  const file = join(logsDir, 'transcript.jsonl')
-  if (existsSync(file)) assertRegularNativeFile(file, sessionDir, false)
-  return file
 }
 
 function agyConversationExists(sessionId: string): boolean {

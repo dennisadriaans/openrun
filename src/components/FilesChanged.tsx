@@ -46,7 +46,6 @@ export function FilesChanged({
   undoDisabled = false,
   undoDisabledReason,
   variant = 'panel',
-  stackTop = true,
 }: {
   files: DiffFile[]
   activePath: string | null
@@ -56,8 +55,6 @@ export function FilesChanged({
   undoDisabled?: boolean
   undoDisabledReason?: string
   variant?: 'panel' | 'composer'
-  /** Rounded top when this strip is the top of a composer stack. */
-  stackTop?: boolean
 }) {
   const attached = variant === 'composer'
   const [expanded, setExpanded] = useState(!attached)
@@ -70,7 +67,7 @@ export function FilesChanged({
     <div
       className={
         attached
-          ? `chat-composer-strip${stackTop ? ' chat-composer-strip-top' : ' chat-composer-strip-continued'}`
+          ? 'chat-files-glass rounded-t-[16px] border border-b-0 border-border'
           : 'overflow-hidden rounded-xl border border-border bg-elevated shadow-sm'
       }
     >

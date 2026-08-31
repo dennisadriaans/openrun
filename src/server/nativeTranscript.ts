@@ -9,19 +9,10 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { NativeSessionKind } from '../lib/nativeSessions.ts'
 import {
   parseClaudeTranscript,
-  parseCodexTranscript,
-  parseGrokTranscript,
-  parseAntigravityTranscript,
   supportsTranscriptImport,
   type TranscriptTurn,
 } from '../lib/nativeTranscript.ts'
-import {
-  agyTranscriptFile,
-  claudeSessionFile,
-  codexSessionFile,
-  grokTranscriptFile,
-  validateNativeSessionId,
-} from './nativeSessions.ts'
+import { claudeSessionFile, validateNativeSessionId } from './nativeSessions.ts'
 
 export function readNativeTranscript(
   cwd: string,
@@ -33,21 +24,10 @@ export function readNativeTranscript(
   // rather than silently turning it into an empty transcript.
   const id = validateNativeSessionId(sessionId)
   if (!cwd.trim() || !supportsTranscriptImport(kind)) return []
-  const file =
-    kind === 'codex'
-      ? codexSessionFile(id)
-      : kind === 'grok'
-        ? grokTranscriptFile(cwd, id)
-        : kind === 'antigravity'
-          ? agyTranscriptFile(id)
-          : claudeSessionFile(cwd, id)
+  const file = claudeSessionFile(cwd, id)
   if (!file || !existsSync(file)) return []
   try {
-    const contents = readFileSync(file, 'utf8')
-    if (kind === 'codex') return parseCodexTranscript(contents)
-    if (kind === 'grok') return parseGrokTranscript(contents)
-    if (kind === 'antigravity') return parseAntigravityTranscript(contents)
-    return parseClaudeTranscript(contents)
+    return parseClaudeTranscript(readFileSync(file, 'utf8'))
   } catch {
     // An unreadable or half-written transcript is not worth failing a run over.
     return []

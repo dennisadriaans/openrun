@@ -70,9 +70,8 @@ HTTP polling is only the **fallback** when a stream is unhealthy. That is why ho
 **`EventSource` is not the judge of liveness — the heartbeat is.** A socket that dies while
 the machine sleeps stays `readyState === OPEN` and never fires `error`, which would pin
 `streamHealthy` to `true` and switch every fallback poll off for good. `lib/liveStream.ts`
-owns both constants: `SERVER_PING_MS` is the heartbeat both SSE factories import (they
-re-export it rather than declaring their own), and a stream silent past `STALE_AFTER_MS` —
-derived from it — is closed and redialled. Do not reintroduce a second copy of the period.
+owns that: both SSE routes ping on `DEFAULT_PING_MS`, and a stream silent past
+`STALE_AFTER_MS` is closed and redialled. Change one of those constants and change the other.
 Neither hook may open an `EventSource` of its own.
 
 ## Hard rules
@@ -180,7 +179,7 @@ Neither hook may open an `EventSource` of its own.
 | AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
 | Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts` |
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
-| Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; `/runs/new` offers the primary checkout only for interactive chats, while automations remain worktree-only |
+| Projects, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts` |
 | Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `lib/workspaceHealth.ts` (the codes + wording), `server/workspaceHealth.ts` (inspection, quarantine, restore) |
 | Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `lib/unattendedGate.ts` (the rules), `server/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |

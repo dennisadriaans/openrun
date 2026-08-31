@@ -7,7 +7,7 @@ import { DEMO_RUNNING_TASK_ID, demoTasks, isDemoMode, type DemoTask } from '../l
 import { absoluteTime, describeSchedule, relativeTime, taskScheduleStatus } from '../lib/format'
 import { normalizeSelection, selectionState, toggleSelection } from '../lib/listSelection.ts'
 import { automationsEmptyKind } from '../lib/projectGate'
-import { useDeleteTasks, useProjects, useRunningTaskIds, useTasks } from '../lib/queries'
+import { useDeleteTasks, useProjects, useRuns, useTasks } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
 import { queueDepthLabel } from '../lib/runQueue'
 
@@ -50,13 +50,16 @@ function TasksPage() {
   const demo = isDemoMode()
   const { data: liveTasks, isLoading: liveLoading } = useTasks()
   const { data: projects, isLoading: liveLoadingProjects } = useProjects()
-  const { data: runningIds } = useRunningTaskIds()
+  const { data: runs } = useRuns()
   const tasks = demo ? demoTasks(Date.now()) : liveTasks
   const isLoading = demo ? false : liveLoading
   const loadingProjects = demo ? false : liveLoadingProjects
   const runningTaskIds = useMemo(
-    () => (demo ? new Set([DEMO_RUNNING_TASK_ID]) : new Set(runningIds ?? [])),
-    [demo, runningIds],
+    () =>
+      demo
+        ? new Set([DEMO_RUNNING_TASK_ID])
+        : new Set(runs?.filter((r) => r.status === 'running').map((r) => r.taskId) ?? []),
+    [demo, runs],
   )
   const navigate = useNavigate()
   const emptyKind = demo ? null : automationsEmptyKind(projects?.length ?? 0)

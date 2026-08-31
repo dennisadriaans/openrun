@@ -23,20 +23,13 @@ const STATE_TONE: Record<PullRequestState, { icon: typeof GitPullRequest; tone: 
 export function PullRequestChip({
   pr,
   variant = 'composer',
-  stackTop = true,
 }: {
   pr: RunPullRequest
   /** `composer` docks the strip onto the composer; `panel` stands alone. */
   variant?: 'composer' | 'panel'
-  /** Rounded top when this strip is the top of a composer stack. */
-  stackTop?: boolean
 }) {
   const { icon: Icon, tone } = STATE_TONE[pr.state]
   const live = isPullRequestLive(pr.state)
-  const stripClass =
-    variant === 'composer'
-      ? `chat-composer-strip${stackTop ? ' chat-composer-strip-top' : ' chat-composer-strip-continued'}`
-      : 'rounded-xl border border-border bg-elevated'
 
   return (
     <a
@@ -44,31 +37,33 @@ export function PullRequestChip({
       target="_blank"
       rel="noreferrer"
       title={`${pullRequestStateLabel(pr.state)} · ${pr.title || pr.url}`}
-      className={`group flex items-center gap-2 px-2 py-1.5 focus-visible:outline-none ${stripClass}`}
+      className={`group flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] transition-colors hover:bg-secondary/50 ${
+        variant === 'composer'
+          ? 'chat-files-glass rounded-t-[16px] border border-b-0 border-border'
+          : 'rounded-xl border border-border bg-elevated'
+      }`}
     >
-      <span className="inline-flex min-w-0 max-w-[min(100%,28rem)] items-center gap-2 rounded-md px-1 py-0.5 text-[12.5px] transition-colors hover:bg-secondary/60 group-focus-visible:bg-secondary/60 group-focus-visible:ring-2 group-focus-visible:ring-inset group-focus-visible:ring-ring/70">
-        <span className={`relative flex size-4 shrink-0 items-center justify-center ${tone}`}>
-          <Icon className="size-4" />
-          {live ? (
-            <span className="absolute -right-1 -top-1 size-1.5 rounded-full bg-emerald-400" />
-          ) : null}
-        </span>
-        <span className="shrink-0 mono text-[12px] tabular-nums text-tier-secondary">
-          #{pr.number}
-        </span>
-        <span className="min-w-0 truncate text-tier-secondary">{pr.title || 'Pull request'}</span>
-      </span>
-      <span className="ml-auto flex shrink-0 items-center gap-2">
-        {pr.checks === 'failing' ? (
-          <span className="text-[11.5px] text-rose-400">checks failing</span>
+      <span className={`relative flex size-4 shrink-0 items-center justify-center ${tone}`}>
+        <Icon className="size-4" />
+        {live ? (
+          <span className="absolute -right-1 -top-1 size-1.5 rounded-full bg-emerald-400" />
         ) : null}
-        {!live ? (
-          <span className="text-[11.5px] text-tier-quaternary">
-            {pullRequestStateLabel(pr.state)}
-          </span>
-        ) : null}
-        <ExternalLink className="size-3.5 text-tier-quaternary opacity-0 transition-opacity group-hover:opacity-100" />
       </span>
+      <span className="shrink-0 mono text-[12px] tabular-nums text-tier-secondary">
+        #{pr.number}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-tier-secondary">
+        {pr.title || 'Pull request'}
+      </span>
+      {pr.checks === 'failing' ? (
+        <span className="shrink-0 text-[11.5px] text-rose-400">checks failing</span>
+      ) : null}
+      {!live ? (
+        <span className="shrink-0 text-[11.5px] text-tier-quaternary">
+          {pullRequestStateLabel(pr.state)}
+        </span>
+      ) : null}
+      <ExternalLink className="size-3.5 shrink-0 text-tier-quaternary opacity-0 transition-opacity group-hover:opacity-100" />
     </a>
   )
 }

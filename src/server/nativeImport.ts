@@ -11,6 +11,7 @@
 import { getDb } from './db.ts'
 import { readNativeTranscript } from './nativeTranscript.ts'
 import { resumedNativeChatStub, type NativeSessionKind } from '../lib/nativeSessions.ts'
+import { omittedTurnsNote, trimTranscript } from '../lib/nativeTranscript.ts'
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
@@ -76,9 +77,9 @@ export function allocateImportTimestamps(
 }
 
 /**
- * Import `sessionId`'s complete transcript into `runId`. Always writes the
- * provenance note, so a runtime with no readable transcript behaves as it did
- * before.
+ * Import `sessionId`'s transcript into `runId`, newest turns first if it does
+ * not all fit. Always writes the provenance note, so a runtime with no reader
+ * (or a transcript we could not parse) behaves as it did before.
  *
  * `before` is the timestamp the caller's own next row will use — everything
  * written here sorts strictly ahead of it.
@@ -91,7 +92,9 @@ export function importNativeTranscript(input: {
   label: string
   before: number
 }): NativeImportResult {
-  const turns = readNativeTranscript(input.cwd, input.kind, input.sessionId)
+  const { turns, dropped, droppedEvents } = trimTranscript(
+    readNativeTranscript(input.cwd, input.kind, input.sessionId),
+  )
 
   const db = getDb()
   const insertMessage = db.prepare(
@@ -105,6 +108,7 @@ export function importNativeTranscript(input: {
 
   const timestampRows: ImportTimestampInput[] = []
   timestampRows.push({})
+  if (dropped > 0 || droppedEvents > 0) timestampRows.push({})
   for (const turn of turns) {
     if (turn.prompt) timestampRows.push({ sourceAt: turn.promptAt })
     if (turn.events.length > 0) {
@@ -140,6 +144,8 @@ export function importNativeTranscript(input: {
 
   const write = db.transaction(() => {
     note(resumedNativeChatStub(input.kind, input.label))
+    if (dropped > 0 || droppedEvents > 0) note(omittedTurnsNote(dropped, droppedEvents))
+
     for (const turn of turns) {
       if (turn.prompt) {
         const createdAt = at()

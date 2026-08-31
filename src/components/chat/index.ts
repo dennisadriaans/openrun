@@ -6,7 +6,7 @@ export { PlanEvent } from './PlanEvent'
 export { ApprovalEvent } from './ApprovalEvent'
 export { ChatEventShell, ChatEventSection, type ChatEventKind } from './ChatEventShell'
 export { iconForCallRole, iconForToolKind, eyebrowForCallRole } from './chatEventIcons'
-export { ChatMarkdown, ChatRepositoryProvider, type ChatMarkdownProps } from './ChatMarkdown'
+export { ChatMarkdown, type ChatMarkdownProps } from './ChatMarkdown'
 export { EditDiff } from './EditDiff'
 export { SubagentCall } from './SubagentCall'
 export { TerminalOutput } from './TerminalOutput'
@@ -27,4 +27,3 @@ export {
   type AttachmentUploader,
   type PendingAttachment,
 } from './ComposerAttachments'
-export { Composer } from './Composer'

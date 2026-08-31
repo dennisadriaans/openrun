@@ -1,1 +1,0 @@
-You no longer have to scan mismatched composer strips when a run has queued messages, changed files, or pull-request controls — they now stack with consistent spacing, borders, labels, and actions across chat and run views.

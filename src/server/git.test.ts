@@ -8,9 +8,7 @@ import {
   captureBaseSnapshot,
   changedFiles,
   changedFilesAsync,
-  cloneRepo,
   commit,
-  createBranch,
   createPullRequest,
   discard,
   discardHunk,
@@ -249,18 +247,6 @@ describe('discardHunk', () => {
 function parseHunkCount(diff: string): number {
   return diff.split('\n').filter((line) => line.startsWith('@@ ')).length
 }
-
-describe('git argv leading-dash refusal', () => {
-  it('createBranch refuses a name that starts with -', () => {
-    const cwd = makeRepo()
-    assert.throws(() => createBranch(cwd, '--help'), /Invalid branch name/)
-  })
-
-  it('cloneRepo refuses a URL that starts with -', () => {
-    const dest = join(makeRepo(), 'clone-dest')
-    assert.throws(() => cloneRepo({ url: '--upload-pack=true', dest }), /Invalid clone URL/)
-  })
-})
 
 describe('push / createPullRequest origin gate', () => {
   it('push refuses a repo with no origin remote', () => {

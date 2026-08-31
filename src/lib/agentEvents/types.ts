@@ -90,12 +90,7 @@ export function textFromContentBlocks(content: unknown): string {
   for (const block of content) {
     if (!block || typeof block !== 'object') continue
     const b = block as Record<string, unknown>
-    if (
-      (b.type === 'text' || b.type === 'input_text' || b.type === 'output_text') &&
-      typeof b.text === 'string'
-    ) {
-      parts.push(b.text)
-    }
+    if (b.type === 'text' && typeof b.text === 'string') parts.push(b.text)
   }
   return parts.join('')
 }

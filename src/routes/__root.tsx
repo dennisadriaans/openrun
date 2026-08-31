@@ -20,8 +20,7 @@ import {
   User,
   Webhook,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useClickOutside } from '../hooks/useClickOutside'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import {
   AppTopBar,
@@ -91,6 +90,33 @@ const USER_MENU = [
 
 export const Icon = ({ className = 'size-4 rounded-[3px]' }: { className?: string }) => {
   return <img src="/favicon.svg" alt="" className={className} />
+}
+
+function useClickOutside(
+  active: boolean,
+  onOutside: () => void,
+  refs: Array<RefObject<HTMLElement | null>>,
+) {
+  const refsRef = useRef(refs)
+  refsRef.current = refs
+
+  useEffect(() => {
+    if (!active) return
+    const onPointer = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (refsRef.current.some((r) => r.current?.contains(target))) return
+      onOutside()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOutside()
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [active, onOutside])
 }
 
 function UserMenu() {

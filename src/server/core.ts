@@ -33,7 +33,6 @@ import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay, RUNTIME_PRESETS } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { runActivitySummary, runListTitle } from '../lib/runPreview'
-import { slimConversationEvent } from '../lib/turnEvents.ts'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
 import type { WebhookFilters } from '../lib/integrations/types'
 import {
@@ -1028,11 +1027,6 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     assertTaskWorkspaceIdle(tid)
   }
 
-  const taskWorkspace = getWorkspace(workspaceId)
-  if (taskWorkspace?.kind === 'main') {
-    throw new Error('Pick an isolated worktree. Automations cannot run in the primary checkout.')
-  }
-
   // cwd stays the source of truth for git operations (executor, diff panel,
   // etc.) — resolve once here so cwd stays in sync with the workspace path.
   const cwd = resolveWorkspacePath(workspaceId)
@@ -1722,17 +1716,6 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   })
 }
 
-/** Task ids with a live run — cheap status dots for the automations list. */
-export function listRunningTaskIds(): string[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT DISTINCT taskId FROM runs
-       WHERE status = 'running' AND taskId IS NOT NULL AND taskId != ''`,
-    )
-    .all() as Array<{ taskId: string }>
-  return rows.map((row) => row.taskId)
-}
-
 export function listRuns(opts?: {
   taskId?: string
   limit?: number
@@ -1850,6 +1833,27 @@ export type ChatMessage = Omit<MessageRow, 'diffSummary' | 'usage'> & {
   usage: TurnUsage | null
 }
 
+const MAX_EVENT_PAYLOAD_CHARS = 4_000
+
+/** Truncate oversized tool payloads so conversation polls stay light. */
+function slimTurnEvent(ev: TurnEventRow): TurnEventRow {
+  if (ev.payload.length <= MAX_EVENT_PAYLOAD_CHARS) return ev
+  try {
+    const obj = JSON.parse(ev.payload) as Record<string, unknown>
+    for (const key of ['content', 'input', 'text', 'result']) {
+      const val = obj[key]
+      if (typeof val === 'string' && val.length > 1_500) {
+        obj[key] = `${val.slice(0, 1_500)}…`
+      }
+    }
+    const next = JSON.stringify(obj)
+    if (next.length <= MAX_EVENT_PAYLOAD_CHARS) return { ...ev, payload: next }
+  } catch {
+    // fall through
+  }
+  return { ...ev, payload: `${ev.payload.slice(0, MAX_EVENT_PAYLOAD_CHARS)}…` }
+}
+
 /**
  * Chat-focused conversation payload (no git/`gh` work). Right panel data lives
  * in `getRunWorkspace` so polling the live chat does not re-shell git.
@@ -1863,7 +1867,7 @@ export function getConversation(runId: string) {
   const eventsByMessage = new Map<string, TurnEventRow[]>()
   for (const ev of listTurnEventsForRun(runId)) {
     const list = eventsByMessage.get(ev.messageId) ?? []
-    list.push(slimConversationEvent(ev))
+    list.push(slimTurnEvent(ev))
     eventsByMessage.set(ev.messageId, list)
   }
   const messages: ChatMessage[] =

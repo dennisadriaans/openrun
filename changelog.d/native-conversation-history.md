@@ -1,1 +1,0 @@
-You no longer lose the context of an existing native CLI conversation when bringing it into Open Run: saved history, assistant commentary, tool output, and pull-request references are preserved for follow-up turns.

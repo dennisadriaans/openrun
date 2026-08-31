@@ -21,9 +21,7 @@ export type TurnFoldPlan = {
 }
 
 /**
- * A settled turn folds tool calls and thoughts. Assistant prose always stays
- * visible: imported native chats often contain multiple commentary messages
- * before the final answer, and those are conversation history, not tool noise.
+ * A settled turn folds tool calls, thoughts, and in-progress commentary.
  * File-edit hunks stay in the response as change cards, next to the answer.
  *
  * A turn still running folds its work too — the working line is the whole
@@ -38,7 +36,18 @@ export function planTurnFold(rows: TurnRow[], settled: boolean): TurnFoldPlan {
     return { foldable: true, hiddenIds: workIds }
   }
 
-  const hiddenIds = new Set(rows.filter((row) => row.kind === 'work').map((row) => row.id))
+  let terminalTextId: string | null = null
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]!
+    if (row.kind === 'text') {
+      terminalTextId = row.id
+      break
+    }
+  }
+
+  const hiddenIds = new Set(
+    rows.filter((row) => row.id !== terminalTextId && row.kind !== 'edit').map((row) => row.id),
+  )
   if (hiddenIds.size === 0) return empty
   return { foldable: true, hiddenIds }
 }
