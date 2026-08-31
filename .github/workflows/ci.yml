@@ -85,6 +85,43 @@ jobs:
             git diff -- src/routeTree.gen.ts
           fi
 
+  changelog:
+    name: changelog entry
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Collect changed files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > changed-files.txt
+          {
+            echo 'files<<EOF'
+            cat changed-files.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require changelog fragment when release moves
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+        run: node --experimental-strip-types scripts/check-changelog.ts
+
   licenses:
     name: dependency licences
     runs-on: ubuntu-latest
