@@ -1,4 +1,4 @@
-import { Check, ChevronDown, FolderGit2, GitBranch, Plus } from 'lucide-react'
+import { Check, ChevronDown, Copy, FolderGit2, GitBranch, Plus } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { truncateBranchLabel, truncateNavTitle } from '../../lib/truncateLabel.ts'
 
@@ -201,8 +201,28 @@ export function NavigationWorkspacePicker({
   onRequestNewBranch?: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selected = workspaces.find((workspace) => workspace.id === workspaceId)
   const visible = expanded ? workspaces : workspaces.slice(0, PAGE_SIZE)
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    }
+  }, [])
+
+  const copyBranch = async (workspaceIdToCopy: string, branch: string) => {
+    try {
+      await navigator.clipboard.writeText(branch)
+      setCopiedId(workspaceIdToCopy)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopiedId(null), 1000)
+    } catch {
+      // Clipboard access can be unavailable in an insecure browser context.
+    }
+  }
+
   return (
     <NavigationMenu
       label={truncateBranchLabel(selected?.branch ?? 'Select branch')}
@@ -230,21 +250,67 @@ export function NavigationWorkspacePicker({
           <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Workspaces
           </div>
-          {visible.map((workspace) => (
-            <NavigationItem
-              key={workspace.id}
-              label={workspace.branch}
-              hint={workspace.kind === 'main' ? 'main' : undefined}
-              icon={<GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />}
-              active={workspace.id === workspaceId}
-              disabled={busyId === workspace.id}
-              unread={unreadIds.has(workspace.id)}
-              onSelect={() => {
-                onChange(workspace.id)
-                close()
-              }}
-            />
-          ))}
+          {visible.map((workspace) => {
+            const active = workspace.id === workspaceId
+            const copied = copiedId === workspace.id
+            return (
+              <div
+                key={workspace.id}
+                role="menuitem"
+                className={`group/workspace flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors ${
+                  active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
+                }`}
+              >
+                <button
+                  type="button"
+                  disabled={busyId === workspace.id}
+                  title={workspace.branch}
+                  onClick={() => {
+                    onChange(workspace.id)
+                    close()
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] leading-tight">{workspace.branch}</span>
+                    {workspace.kind === 'main' ? (
+                      <span className="block truncate text-[10px] leading-tight text-muted-foreground">
+                        main
+                      </span>
+                    ) : null}
+                  </span>
+                  {unreadIds.has(workspace.id) ? (
+                    <span
+                      role="img"
+                      aria-label="New activity"
+                      className="size-1.5 shrink-0 rounded-full bg-accent"
+                    />
+                  ) : null}
+                </button>
+                <span className="relative size-3.5 shrink-0">
+                  {active ? (
+                    <Check className="absolute inset-0 size-3.5 transition-opacity group-hover/workspace:opacity-0" aria-hidden="true" />
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void copyBranch(workspace.id, workspace.branch)}
+                    aria-label={copied ? `Copied branch ${workspace.branch}` : `Copy branch ${workspace.branch}`}
+                    title={copied ? 'Copied' : 'Copy branch name'}
+                    className={`absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 group-hover/workspace:opacity-100 ${
+                      copied ? 'text-success' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {copied ? (
+                      <Check className="size-3.5" aria-hidden="true" />
+                    ) : (
+                      <Copy className="size-3.5" aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
+              </div>
+            )
+          })}
           {workspaces.length > PAGE_SIZE ? (
             <button
               type="button"
