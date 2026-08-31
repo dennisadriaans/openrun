@@ -136,7 +136,7 @@ export function encodePairingQr(payload: PairingQrPayload): string {
   return JSON.stringify(payload)
 }
 
-/** Parse a scanned QR. Tolerates the `agentops://pair?base=…&code=…` form too. */
+/** Parse a scanned QR. JSON, plus `openrun://pair` and legacy `agentops://pair`. */
 export function decodePairingQr(raw: string): PairingQrPayload | null {
   const text = raw.trim()
   if (!text) return null
@@ -153,7 +153,7 @@ export function decodePairingQr(raw: string): PairingQrPayload | null {
     return null
   }
 
-  if (text.startsWith('agentops://')) {
+  if (text.startsWith('agentops://') || text.startsWith('openrun://')) {
     try {
       const url = new URL(text)
       const base = url.searchParams.get('base')

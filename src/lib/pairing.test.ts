@@ -128,6 +128,13 @@ test('the agentops:// URL form decodes and normalizes the code', () => {
   assert.deepEqual(decoded, { base: 'http://192.168.1.24:3000', code: 'A1B2C3D4' })
 })
 
+test('the openrun:// URL form decodes the same way', () => {
+  const decoded = decodePairingQr(
+    'openrun://pair?base=http%3A%2F%2F192.168.1.24%3A3000&code=a1b2-c3d4',
+  )
+  assert.deepEqual(decoded, { base: 'http://192.168.1.24:3000', code: 'A1B2C3D4' })
+})
+
 test('garbage and partial QR payloads decode to null', () => {
   assert.equal(decodePairingQr(''), null)
   assert.equal(decodePairingQr('hello'), null)
