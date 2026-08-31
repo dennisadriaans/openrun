@@ -1,5 +1,5 @@
 // The release pipeline's IO half. Every decision it makes comes from
-// `src/lib/release/*`, which is pure and tested; this file only reads git,
+// `scripts/release/*`, which is pure and tested; this file only reads git,
 // writes files and talks to `gh`.
 //
 //   plan     read-only: what would the next release be?
@@ -22,19 +22,14 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseCadence, isReleaseDue } from '../src/lib/release/cadence.ts'
-import {
-  extractRelease,
-  insertRelease,
-  renderReleaseNotes,
-  splitChangelog,
-} from '../src/lib/release/notes.ts'
-import type { Fragment } from '../src/lib/release/notes.ts'
-import { planRelease, summariseCounts } from '../src/lib/release/plan.ts'
-import type { ReleasePlan } from '../src/lib/release/plan.ts'
-import { highestVersion, toTag } from '../src/lib/release/semver.ts'
+import { parseCadence, isReleaseDue } from './cadence.ts'
+import { extractRelease, insertRelease, renderReleaseNotes, splitChangelog } from './notes.ts'
+import type { Fragment } from './notes.ts'
+import { planRelease, summariseCounts } from './plan.ts'
+import type { ReleasePlan } from './plan.ts'
+import { highestVersion, toTag } from './semver.ts'
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CHANGELOG = join(ROOT, 'CHANGELOG.md')
 const FRAGMENTS = join(ROOT, 'changelog.d')
 const PACKAGE = join(ROOT, 'package.json')

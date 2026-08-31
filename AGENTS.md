@@ -215,7 +215,7 @@ Neither hook may open an `EventSource` of its own.
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
 | Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
 | Open-core boundary (what is free vs. commercial) | `lib/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
-| Release pipeline: version maths, cadence, notes | `lib/release/` (`semver.ts`, `conventional.ts`, `plan.ts`, `cadence.ts`, `notes.ts`) — all pure, all tested; IO in `scripts/release.ts`; runbook in `RELEASING.md` |
+| Release pipeline: version maths, cadence, notes | `scripts/release/` (`semver.ts`, `conventional.ts`, `plan.ts`, `cadence.ts`, `notes.ts`) — all pure, all tested; IO in `scripts/release/index.ts`; runbook in `RELEASING.md` |
 | Why CI rejected a PR title, or a missing changelog entry | `lib/release/conventional.ts` (`validateCommitTitle`) → `scripts/check-title.ts`; `scripts/check-changelog.ts`; the `pr-title` workflow and the `changelog` job in `ci.yml` |
 | Cutting a release, or why one did not happen | `RELEASING.md`; `release.cadence` in `package.json`; `.github/workflows/release-prepare.yml` + `release-publish.yml` |
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |

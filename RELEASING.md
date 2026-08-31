@@ -71,8 +71,8 @@ Two rules hold a major back:
 - **At or past 1.0**, an automatic major still needs `--allow-major`. The release
   PR says the breaking changes are there and a human cuts the major.
 
-The rules live in `src/lib/release/` with colocated tests, so the same answer
-comes back locally, in CI, and anywhere the UI wants to preview a release.
+The rules live in `scripts/release/` with colocated tests, so local commands and
+CI always compute the same answer.
 
 ## Where the words come from
 
@@ -133,7 +133,7 @@ Never move a published tag.
 
 ## What a release does not do yet
 
-`Release · publish` attaches the build to the GitHub Release. There is no npm
-publish and no binary — the app is `private: true` and is installed by cloning.
-The distribution hook is the "Attach the build" step; new targets go there,
-after the tag exists and against the same SHA.
+`Release · publish` creates a tag and GitHub Release, but attaches no build
+artifact. There is no npm publish and no binary — the app is `private: true`
+and is installed by cloning. Future distribution targets should be added after
+the tag exists and must use that same SHA.

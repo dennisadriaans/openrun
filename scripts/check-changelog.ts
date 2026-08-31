@@ -4,7 +4,7 @@
 // load-bearing, because a `feat` with no fragment ships a release whose notes
 // have a version but nothing to say about it.
 
-import { commitBump, parseCommit } from '../src/lib/release/conventional.ts'
+import { commitBump, parseCommit } from './release/conventional.ts'
 
 const title = process.env.PR_TITLE ?? ''
 const body = process.env.PR_BODY ?? ''

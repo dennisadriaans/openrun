@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseCommit, validateCommitTitle } from '../src/lib/release/conventional.ts'
+import { parseCommit, validateCommitTitle } from './release/conventional.ts'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const TEMPLATE = join(ROOT, '.github', 'pull_request_template.md')

@@ -1,10 +1,10 @@
 // Validates a PR title against the commit rules, for the `PR title` workflow.
 //
-// The rules themselves live in `src/lib/release/conventional.ts` alongside their
+// The rules themselves live in `scripts/release/conventional.ts` alongside their
 // tests, so this file is only the CI entry point — the gate and `pnpm ship`
 // cannot drift into disagreeing about the same title.
 
-import { validateCommitTitle } from '../src/lib/release/conventional.ts'
+import { validateCommitTitle } from './release/conventional.ts'
 
 const title = process.argv[2] ?? process.env.PR_TITLE ?? ''
 

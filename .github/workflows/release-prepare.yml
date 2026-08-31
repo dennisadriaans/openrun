@@ -88,8 +88,8 @@ jobs:
 
 ## Test plan
 
-- [x] Release preparation ran lint, typecheck, tests and build.
-- [ ] Merge this PR to publish the tagged GitHub Release.")
+- [ ] Confirm the version and generated changelog match the changes since the previous tag.
+- [ ] Merge this PR and confirm the matching tag and GitHub Release are created.")
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # A PR opened by GITHUB_TOKEN does not trigger pull_request workflows.

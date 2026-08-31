@@ -40,10 +40,10 @@
     "lint": "biome check src scripts",
     "lint:fix": "biome check --write src scripts",
     "format": "biome format --write src scripts",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
-    "release:plan": "node --experimental-strip-types scripts/release.ts plan",
-    "release:prepare": "node --experimental-strip-types scripts/release.ts prepare",
-    "release:publish": "node --experimental-strip-types scripts/release.ts publish",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "release:plan": "node --experimental-strip-types scripts/release/index.ts plan",
+    "release:prepare": "node --experimental-strip-types scripts/release/index.ts prepare",
+    "release:publish": "node --experimental-strip-types scripts/release/index.ts publish",
     "ship": "node --experimental-strip-types scripts/ship.ts"
   },
   "dependencies": {
