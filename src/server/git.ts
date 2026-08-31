@@ -1204,8 +1204,9 @@ export function addWorktree(input: {
   const { repoPath, newBranch } = input
   const branch = refuseLeadingDash(input.branch, 'branch name')
   const baseRef = refuseLeadingDash(input.baseRef, 'base ref')
-  const path = refuseLeadingDash(input.path, 'worktree path')
-  if (newBranch) {
+  const path = input.path
+  if (!path.trim()) throw new Error('Worktree path is required')
+  if (path.startsWith('-') || path.includes('\0')) throw new Error('Invalid worktree path')
     gitOrThrow(repoPath, ['worktree', 'add', '-b', branch, '--', path, baseRef])
   } else {
     gitOrThrow(repoPath, ['worktree', 'add', '--', path, branch])
