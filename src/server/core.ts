@@ -33,6 +33,7 @@ import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay, RUNTIME_PRESETS } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { runActivitySummary, runListTitle } from '../lib/runPreview'
+import { slimConversationEvent } from '../lib/turnEvents.ts'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
 import type { WebhookFilters } from '../lib/integrations/types'
 import {
@@ -1849,27 +1850,6 @@ export type ChatMessage = Omit<MessageRow, 'diffSummary' | 'usage'> & {
   usage: TurnUsage | null
 }
 
-const MAX_EVENT_PAYLOAD_CHARS = 4_000
-
-/** Truncate oversized tool payloads so conversation polls stay light. */
-function slimTurnEvent(ev: TurnEventRow): TurnEventRow {
-  if (ev.payload.length <= MAX_EVENT_PAYLOAD_CHARS) return ev
-  try {
-    const obj = JSON.parse(ev.payload) as Record<string, unknown>
-    for (const key of ['content', 'input', 'text', 'result']) {
-      const val = obj[key]
-      if (typeof val === 'string' && val.length > 1_500) {
-        obj[key] = `${val.slice(0, 1_500)}…`
-      }
-    }
-    const next = JSON.stringify(obj)
-    if (next.length <= MAX_EVENT_PAYLOAD_CHARS) return { ...ev, payload: next }
-  } catch {
-    // fall through
-  }
-  return { ...ev, payload: `${ev.payload.slice(0, MAX_EVENT_PAYLOAD_CHARS)}…` }
-}
-
 /**
  * Chat-focused conversation payload (no git/`gh` work). Right panel data lives
  * in `getRunWorkspace` so polling the live chat does not re-shell git.
@@ -1883,7 +1863,7 @@ export function getConversation(runId: string) {
   const eventsByMessage = new Map<string, TurnEventRow[]>()
   for (const ev of listTurnEventsForRun(runId)) {
     const list = eventsByMessage.get(ev.messageId) ?? []
-    list.push(slimTurnEvent(ev))
+    list.push(slimConversationEvent(ev))
     eventsByMessage.set(ev.messageId, list)
   }
   const messages: ChatMessage[] =
