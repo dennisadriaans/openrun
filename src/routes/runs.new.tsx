@@ -9,7 +9,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Composer } from '../components/Chat'
+import { Composer } from '../components/chat/Composer'
 import { BranchPicker, ProjectPicker, RuntimePicker } from '../components/ComposerControls'
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'

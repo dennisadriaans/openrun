@@ -9,6 +9,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Check, ChevronDown, ChevronRight, Copy, GitBranch, Plus } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useClickOutside } from '../../hooks/useClickOutside'
 import type { WorkspaceWithMeta } from '../../fns'
 import { fetchLatestRunForWorkspace } from '../../lib/queries'
 
@@ -54,22 +55,8 @@ function BranchSwitcher({
   const ref = useRef<HTMLDivElement>(null)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const navigate = useNavigate()
-
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onPointer)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const close = () => setOpen(false)
+  useClickOutside(open, close, [ref])
 
   useEffect(() => {
     return () => {

@@ -1722,6 +1722,17 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   })
 }
 
+/** Task ids with a live run — cheap status dots for the automations list. */
+export function listRunningTaskIds(): string[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT taskId FROM runs
+       WHERE status = 'running' AND taskId IS NOT NULL AND taskId != ''`,
+    )
+    .all() as Array<{ taskId: string }>
+  return rows.map((row) => row.taskId)
+}
+
 export function listRuns(opts?: {
   taskId?: string
   limit?: number
