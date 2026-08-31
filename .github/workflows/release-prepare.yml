@@ -77,19 +77,22 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           REASON: ${{ steps.release.outputs.reason }}
         run: |
+          {
+            echo '## Summary'
+            echo ''
+            echo "- Prepare **$TAG** for release."
+            echo "- $REASON"
+            echo ''
+            echo '## Test plan'
+            echo ''
+            echo '- [ ] Confirm the version and generated changelog match the changes since the previous tag.'
+            echo '- [ ] Merge this PR and confirm the matching tag and GitHub Release are created.'
+          } > /tmp/pr-body.md
           url=$(gh pr create \
             --base main \
             --head "$BRANCH" \
             --title "chore(release): $TAG" \
-            --body "## Summary
-
-- Prepare **$TAG** for release.
-- $REASON
-
-## Test plan
-
-- [ ] Confirm the version and generated changelog match the changes since the previous tag.
-- [ ] Merge this PR and confirm the matching tag and GitHub Release are created.")
+            --body-file /tmp/pr-body.md)
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # A PR opened by GITHUB_TOKEN does not trigger pull_request workflows.
