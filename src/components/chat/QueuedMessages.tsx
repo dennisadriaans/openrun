@@ -18,7 +18,6 @@ export function QueuedMessages({
   onSendNow,
   onDrop,
   onClear,
-  stackTop = true,
 }: {
   queued: QueuedMessage[]
   /** The run is still working, so the queue drains on its own. */
@@ -28,16 +27,12 @@ export function QueuedMessages({
   onSendNow: () => void
   onDrop: (id: string) => void
   onClear: () => void
-  /** Rounded top when this strip is the top of a composer stack. */
-  stackTop?: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
   if (queued.length === 0) return null
 
   return (
-    <div
-      className={`chat-composer-strip${stackTop ? ' chat-composer-strip-top' : ' chat-composer-strip-continued'}`}
-    >
+    <div className="chat-files-glass rounded-t-[16px] border border-b-0 border-border">
       <div className="flex items-center gap-1 px-2 py-1.5">
         <button
           type="button"

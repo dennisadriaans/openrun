@@ -9,7 +9,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Composer } from '../components/chat/Composer'
+import { Composer } from '../components/Chat'
 import { BranchPicker, ProjectPicker, RuntimePicker } from '../components/ComposerControls'
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
@@ -115,7 +115,7 @@ function NewRun() {
   const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
   const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
-    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
+    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived' && w.kind === 'worktree'),
     [allWorkspaces],
   )
   const branchChoices = useMemo(
@@ -144,9 +144,7 @@ function NewRun() {
   useEffect(() => {
     if (workspaces.some((w) => w.id === workspaceId)) return
     const preferred =
-      workspaces.find(
-        (w) => w.kind === 'worktree' && isWorkspaceReady(w.status) && !w.activeRunId,
-      ) ?? workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId)
+      workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId) ?? workspaces[0]
     setWorkspaceId(preferred?.id ?? '')
   }, [workspaces, workspaceId])
 
@@ -480,8 +478,7 @@ function NewRun() {
       {newWorkspaceOpen && project ? (
         <NewWorkspaceModal
           projectName={project.name}
-          defaultBaseBranch={project.defaultBranch || ''}
-          baseBranches={gitBranches ?? []}
+          defaultBaseBranch={workspace?.branch || project.defaultBranch || ''}
           pending={createWorkspace.isPending}
           onClose={() => setNewWorkspaceOpen(false)}
           onCreate={async (input) => {

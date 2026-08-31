@@ -236,7 +236,7 @@ function RunsPage() {
                     </span>
                     <span className="min-w-0">
                       <span
-                        className="block truncate text-ui-base text-foreground pr-6"
+                        className="block truncate text-ui-base text-foreground"
                         title={r.chatTitle}
                       >
                         {r.chatTitle}

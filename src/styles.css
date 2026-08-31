@@ -323,22 +323,16 @@ body {
   isolation: isolate;
 }
 
-.chat-composer-strip {
+.chat-files-glass {
   overflow: hidden;
   isolation: isolate;
-  background: var(--bg-elevated);
-  border-inline: 1px solid var(--color-border);
-  border-bottom: 0;
 }
 
-.chat-composer-strip-top {
-  border-top: 1px solid var(--color-border);
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
-}
-
-.chat-composer-strip-continued {
-  border-top: 1px solid var(--color-border);
+.chat-files-glass,
+.chat-glass-fill {
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--bg-elevated) 52%, transparent);
 }
 
 .chat-glass-fill {
@@ -348,13 +342,19 @@ body {
   overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
-  background: var(--bg-elevated);
 }
 
 .chat-composer-lower-chrome {
   margin-top: -1px;
   padding-top: 1px;
   background: var(--bg-chrome);
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .chat-files-glass,
+  .chat-glass-fill {
+    background: var(--bg-elevated);
+  }
 }
 
 /*

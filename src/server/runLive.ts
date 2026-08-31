@@ -5,11 +5,9 @@
  * (`/api/runs/$runId/stream`) subscribes and pushes frames to open browsers.
  * One local user, one Node process — no Redis, no cross-machine fan-out.
  */
-import { SERVER_PING_MS } from '../lib/liveStream.ts'
 import type { RunLiveEvent } from '../lib/runLive'
 
 export type { RunLiveEvent }
-export { SERVER_PING_MS }
 
 type Listener = (event: RunLiveEvent) => void
 
@@ -45,6 +43,8 @@ export function runLiveSubscriberCount(runId: string): number {
   return listeners.get(runId)?.size ?? 0
 }
 
+const DEFAULT_PING_MS = 15_000
+
 /**
  * Build an SSE ReadableStream for one run. Sends `hello`, then live events,
  * with periodic `ping` heartbeats. Abort (client disconnect) tears down the
@@ -55,7 +55,7 @@ export function createRunLiveSseStream(
   opts: { status: string; signal: AbortSignal; pingMs?: number },
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
-  const pingMs = opts.pingMs ?? SERVER_PING_MS
+  const pingMs = opts.pingMs ?? DEFAULT_PING_MS
 
   return new ReadableStream<Uint8Array>({
     start(controller) {

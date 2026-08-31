@@ -30,7 +30,6 @@ import {
   useArchiveWorkspace,
   useCreateWorkspace,
   useProjects,
-  useProjectBranches,
   useRemoveProject,
   useRetryWorkspaceSetup,
   useRuntimes,
@@ -592,14 +591,9 @@ function NewWorkspaceModal({
   onClose: () => void
 }) {
   const create = useCreateWorkspace()
-  const { data: baseBranches = [] } = useProjectBranches(project.id)
   const [branch, setBranch] = useState('')
   const [fromBranch, setFromBranch] = useState(project.defaultBranch)
   const [useExistingBranch, setUseExistingBranch] = useState(false)
-  const branchChoices = [
-    project.defaultBranch,
-    ...baseBranches.map((candidate) => candidate.name),
-  ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index)
 
   const submit = async () => {
     await create.mutateAsync({
@@ -625,18 +619,11 @@ function NewWorkspaceModal({
         </Field>
 
         <Field label="Base branch" hint="defaults to the project's default branch">
-          <select
+          <input
             className={`${inputClass} mono text-[13px]`}
             value={fromBranch}
             onChange={(e) => setFromBranch(e.target.value)}
-          >
-            {branchChoices.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {candidate}
-                {candidate === project.defaultBranch ? ' (default)' : ''}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <label className="flex items-center gap-2.5">

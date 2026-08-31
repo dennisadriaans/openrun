@@ -12,7 +12,6 @@ import * as fns from '../fns'
 import { Chat } from '../components/Chat'
 import { ChatDebugMenuItem } from '../components/chat/ChatDebugToggle'
 import { ContextMeter } from '../components/chat/ContextMeter'
-import { ThreadStack } from '../components/chat/ThreadStack'
 import { TerminalPaletteMenuItems } from '../components/chat/TerminalPalettePicker'
 import { useChatTheme } from '../components/chat/ChatThemeProvider'
 import { DiffPanel } from '../components/DiffPanel'
@@ -44,7 +43,6 @@ import {
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
 import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
-import { runListTitle } from '../lib/runPreview'
 import {
   NO_RUN_COMMITS,
   shortSha,
@@ -476,7 +474,6 @@ function RunDetail() {
               </Link>
 
               <WorkspaceBreadcrumb
-                projectId={project?.id}
                 projectName={project?.name}
                 branch={workspace?.branch}
                 isMainCheckout={workspace?.kind === 'main'}
@@ -484,22 +481,6 @@ function RunDetail() {
                 workspaces={workspaces}
                 branchDisabled={booting}
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
-                trailing={
-                  run ? (
-                    <ThreadStack
-                      runId={run.id}
-                      title={runListTitle({
-                        trigger: run.trigger,
-                        taskName: run.taskName,
-                        prompt: firstPrompt,
-                      })}
-                      runtimeId={data?.runtime?.id ?? run.runtimeId}
-                      runtimeLabel={data?.runtime?.label ?? run.runtimeId}
-                      workspaceId={workspace?.id ?? run.workspaceId}
-                      projectId={project?.id ?? workspace?.projectId ?? ''}
-                    />
-                  ) : null
-                }
               />
 
               <div className="flex shrink-0 items-center gap-0.5">
@@ -619,7 +600,6 @@ function RunDetail() {
                 checkResults={checkResults}
                 pullRequest={pullRequest ?? null}
                 pullRequestError={pullRequestError}
-                repositoryUrl={project?.remoteUrl}
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}

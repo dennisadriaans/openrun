@@ -1,9 +1,9 @@
 /**
  * Native CLI session listing — parse-only, browser-safe.
  *
- * These helpers turn each CLI's on-disk index (or a JSONL *prefix*) into picker
- * rows: id, title, timestamps. Full transcript parsing lives separately in
- * `nativeTranscript.ts`; the server module locates both stores for the cwd.
+ * Open Run does not ingest transcripts. These helpers turn each CLI's on-disk
+ * index (or a JSONL *prefix*) into picker rows: id, title, timestamps. The
+ * server module walks the matching home-dir folder for the workspace cwd.
  */
 import { isAcpTransport } from './acpTransport.ts'
 import { modelKindForBin, type RuntimeModelKind } from './models.ts'
