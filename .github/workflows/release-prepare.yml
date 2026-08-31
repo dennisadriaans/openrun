@@ -110,3 +110,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ steps.pr.outputs.url }}
         run: gh pr merge "$PR_URL" --auto --squash
+
+      # A merge performed with GITHUB_TOKEN does not emit another workflow run,
+      # so the push trigger in release-publish.yml cannot observe this merge.
+      - name: Wait for release PR to merge
+        if: steps.release.outputs.prepared == 'true'
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          while true; do
+            merged_at=$(gh pr view "$PR_URL" --json mergedAt --jq '.mergedAt // ""')
+            state=$(gh pr view "$PR_URL" --json state --jq .state)
+            if [[ -n "$merged_at" ]]; then
+              break
+            fi
+            if [[ "$state" == "CLOSED" ]]; then
+              echo "Release PR closed without merging."
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Publish merged release
+        if: steps.release.outputs.prepared == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-publish.yml --ref main

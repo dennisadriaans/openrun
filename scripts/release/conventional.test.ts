@@ -5,6 +5,7 @@ import {
   COMMIT_TYPE_NAMES,
   MAX_SUBJECT_LENGTH,
   commitBump,
+  isReleaseCommitSubject,
   parseCommit,
   typeMeta,
   validateCommitTitle,
@@ -34,6 +35,13 @@ test('a subject with no PR suffix keeps its full description', () => {
   const commit = at('docs: document the release pipeline')
   assert.equal(commit.description, 'document the release pipeline')
   assert.equal(commit.pr, null)
+})
+
+test('recognises release commits before and after squash merge', () => {
+  assert.equal(isReleaseCommitSubject('chore(release): v0.1.0', 'v0.1.0'), true)
+  assert.equal(isReleaseCommitSubject('chore(release): v0.1.0 (#63)', 'v0.1.0'), true)
+  assert.equal(isReleaseCommitSubject('chore(release): v0.1.1 (#64)', 'v0.1.0'), false)
+  assert.equal(isReleaseCommitSubject('fix(release): v0.1.0 (#63)', 'v0.1.0'), false)
 })
 
 test('detects a breaking change from the bang', () => {

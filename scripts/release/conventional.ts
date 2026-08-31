@@ -111,6 +111,12 @@ function stripPr(text: string): { text: string; pr: number | null } {
   return { text: text.slice(0, match.index).trim(), pr: Number(match[1]) }
 }
 
+/** Accepts the release commit before or after GitHub appends its squash PR number. */
+export function isReleaseCommitSubject(subject: string, tag: string): boolean {
+  const commit = parseCommit({ sha: '', subject })
+  return commit.type === 'chore' && commit.scope === 'release' && commit.description === tag
+}
+
 /** Metadata for a parsed commit's type, or null for an unknown/unconventional one. */
 export function typeMeta(commit: ParsedCommit): CommitTypeMeta | null {
   if (!commit.type) return null

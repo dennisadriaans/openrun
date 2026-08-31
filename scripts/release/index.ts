@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { parseCadence, isReleaseDue } from './cadence.ts'
+import { isReleaseCommitSubject } from './conventional.ts'
 import { extractRelease, insertRelease, renderReleaseNotes, splitChangelog } from './notes.ts'
 import type { Fragment } from './notes.ts'
 import { planRelease, summariseCounts } from './plan.ts'
@@ -357,7 +358,7 @@ function commandPublish(argv: string[]): number {
   }
 
   const subject = git('log', '-1', '--format=%s')
-  if (subject !== `chore(release): ${tag}`) {
+  if (!isReleaseCommitSubject(subject, tag)) {
     console.log(`HEAD is "${subject}", not the release commit for ${tag} — nothing to publish.`)
     setOutput('published', 'false')
     return 0
