@@ -17,6 +17,7 @@ import {
   hostHeaderRefusal,
   insecureHostWarning,
   isDocumentRequest,
+  mergeAllowedHosts,
   parseAllowedHosts,
   serverBindRefusal,
   tokenRequiredForRequests,
@@ -27,6 +28,8 @@ import {
 } from '../lib/serverAccess.ts'
 import { openrunEnv } from '../lib/openrunEnv.ts'
 import { openrunHome } from './db.ts'
+import { mobileEnabled } from './mobile/config.ts'
+import { lanAddresses } from './mobile/lan.ts'
 
 /** Owner read/write only. Anything wider and the token is not a secret. */
 const OWNER_ONLY = 0o600
@@ -102,7 +105,10 @@ export function serverAccessConfig(): ServerAccessConfig {
     host: resolveHost(),
     hasToken: resolveAccessToken() !== null,
     allowInsecureHost: allowInsecureHost(),
-    allowedHosts: parseAllowedHosts(openrunEnv('ALLOWED_HOSTS')),
+    allowedHosts: mergeAllowedHosts(
+      parseAllowedHosts(openrunEnv('ALLOWED_HOSTS')),
+      mobileEnabled() ? lanAddresses() : [],
+    ),
   }
 }
 
