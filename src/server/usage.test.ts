@@ -1,6 +1,6 @@
 /**
  * Each CLI's real history layout is built on disk and its home override points
- * at it. The chdir is for `usage_file_cache`, which `getDb()` resolves by cwd.
+ * at it. OPENRUN_HOME isolates `usage_file_cache` from the developer's database.
  */
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -13,6 +13,8 @@ const home = join(root, 'home')
 const project = join(root, 'code', 'openrun')
 const worktree = join(project, '.worktrees', 'fix')
 const cwdBefore = process.cwd()
+const previousHome = process.env.OPENRUN_HOME
+process.env.OPENRUN_HOME = join(root, '.openrun')
 process.chdir(root)
 
 process.env.OPENRUN_CLAUDE_LIMITS = '0'
@@ -169,6 +171,8 @@ before(() => {
 after(() => {
   closeDb()
   process.chdir(cwdBefore)
+  if (previousHome === undefined) delete process.env.OPENRUN_HOME
+  else process.env.OPENRUN_HOME = previousHome
   rmSync(root, { recursive: true, force: true })
   for (const key of [
     'OPENRUN_CLAUDE_LIMITS',

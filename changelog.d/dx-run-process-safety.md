@@ -1,1 +1,0 @@
-You no longer leave agent CLIs (claude / codex / grok / gemini) burning tokens after a server restart, Vite HMR reload, or Ctrl+C — Cancel always kills by process id when the in-memory handle is gone, boot reaps orphan `running` rows, Disable stops in-flight agents for that automation, and shutdown hooks tear down every live CLI before the process exits.
