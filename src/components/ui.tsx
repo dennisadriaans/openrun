@@ -15,17 +15,22 @@ export function Tooltip({
   content,
   delay = 400,
   disabled = false,
+  placement = 'top',
   children,
 }: {
   content: string
   delay?: number
   disabled?: boolean
+  /** Prefer bottom under top bars where there is no room above the trigger. */
+  placement?: 'top' | 'bottom'
   children: ReactNode
 }) {
   const wrapRef = useRef<HTMLSpanElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
   const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; below: boolean } | null>(null)
 
   const clear = () => {
     if (timer.current) {
@@ -43,16 +48,29 @@ export function Tooltip({
     if (disabled || !content) return
     clear()
     timer.current = setTimeout(() => {
+      if (disabledRef.current || !content) return
       const el = wrapRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      setPos({ top: rect.top - 6, left: rect.left + rect.width / 2 })
+      const below =
+        placement === 'bottom' ||
+        (placement === 'top' && rect.top < 56 && rect.bottom + 56 < window.innerHeight)
+      const center = rect.left + rect.width / 2
+      const margin = 8
+      const left = Math.min(window.innerWidth - margin, Math.max(margin, center))
+      setPos({
+        top: below ? rect.bottom + 6 : rect.top - 6,
+        left,
+        below,
+      })
       setOpen(true)
     }, delay)
   }
 
   useEffect(() => {
-    if (disabled) setOpen(false)
+    if (!disabled) return
+    clear()
+    setOpen(false)
   }, [disabled])
   useEffect(() => () => clear(), [])
 
@@ -75,10 +93,12 @@ export function Tooltip({
                 position: 'fixed',
                 top: pos.top,
                 left: pos.left,
-                transform: 'translate(-50%, -100%)',
+                transform: pos.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
                 zIndex: 300,
               }}
-              className="pointer-events-none inline-flex w-fit max-w-xs origin-bottom items-center rounded-md bg-foreground px-3 py-1.5 text-ui-sm text-background"
+              className={`pointer-events-none inline-flex w-fit max-w-xs items-center rounded-md bg-foreground px-3 py-1.5 text-ui-sm text-background ${
+                pos.below ? 'origin-top' : 'origin-bottom'
+              }`}
             >
               {content}
             </span>,

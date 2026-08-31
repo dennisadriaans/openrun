@@ -29,6 +29,7 @@ import {
   type ModelOption,
 } from '../lib/models'
 import { usePickerPrefs } from '../lib/pickerPrefs'
+import { truncateBranchLabel, truncateNavTitle } from '../lib/truncateLabel'
 import {
   hiddenRuntimesIn,
   installedRuntimes,
@@ -63,7 +64,10 @@ export function FooterMenu({
   tooltip,
   disabled,
   leading,
+  trailing,
   align = 'start',
+  size = 'default',
+  muted,
   invalid,
   'aria-describedby': ariaDescribedBy,
   onOpen,
@@ -74,7 +78,10 @@ export function FooterMenu({
   tooltip?: string
   disabled?: boolean
   leading?: ReactNode
+  trailing?: ReactNode
   align?: 'start' | 'end'
+  size?: 'default' | 'compact'
+  muted?: boolean
   invalid?: boolean
   'aria-describedby'?: string
   onOpen?: () => void
@@ -129,31 +136,60 @@ export function FooterMenu({
     }
   }, [open, align])
 
-  const menu = (
+  const compact = size === 'compact'
+  const trigger = (
+    <button
+      ref={buttonRef}
+      type="button"
+      disabled={disabled}
+      title={tooltip ? undefined : title}
+      aria-expanded={open}
+      aria-haspopup="menu"
+      aria-invalid={invalid || undefined}
+      aria-describedby={ariaDescribedBy}
+      onClick={() => {
+        if (!open) onOpen?.()
+        setOpen((v) => !v)
+      }}
+      className={
+        compact
+          ? `flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] disabled:opacity-40 ${
+              invalid
+                ? 'text-rose-300'
+                : muted
+                  ? 'text-muted-foreground'
+                  : 'font-medium text-foreground'
+            }`
+          : `inline-flex h-8 max-w-52 min-w-0 items-center gap-2 truncate rounded-lg px-2.5 text-ui-base transition-colors hover:bg-hover disabled:pointer-events-none disabled:opacity-40 sm:max-w-60 ${
+              invalid
+                ? 'text-rose-300 hover:text-rose-200'
+                : 'text-tier-tertiary hover:text-tier-secondary'
+            }`
+      }
+    >
+      {leading}
+      <span className={compact ? 'mono min-w-0 flex-1 truncate' : 'truncate'}>{label}</span>
+      {trailing}
+      <ChevronDown
+        className={
+          compact
+            ? 'h-3 w-3 shrink-0 text-muted-foreground/60'
+            : 'h-3.5 w-3.5 shrink-0 text-tier-quaternary'
+        }
+        aria-hidden="true"
+      />
+    </button>
+  )
+
+  return (
     <div ref={triggerRef} className="relative min-w-0">
-      <button
-        ref={buttonRef}
-        type="button"
-        disabled={disabled}
-        title={tooltip ? undefined : title}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-invalid={invalid || undefined}
-        aria-describedby={ariaDescribedBy}
-        onClick={() => {
-          if (!open) onOpen?.()
-          setOpen((v) => !v)
-        }}
-        className={`inline-flex h-8 max-w-52 min-w-0 items-center gap-2 truncate rounded-lg px-2.5 text-ui-base transition-colors hover:bg-hover disabled:pointer-events-none disabled:opacity-40 sm:max-w-60 ${
-          invalid
-            ? 'text-rose-300 hover:text-rose-200'
-            : 'text-tier-tertiary hover:text-tier-secondary'
-        }`}
-      >
-        {leading}
-        <span className="truncate">{label}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-tier-quaternary" />
-      </button>
+      {tooltip ? (
+        <Tooltip content={tooltip} disabled={open} placement="bottom">
+          {trigger}
+        </Tooltip>
+      ) : (
+        trigger
+      )}
       {open
         ? createPortal(
             <div
@@ -165,7 +201,7 @@ export function FooterMenu({
                 ...(coords?.openUp
                   ? { bottom: window.innerHeight - (coords?.top ?? 0) }
                   : { top: coords?.top ?? 0 }),
-                zIndex: 200,
+                zIndex: 400,
                 maxHeight: coords?.maxHeight,
                 visibility: coords ? 'visible' : 'hidden',
               }}
@@ -177,13 +213,6 @@ export function FooterMenu({
           )
         : null}
     </div>
-  )
-
-  if (!tooltip) return menu
-  return (
-    <Tooltip content={tooltip} disabled={open}>
-      {menu}
-    </Tooltip>
   )
 }
 
@@ -223,6 +252,52 @@ export function MenuItem({
         ) : null}
       </span>
       {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
+    </button>
+  )
+}
+
+const MENU_LIST_EXPAND_TOGGLE_CLASS =
+  'flex w-full items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground'
+
+/** Expand a truncated menu list to show all rows, or collapse back to the first page. */
+export function MenuListExpandToggle({
+  totalCount,
+  visibleCount,
+  pageSize,
+  expandLabel,
+  onVisibleCountChange,
+  className = MENU_LIST_EXPAND_TOGGLE_CLASS,
+}: {
+  totalCount: number
+  visibleCount: number
+  pageSize: number
+  expandLabel: string
+  onVisibleCountChange: (count: number) => void
+  className?: string
+}) {
+  const hasHidden = visibleCount < totalCount
+  const isExpanded = visibleCount > pageSize
+  if (totalCount <= pageSize || (!hasHidden && !isExpanded)) return null
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      aria-label={hasHidden ? expandLabel : 'Show fewer'}
+      onClick={() => onVisibleCountChange(hasHidden ? totalCount : pageSize)}
+      className={className}
+    >
+      {hasHidden ? (
+        <>
+          {expandLabel}
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        </>
+      ) : (
+        <>
+          Show fewer
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 rotate-180" aria-hidden="true" />
+        </>
+      )}
     </button>
   )
 }
@@ -434,6 +509,7 @@ export function ProjectPicker({
   projectId,
   disabled,
   invalid,
+  appearance = 'composer',
   'aria-describedby': ariaDescribedBy,
   placeholder = 'Select repository',
   onChange,
@@ -443,6 +519,7 @@ export function ProjectPicker({
   projectId: string
   disabled?: boolean
   invalid?: boolean
+  appearance?: 'composer' | 'nav'
   'aria-describedby'?: string
   placeholder?: string
   onChange: (id: string) => void
@@ -450,14 +527,16 @@ export function ProjectPicker({
   onAddProject?: () => void
 }) {
   const selected = projects.find((p) => p.id === projectId)
+  const nav = appearance === 'nav'
 
   return (
     <FooterMenu
-      label={selected?.name ?? placeholder}
+      label={truncateNavTitle(selected?.name ?? placeholder, 22)}
       title={selected?.path || selected?.name || placeholder}
-      tooltip="Git repo to work in"
+      tooltip={nav ? undefined : 'Git repo to work in'}
       disabled={disabled}
       invalid={invalid}
+      size={nav ? 'compact' : 'default'}
       aria-describedby={ariaDescribedBy}
       leading={<FolderGit2 className="h-3.5 w-3.5 shrink-0" />}
     >
@@ -523,16 +602,75 @@ export type BranchOption = {
 
 const BRANCH_PAGE_SIZE = 5
 
+function UnreadDot({ label }: { label: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className="size-1.5 shrink-0 rounded-full bg-accent"
+    />
+  )
+}
+
+function CompactBranchItem({
+  option,
+  active,
+  disabled,
+  unread,
+  onSelect,
+}: {
+  option: BranchOption
+  active: boolean
+  disabled?: boolean
+  unread?: boolean
+  onSelect: () => void
+}) {
+  const sublabel = option.blockedReason ?? (option.kind === 'main' ? 'main' : undefined)
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      title={option.blockedReason ?? option.branch}
+      onClick={onSelect}
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
+      }`}
+    >
+      {option.action === 'create-workspace' ? (
+        <Plus className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      ) : (
+        <GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate mono text-[12.5px] leading-tight">{option.branch}</span>
+        {sublabel ? (
+          <span className="block truncate text-[10px] leading-tight text-muted-foreground">
+            {sublabel}
+          </span>
+        ) : null}
+      </span>
+      {unread ? <UnreadDot label="New activity" /> : null}
+      {active ? <Check className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+    </button>
+  )
+}
+
 export function BranchPicker({
   workspaces,
   workspaceId,
   disabled,
   disabledReason,
   busyLabel,
+  busyId,
   invalid,
+  muted,
+  appearance = 'composer',
+  unreadIds,
   'aria-describedby': ariaDescribedBy,
   placeholder = 'Select branch',
-  newBranchLabel = 'New branch',
+  newBranchLabel = 'New branch…',
   onChange,
   onRequestNewBranch,
 }: {
@@ -541,7 +679,11 @@ export function BranchPicker({
   disabled?: boolean
   disabledReason?: string
   busyLabel?: string
+  busyId?: string | null
   invalid?: boolean
+  muted?: boolean
+  appearance?: 'composer' | 'nav'
+  unreadIds?: ReadonlySet<string>
   'aria-describedby'?: string
   placeholder?: string
   newBranchLabel?: string
@@ -551,20 +693,50 @@ export function BranchPicker({
   const selected = workspaces.find((w) => w.id === workspaceId)
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(BRANCH_PAGE_SIZE)
   const [visibleBranchCount, setVisibleBranchCount] = useState(BRANCH_PAGE_SIZE)
+  const compact = appearance === 'nav'
   const existing = workspaces.filter((w) => w.action !== 'create-workspace')
-  const unopened = workspaces.filter((w) => w.action === 'create-workspace')
+  const unopened = compact ? [] : workspaces.filter((w) => w.action === 'create-workspace')
   const visibleWorkspaces = existing.slice(0, visibleWorkspaceCount)
   const visibleBranches = unopened.slice(0, visibleBranchCount)
+  const headingClass = compact
+    ? 'px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground'
+    : 'px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-tier-quaternary'
+  const expandClass = compact
+    ? 'flex w-full items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground'
+    : undefined
 
   return (
     <FooterMenu
-      label={busyLabel ?? selected?.branch ?? placeholder}
-      title={selected?.blockedReason ?? selected?.branch ?? placeholder}
-      tooltip={selected?.blockedReason ?? disabledReason ?? 'Workspace and branch'}
+      label={truncateBranchLabel(busyLabel ?? selected?.branch ?? placeholder)}
+      title={selected?.blockedReason ?? disabledReason ?? selected?.branch ?? placeholder}
+      tooltip={
+        compact ? undefined : (selected?.blockedReason ?? disabledReason ?? 'Workspace and branch')
+      }
       disabled={disabled}
       invalid={invalid || Boolean(selected?.blockedReason)}
+      muted={muted}
+      size={compact ? 'compact' : 'default'}
       aria-describedby={ariaDescribedBy}
-      leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+      leading={
+        <GitBranch
+          aria-hidden="true"
+          className={
+            compact ? 'h-3.5 w-3.5 shrink-0 text-muted-foreground/60' : 'h-3.5 w-3.5 shrink-0'
+          }
+        />
+      }
+      trailing={
+        compact ? (
+          <>
+            {selected && unreadIds?.has(selected.id) ? (
+              <UnreadDot label="New activity in this worktree" />
+            ) : null}
+            {selected?.kind === 'main' ? (
+              <span className="shrink-0 text-[11px] text-muted-foreground/50">(main)</span>
+            ) : null}
+          </>
+        ) : undefined
+      }
       onOpen={() => {
         setVisibleWorkspaceCount(BRANCH_PAGE_SIZE)
         setVisibleBranchCount(BRANCH_PAGE_SIZE)
@@ -575,35 +747,43 @@ export function BranchPicker({
           {existing.length === 0 && unopened.length === 0 ? (
             <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">No branches yet</div>
           ) : null}
-          {existing.length > 0 ? (
-            <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-tier-quaternary">
-              Workspaces
-            </div>
-          ) : null}
-          {visibleWorkspaces.map((w) => (
-            <MenuItem
-              key={w.id}
-              active={w.id === workspaceId}
-              disabled={Boolean(w.blockedReason)}
-              label={w.branch}
-              hint={w.blockedReason ?? w.hint}
-              leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
-              onSelect={() => {
-                onChange(w.id)
-                close()
-              }}
-            />
-          ))}
-          {visibleWorkspaces.length < existing.length ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => setVisibleWorkspaceCount((count) => count + BRANCH_PAGE_SIZE)}
-              className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground"
-            >
-              More workspaces
-            </button>
-          ) : null}
+          {existing.length > 0 ? <div className={headingClass}>Workspaces</div> : null}
+          {visibleWorkspaces.map((w) =>
+            compact ? (
+              <CompactBranchItem
+                key={w.id}
+                option={w}
+                active={w.id === workspaceId}
+                disabled={Boolean(w.blockedReason) || busyId === w.id}
+                unread={unreadIds?.has(w.id)}
+                onSelect={() => {
+                  onChange(w.id)
+                  close()
+                }}
+              />
+            ) : (
+              <MenuItem
+                key={w.id}
+                active={w.id === workspaceId}
+                disabled={Boolean(w.blockedReason)}
+                label={w.branch}
+                hint={w.blockedReason ?? w.hint}
+                leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                onSelect={() => {
+                  onChange(w.id)
+                  close()
+                }}
+              />
+            ),
+          )}
+          <MenuListExpandToggle
+            totalCount={existing.length}
+            visibleCount={visibleWorkspaceCount}
+            pageSize={BRANCH_PAGE_SIZE}
+            expandLabel="More workspaces"
+            onVisibleCountChange={setVisibleWorkspaceCount}
+            {...(expandClass ? { className: expandClass } : {})}
+          />
           {unopened.length > 0 ? (
             <div className="mt-1 border-t border-border px-2.5 pt-2 pb-1.5 text-[10px] uppercase tracking-wide text-tier-quaternary">
               Open Branch in New Workspace
@@ -621,26 +801,37 @@ export function BranchPicker({
               }}
             />
           ))}
-          {visibleBranches.length < unopened.length ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => setVisibleBranchCount((count) => count + BRANCH_PAGE_SIZE)}
-              className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground"
-            >
-              More branches
-            </button>
-          ) : null}
+          <MenuListExpandToggle
+            totalCount={unopened.length}
+            visibleCount={visibleBranchCount}
+            pageSize={BRANCH_PAGE_SIZE}
+            expandLabel="More branches"
+            onVisibleCountChange={setVisibleBranchCount}
+          />
           {onRequestNewBranch ? (
-            <MenuItem
-              label={newBranchLabel}
-              hint="Create a new branch in its own isolated workspace"
-              leading={<Plus aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
-              onSelect={() => {
-                close()
-                onRequestNewBranch()
-              }}
-            />
+            compact ? (
+              <button
+                type="button"
+                onClick={() => {
+                  close()
+                  onRequestNewBranch()
+                }}
+                className="mt-0.5 flex w-full items-center gap-2 rounded-lg border-t border-border px-2.5 py-2 text-left text-sm text-foreground/85 hover:bg-secondary/70"
+              >
+                <Plus className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+                {newBranchLabel}
+              </button>
+            ) : (
+              <MenuItem
+                label={newBranchLabel}
+                hint="Create a new branch in its own isolated workspace"
+                leading={<Plus aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                onSelect={() => {
+                  close()
+                  onRequestNewBranch()
+                }}
+              />
+            )
           ) : null}
         </>
       )}

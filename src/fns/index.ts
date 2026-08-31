@@ -251,6 +251,10 @@ export const listRuns = createServerFn({ method: 'GET' })
   )
   .handler(async ({ data }) => (await core()).listRuns(data))
 
+export const listConversationNavigationRuns = createServerFn({ method: 'GET' }).handler(async () =>
+  (await core()).listConversationNavigationRuns(),
+)
+
 export const countRuns = createServerFn({ method: 'GET' })
   .validator((d: { taskId?: string; includeArchived?: boolean }) => d)
   .handler(async ({ data }) => (await core()).countRuns(data))
@@ -292,6 +296,10 @@ export const deleteRuns = createServerFn({ method: 'POST' })
 export const getLatestRunForWorkspace = createServerFn({ method: 'GET' })
   .validator((d: { workspaceId: string }) => d)
   .handler(async ({ data }) => (await core()).getLatestRunForWorkspace(data.workspaceId))
+
+export const getLatestRunForProject = createServerFn({ method: 'GET' })
+  .validator((d: { projectId: string }) => d)
+  .handler(async ({ data }) => (await core()).getLatestRunForProject(data.projectId))
 
 export const startChat = createServerFn({ method: 'POST' })
   .validator(
