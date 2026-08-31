@@ -1,3 +1,1 @@
-- The iOS pairing QR also accepts `openrun://pair?base=…&code=…` (the old
-  `agentops://` form still works). APNs env vars accept `OPENRUN_APNS_*` names
-  as well as `AGENTOPS_APNS_*`.
+You no longer need the legacy `agentops://` pairing scheme or `AGENTOPS_APNS_*` names: iOS pairing accepts validated `openrun://pair` URLs and APNs also reads `OPENRUN_APNS_*` settings.

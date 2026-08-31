@@ -128,11 +128,19 @@ test('the agentops:// URL form decodes and normalizes the code', () => {
   assert.deepEqual(decoded, { base: 'http://192.168.1.24:3000', code: 'A1B2C3D4' })
 })
 
-test('the openrun:// URL form decodes the same way', () => {
+test('the openrun:// URL form decodes and validates the base', () => {
   const decoded = decodePairingQr(
-    'openrun://pair?base=http%3A%2F%2F192.168.1.24%3A3000&code=a1b2-c3d4',
+    'openrun://pair?base=http%3A%2F%2F192.168.1.24%3A3000%2Fignored&code=a1b2-c3d4',
   )
   assert.deepEqual(decoded, { base: 'http://192.168.1.24:3000', code: 'A1B2C3D4' })
+})
+
+test('pairing URL forms reject unexpected routes and invalid bases', () => {
+  assert.equal(
+    decodePairingQr('openrun://other?base=http%3A%2F%2F192.168.1.24%3A3000&code=a1b2-c3d4'),
+    null,
+  )
+  assert.equal(decodePairingQr('openrun://pair?base=http%3A%2F%2Fexample.com&code=a1b2-c3d4'), null)
 })
 
 test('garbage and partial QR payloads decode to null', () => {
