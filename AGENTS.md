@@ -292,6 +292,13 @@ Closes #13
   here buries the steps a human must actually do. Tick a box only once you have
   performed it.
 
+**PR review comments are brief, natural, and useful.** Comment only on a specific
+actionable problem or a genuinely helpful optional improvement. Keep each comment
+to one or two short sentences; use `Nitpick: ...` for minor suggestions. Do not
+summarize the diff, restate the code, narrate checks, or post obvious observations
+such as "TypeScript is OK" or "tests pass." If there is nothing worth commenting
+on, say only `Looks good to me.`
+
 Reference shape: <https://github.com/dennisadriaans/openrun/pull/34>.
 
 The gates that used to live in the template are still hard rules, enforced in
