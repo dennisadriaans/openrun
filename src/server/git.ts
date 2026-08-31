@@ -68,6 +68,15 @@ function refuseLeadingDash(value: string, label: string): string {
   return trimmed
 }
 
+/** Validate filesystem paths without changing the exact path the caller supplied. */
+function refuseUnsafePath(value: string, label: string): string {
+  if (!value.trim()) throw new Error(`${label} is required`)
+  if (value.startsWith('-') || value.includes('\0')) {
+    throw new Error(`Invalid ${label}`)
+  }
+  return value
+}
+
 function gitEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...extra }
 }
@@ -777,7 +786,7 @@ export function commit(cwd: string, message: string, paths?: string[]): { sha: s
 /** Put a registered worktree on its configured branch at its immutable base. */
 export function resetWorktree(cwd: string, branch: string, baseCommit: string): void {
   if (!isRepo(cwd)) throw new Error('Not a git repository')
-  if (!branch.trim()) throw new Error('A branch is required to restore a worktree')
+  const safeBranch = refuseLeadingDash(branch, 'branch name')
   if (!resolveCommit(cwd, baseCommit)) {
     throw new Error('The workspace restore base commit is unavailable')
   }
@@ -789,8 +798,8 @@ export function resetWorktree(cwd: string, branch: string, baseCommit: string): 
   // build caches. Removing those turns a restore into a re-setup.
   gitOrThrow(cwd, ['clean', '-fd'])
 
-  if (currentBranch(cwd) !== branch) {
-    gitOrThrow(cwd, ['checkout', branch])
+  if (currentBranch(cwd) !== safeBranch) {
+    gitOrThrow(cwd, ['checkout', safeBranch])
   }
 
   gitOrThrow(cwd, ['reset', '--hard', baseCommit])
@@ -1207,7 +1216,7 @@ export function addWorktree(input: {
   const { repoPath, newBranch } = input
   const branch = refuseLeadingDash(input.branch, 'branch name')
   const baseRef = refuseLeadingDash(input.baseRef, 'base ref')
-  const path = refuseLeadingDash(input.path, 'worktree path')
+  const path = refuseUnsafePath(input.path, 'worktree path')
   if (newBranch) {
     gitOrThrow(repoPath, ['worktree', 'add', '-b', branch, '--', path, baseRef])
   } else {
@@ -1217,7 +1226,8 @@ export function addWorktree(input: {
 
 /** Remove a worktree, then prune stale metadata. Prune failure is not fatal. */
 export function removeWorktree(repoPath: string, path: string, force: boolean): void {
-  const args = ['worktree', 'remove', ...(force ? ['--force'] : []), path]
+  const safePath = refuseUnsafePath(path, 'worktree path')
+  const args = ['worktree', 'remove', ...(force ? ['--force'] : []), '--', safePath]
   gitOrThrow(repoPath, args)
   git(repoPath, ['worktree', 'prune'])
 }
@@ -1230,7 +1240,7 @@ export function removeWorktree(repoPath: string, path: string, force: boolean): 
  */
 export function cloneRepo(input: { url: string; dest: string }): void {
   const url = refuseLeadingDash(input.url, 'clone URL')
-  const dest = refuseLeadingDash(input.dest, 'clone destination')
+  const dest = refuseUnsafePath(input.dest, 'clone destination')
   const res = spawnSync('git', ['clone', '--', url, dest], {
     encoding: 'utf8',
     maxBuffer: MAX_BUFFER,
