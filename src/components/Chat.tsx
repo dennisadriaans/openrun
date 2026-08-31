@@ -70,6 +70,7 @@ import {
   ApprovalEvent,
   CallEvent,
   ChatMarkdown,
+  ChatRepositoryProvider,
   PlanEvent,
   QueuedMessages,
   ThoughtEvent,
@@ -808,6 +809,7 @@ export function Chat({
   onNewChat,
   pullRequest,
   pullRequestError,
+  repositoryUrl,
 }: {
   messages: ChatMessage[]
   /** Pulse the transcript scroller while conversation is still in flight. */
@@ -889,6 +891,8 @@ export function Chat({
   pullRequest?: RunPullRequest | null
   /** A failed PR probe is shown alongside any stale cached result. */
   pullRequestError?: string | null
+  /** Repository remote used to resolve plain `PR #123` mentions. */
+  repositoryUrl?: string
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -1179,241 +1183,244 @@ export function Chat({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div
-        ref={scrollerRef}
-        className="scroll-thin flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5"
-      >
+    <ChatRepositoryProvider repositoryUrl={repositoryUrl}>
+      <div className="relative flex h-full min-h-0 flex-col">
         <div
-          ref={contentRef}
-          className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-3 sm:pt-4"
-          style={{ paddingBottom: composerHeight + 16 }}
+          ref={scrollerRef}
+          className="scroll-thin flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-5"
         >
-          {transcriptPending && messages.length === 0 ? (
-            <TranscriptBootSkeleton />
-          ) : (
-            messages.map((message) =>
-              message.role === 'system' ? (
-                <p key={message.id} className="text-ui-sm text-tier-quaternary">
-                  {message.content}
-                </p>
-              ) : message.role === 'user' ? (
-                <UserMessage key={message.id} message={message} runId={runId} />
-              ) : (
-                <AssistantMessage
-                  key={message.id}
-                  message={message}
-                  answering={answerApproval.isPending}
-                  onAnswer={onAnswer}
-                  onSelectFile={onSelectFile}
-                  onReviewFile={onReviewFile}
-                  onUndoFile={undoChatFile}
-                  onRedoFile={redoChatFile}
-                  undoDisabled={undoFilesDisabled}
-                  undoDisabledReason={undoFilesReason}
-                  undoBusyPath={undoBusyPath}
-                  redoBusyPath={redoBusyPath}
-                  changedPaths={changedPaths}
-                  undonePaths={undonePaths}
-                  redoablePaths={redoablePaths}
-                  runId={runId}
-                  runtimeId={runtimeId}
-                  runTrigger={runTrigger}
-                  installWorkspaceId={installWorkspaceId}
-                  installWorkspaceReady={installWorkspaceReady}
-                  installWorkspaceStatus={installWorkspaceStatus}
-                  installProjectId={installProjectId}
-                  installProjectName={installProjectName}
-                  installWorkspaceLabel={installWorkspaceLabel}
+          <div
+            ref={contentRef}
+            className="mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-3 sm:pt-4"
+            style={{ paddingBottom: composerHeight + 16 }}
+          >
+            {transcriptPending && messages.length === 0 ? (
+              <TranscriptBootSkeleton />
+            ) : (
+              messages.map((message) =>
+                message.role === 'system' ? (
+                  <p key={message.id} className="text-ui-sm text-tier-quaternary">
+                    {message.content}
+                  </p>
+                ) : message.role === 'user' ? (
+                  <UserMessage key={message.id} message={message} runId={runId} />
+                ) : (
+                  <AssistantMessage
+                    key={message.id}
+                    message={message}
+                    answering={answerApproval.isPending}
+                    onAnswer={onAnswer}
+                    onSelectFile={onSelectFile}
+                    onReviewFile={onReviewFile}
+                    onUndoFile={undoChatFile}
+                    onRedoFile={redoChatFile}
+                    undoDisabled={undoFilesDisabled}
+                    undoDisabledReason={undoFilesReason}
+                    undoBusyPath={undoBusyPath}
+                    redoBusyPath={redoBusyPath}
+                    changedPaths={changedPaths}
+                    undonePaths={undonePaths}
+                    redoablePaths={redoablePaths}
+                    runId={runId}
+                    runtimeId={runtimeId}
+                    runTrigger={runTrigger}
+                    installWorkspaceId={installWorkspaceId}
+                    installWorkspaceReady={installWorkspaceReady}
+                    installWorkspaceStatus={installWorkspaceStatus}
+                    installProjectId={installProjectId}
+                    installProjectName={installProjectName}
+                    installWorkspaceLabel={installWorkspaceLabel}
+                  />
+                ),
+              )
+            )}
+            {phase ? (
+              <div className="px-1">
+                <WorkingIndicator
+                  verb={phase.label}
+                  orb={phase.command ? 'working' : 'breathing'}
+                  {...(phase.startedAt ? { startedAt: phase.startedAt } : {})}
+                  {...(phase.command ? { step: phase.command } : {})}
                 />
-              ),
-            )
-          )}
-          {phase ? (
-            <div className="px-1">
-              <WorkingIndicator
-                verb={phase.label}
-                orb={phase.command ? 'working' : 'breathing'}
-                {...(phase.startedAt ? { startedAt: phase.startedAt } : {})}
-                {...(phase.command ? { step: phase.command } : {})}
+              </div>
+            ) : null}
+            <div ref={bottomRef} />
+          </div>
+        </div>
+
+        <div
+          ref={composerOverlayRef}
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+        >
+          <div className="chat-composer-horizontal-inset pointer-events-auto relative">
+            <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
+              {pullRequest ? (
+                <div className="relative z-[6] mx-auto -mb-[2px] w-[92%]">
+                  <PullRequestChip pr={pullRequest} />
+                </div>
+              ) : null}
+              {pullRequestError ? (
+                <div
+                  role="alert"
+                  className={`relative z-[6] mx-auto -mb-[2px] w-[92%] truncate px-2.5 py-1.5 text-[12.5px] text-danger chat-composer-strip${hasPrChip ? ' chat-composer-strip-continued' : ' chat-composer-strip-top'}`}
+                  title={pullRequestError}
+                >
+                  Pull request status unavailable: {pullRequestError}
+                </div>
+              ) : null}
+              {changedFiles && changedFiles.length > 0 && onReviewFile ? (
+                <div className="relative mx-auto -mb-[2px] w-[92%]">
+                  <FilesChanged
+                    variant="composer"
+                    stackTop={!hasStripAboveFiles}
+                    files={changedFiles}
+                    activePath={activePath}
+                    onSelect={onReviewFile}
+                    onReview={onReviewFiles}
+                    onUndoAll={onUndoAllFiles}
+                    undoDisabled={undoFilesDisabled}
+                    undoDisabledReason={undoFilesReason}
+                  />
+                </div>
+              ) : null}
+              {queuedMessages.length > 0 ? (
+                <div className="relative z-[5] mx-auto -mb-[2px] w-[92%]">
+                  <QueuedMessages
+                    stackTop={!hasStripAboveQueue}
+                    queued={queuedMessages}
+                    running={running}
+                    busy={queueBusy}
+                    onSendNow={() => onFlushQueue?.()}
+                    onDrop={(id) => onDropQueued?.(id)}
+                    onClear={() => onClearQueue?.()}
+                  />
+                </div>
+              ) : null}
+              <Composer
+                className={
+                  (changedFiles && changedFiles.length > 0 && onReviewFile) ||
+                  queuedMessages.length > 0 ||
+                  pullRequest ||
+                  pullRequestError
+                    ? 'relative z-10 w-full'
+                    : 'w-full pt-2'
+                }
+                disabled={
+                  !running && ((!canFollowUp && !switching) || switchBlockedReason !== null)
+                }
+                disabledReason={switchBlockedReason ?? followUpReason}
+                pending={pending}
+                running={running}
+                canQueue={canQueue && !switching}
+                {...(queuedMessages.length > 0 && !running
+                  ? { placeholder: 'Add to the queue…' }
+                  : {})}
+                {...(canQueue && onSendNow
+                  ? {
+                      onSendNow: (text: string) =>
+                        onSendNow({ prompt: text, model, effort, runtimeMode }),
+                    }
+                  : {})}
+                {...(phase ? { runningLabel: `${phase.label}…` } : {})}
+                {...(canSwitchRuntime && runtimeCatalog.length > 0 && selectedRuntimeId
+                  ? {
+                      leading: (
+                        <div className="flex min-w-0 shrink items-center gap-0.5">
+                          <RuntimePicker
+                            runtimes={runtimeCatalog}
+                            runtimeId={selectedRuntimeId}
+                            disabled={pending || running}
+                            align="start"
+                            onChange={handleRuntimePick}
+                          />
+                        </div>
+                      ),
+                    }
+                  : {})}
+                models={activeModels}
+                model={model}
+                effort={effort}
+                runtimeMode={runtimeMode}
+                supportsSupervised={canSupervise}
+                onModelChange={handleModelChange}
+                onEffortChange={handleEffortChange}
+                onRuntimeModeChange={handleRuntimeModeChange}
+                onStop={onStop}
+                onSend={(text) =>
+                  onSend({
+                    prompt: text,
+                    model,
+                    effort,
+                    runtimeMode,
+                    ...(switching ? { runtimeId: selectedRuntimeId } : {}),
+                  })
+                }
+                commands={commandListing?.commands ?? []}
+                {...(commandListing?.note ? { commandNote: commandListing.note } : {})}
+                plugins={pluginListing?.plugins ?? []}
+                {...(pluginListing?.note ? { pluginNote: pluginListing.note } : {})}
+                onAppCommand={handleAppCommand}
+                {...(uploadAttachment ? { uploadAttachment } : {})}
               />
             </div>
-          ) : null}
-          <div ref={bottomRef} />
-        </div>
-      </div>
-
-      <div
-        ref={composerOverlayRef}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
-      >
-        <div className="chat-composer-horizontal-inset pointer-events-auto relative">
-          <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
-            {pullRequest ? (
-              <div className="relative z-[6] mx-auto -mb-[2px] w-[92%]">
-                <PullRequestChip pr={pullRequest} />
-              </div>
-            ) : null}
-            {pullRequestError ? (
-              <div
-                role="alert"
-                className={`relative z-[6] mx-auto -mb-[2px] w-[92%] truncate px-2.5 py-1.5 text-[12.5px] text-danger chat-composer-strip${hasPrChip ? ' chat-composer-strip-continued' : ' chat-composer-strip-top'}`}
-                title={pullRequestError}
-              >
-                Pull request status unavailable: {pullRequestError}
-              </div>
-            ) : null}
-            {changedFiles && changedFiles.length > 0 && onReviewFile ? (
-              <div className="relative mx-auto -mb-[2px] w-[92%]">
-                <FilesChanged
-                  variant="composer"
-                  stackTop={!hasStripAboveFiles}
-                  files={changedFiles}
-                  activePath={activePath}
-                  onSelect={onReviewFile}
-                  onReview={onReviewFiles}
-                  onUndoAll={onUndoAllFiles}
-                  undoDisabled={undoFilesDisabled}
-                  undoDisabledReason={undoFilesReason}
-                />
-              </div>
-            ) : null}
-            {queuedMessages.length > 0 ? (
-              <div className="relative z-[5] mx-auto -mb-[2px] w-[92%]">
-                <QueuedMessages
-                  stackTop={!hasStripAboveQueue}
-                  queued={queuedMessages}
-                  running={running}
-                  busy={queueBusy}
-                  onSendNow={() => onFlushQueue?.()}
-                  onDrop={(id) => onDropQueued?.(id)}
-                  onClear={() => onClearQueue?.()}
-                />
-              </div>
-            ) : null}
-            <Composer
-              className={
-                (changedFiles && changedFiles.length > 0 && onReviewFile) ||
-                queuedMessages.length > 0 ||
-                pullRequest ||
-                pullRequestError
-                  ? 'relative z-10 w-full'
-                  : 'w-full pt-2'
-              }
-              disabled={!running && ((!canFollowUp && !switching) || switchBlockedReason !== null)}
-              disabledReason={switchBlockedReason ?? followUpReason}
-              pending={pending}
-              running={running}
-              canQueue={canQueue && !switching}
-              {...(queuedMessages.length > 0 && !running
-                ? { placeholder: 'Add to the queue…' }
-                : {})}
-              {...(canQueue && onSendNow
-                ? {
-                    onSendNow: (text: string) =>
-                      onSendNow({ prompt: text, model, effort, runtimeMode }),
-                  }
-                : {})}
-              {...(phase ? { runningLabel: `${phase.label}…` } : {})}
-              {...(canSwitchRuntime && runtimeCatalog.length > 0 && selectedRuntimeId
-                ? {
-                    leading: (
-                      <div className="flex min-w-0 shrink items-center gap-0.5">
-                        <RuntimePicker
-                          runtimes={runtimeCatalog}
-                          runtimeId={selectedRuntimeId}
-                          disabled={pending || running}
-                          align="start"
-                          onChange={handleRuntimePick}
-                        />
-                      </div>
-                    ),
-                  }
-                : {})}
-              models={activeModels}
-              model={model}
-              effort={effort}
-              runtimeMode={runtimeMode}
-              supportsSupervised={canSupervise}
-              onModelChange={handleModelChange}
-              onEffortChange={handleEffortChange}
-              onRuntimeModeChange={handleRuntimeModeChange}
-              onStop={onStop}
-              onSend={(text) =>
-                onSend({
-                  prompt: text,
-                  model,
-                  effort,
-                  runtimeMode,
-                  ...(switching ? { runtimeId: selectedRuntimeId } : {}),
-                })
-              }
-              commands={commandListing?.commands ?? []}
-              {...(commandListing?.note ? { commandNote: commandListing.note } : {})}
-              plugins={pluginListing?.plugins ?? []}
-              {...(pluginListing?.note ? { pluginNote: pluginListing.note } : {})}
-              onAppCommand={handleAppCommand}
-              {...(uploadAttachment ? { uploadAttachment } : {})}
-            />
           </div>
-          <div className="chat-composer-lower-chrome relative z-10 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]" />
         </div>
-      </div>
 
-      {pendingRuntimeId ? (
-        <Modal
-          title={RUNTIME_SWITCH_NOTE_TITLE}
-          onClose={() => {
-            setPendingRuntimeId(null)
-            setDismissSwitchNote(false)
-          }}
-          className="z-[110]"
-        >
-          <div className="space-y-4">
-            <p className="text-ui-base text-tier-secondary">
-              {runtimeCatalog.find((r) => r.id === pendingRuntimeId)?.label ?? 'The new runtime'}{' '}
-              cannot resume this agent session, so the next turn starts a fresh one.
-            </p>
-            <ul className="space-y-1.5 text-ui-sm text-tier-tertiary">
-              {RUNTIME_SWITCH_NOTE_POINTS.map((point) => (
-                <li key={point} className="flex gap-2">
-                  <span aria-hidden="true">•</span>
-                  <span>{point}</span>
-                </li>
-              ))}
-            </ul>
-            <label className="flex items-center gap-2 text-ui-sm text-tier-secondary">
-              <input
-                type="checkbox"
-                checked={dismissSwitchNote}
-                onChange={(e) => setDismissSwitchNote(e.target.checked)}
-              />
-              <span>Don’t show this again</span>
-            </label>
-            <div className="flex justify-end gap-2">
-              <Button
-                onClick={() => {
-                  setPendingRuntimeId(null)
-                  setDismissSwitchNote(false)
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  if (dismissSwitchNote) remember({ runtimeSwitchNoteDismissed: true })
-                  applyRuntimeSwitch(pendingRuntimeId)
-                  setPendingRuntimeId(null)
-                  setDismissSwitchNote(false)
-                }}
-              >
-                Switch runtime
-              </Button>
+        {pendingRuntimeId ? (
+          <Modal
+            title={RUNTIME_SWITCH_NOTE_TITLE}
+            onClose={() => {
+              setPendingRuntimeId(null)
+              setDismissSwitchNote(false)
+            }}
+            className="z-[110]"
+          >
+            <div className="space-y-4">
+              <p className="text-ui-base text-tier-secondary">
+                {runtimeCatalog.find((r) => r.id === pendingRuntimeId)?.label ?? 'The new runtime'}{' '}
+                cannot resume this agent session, so the next turn starts a fresh one.
+              </p>
+              <ul className="space-y-1.5 text-ui-sm text-tier-tertiary">
+                {RUNTIME_SWITCH_NOTE_POINTS.map((point) => (
+                  <li key={point} className="flex gap-2">
+                    <span aria-hidden="true">•</span>
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+              <label className="flex items-center gap-2 text-ui-sm text-tier-secondary">
+                <input
+                  type="checkbox"
+                  checked={dismissSwitchNote}
+                  onChange={(e) => setDismissSwitchNote(e.target.checked)}
+                />
+                <span>Don’t show this again</span>
+              </label>
+              <div className="flex justify-end gap-2">
+                <Button
+                  onClick={() => {
+                    setPendingRuntimeId(null)
+                    setDismissSwitchNote(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    if (dismissSwitchNote) remember({ runtimeSwitchNoteDismissed: true })
+                    applyRuntimeSwitch(pendingRuntimeId)
+                    setPendingRuntimeId(null)
+                    setDismissSwitchNote(false)
+                  }}
+                >
+                  Switch runtime
+                </Button>
+              </div>
             </div>
-          </div>
-        </Modal>
-      ) : null}
-    </div>
+          </Modal>
+        ) : null}
+      </div>
+    </ChatRepositoryProvider>
   )
 }

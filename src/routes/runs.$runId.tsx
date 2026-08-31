@@ -600,6 +600,7 @@ function RunDetail() {
                 checkResults={checkResults}
                 pullRequest={pullRequest ?? null}
                 pullRequestError={pullRequestError}
+                repositoryUrl={project?.remoteUrl}
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
