@@ -17,9 +17,9 @@ export type ConversationNavigationRun = {
 export function listConversationNavigationRuns(): ConversationNavigationRun[] {
   const db = getDb()
   const labels = new Map(
-    (db.prepare('SELECT id, label FROM runtimes').all() as Array<{ id: string; label: string }>).map(
-      (row) => [row.id, row.label] as const,
-    ),
+    (
+      db.prepare('SELECT id, label FROM runtimes').all() as Array<{ id: string; label: string }>
+    ).map((row) => [row.id, row.label] as const),
   )
   const rows = db
     .prepare(
