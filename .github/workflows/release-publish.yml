@@ -1,0 +1,58 @@
+name: Release · publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      expected_tag:
+        description: Fail unless this exact release is complete
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure release author
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Verify release commit
+        run: |
+          pnpm exec biome ci src scripts
+          pnpm typecheck
+          pnpm test
+          pnpm build
+
+      - name: Reconcile release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_TAG: ${{ inputs.expected_tag }}
+        run: |
+          args=()
+          if [[ -n "$EXPECTED_TAG" ]]; then
+            args+=(--expect="$EXPECTED_TAG")
+          fi
+          pnpm release:publish -- "${args[@]}"

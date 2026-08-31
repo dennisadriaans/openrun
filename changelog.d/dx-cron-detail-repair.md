@@ -1,1 +1,0 @@
-You no longer stare at a blank “Next run” dash on a broken automation — open the detail page and an invalid schedule is called out with a **Fix schedule** link that opens the editor on the bad expression.

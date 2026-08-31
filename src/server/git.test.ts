@@ -378,3 +378,22 @@ describe('pullRequestForBranchAsync', () => {
     }
   })
 })
+
+describe('fileDiff path confinement', () => {
+  it('diffs a file inside the workspace', () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'tracked.txt'), 'changed\n')
+    const diff = fileDiff(cwd, 'tracked.txt')
+    assert.match(diff, /changed/)
+  })
+
+  it('refuses a path that escapes the workspace', () => {
+    const cwd = makeRepo()
+    assert.throws(() => fileDiff(cwd, '../outside.ts'), /escapes/)
+  })
+
+  it('refuses an absolute path outside the workspace', () => {
+    const cwd = makeRepo()
+    assert.throws(() => fileDiff(cwd, '/etc/passwd'), /escapes/)
+  })
+})

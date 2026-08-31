@@ -1088,12 +1088,6 @@ export function Composer({
 
           <div className="relative flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
             {leading}
-            {uploadAttachment ? (
-              <AttachmentButton
-                disabled={!canAttach || files.full}
-                onFiles={(picked) => files.addFiles(picked)}
-              />
-            ) : null}
             <ComposerModelControls
               models={models}
               model={model}
@@ -1106,43 +1100,53 @@ export function Composer({
               onRuntimeModeChange={onRuntimeModeChange}
             />
 
-            {running && onStop ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label="Stop"
-                title="Stop"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
-              >
-                <Square className="size-3.5 fill-current" />
-              </button>
-            ) : null}
-            {!running || canQueue ? (
-              <button
-                type="button"
-                disabled={!canSend}
-                onClick={() => submit()}
-                aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
-                title={running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
-              >
-                {pending ? (
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-                ) : running ? (
-                  <ListPlus className="size-3.5" />
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                    <path
-                      d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            ) : null}
+            <div className="flex shrink-0 items-center gap-1">
+              {running && onStop ? (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label="Stop"
+                  title="Stop"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
+                >
+                  <Square className="size-3.5 fill-current" />
+                </button>
+              ) : null}
+              {uploadAttachment ? (
+                <AttachmentButton
+                  disabled={!canAttach || files.full}
+                  onFiles={(picked) => files.addFiles(picked)}
+                />
+              ) : null}
+              {!running || canQueue ? (
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={() => submit()}
+                  aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
+                  title={
+                    running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined
+                  }
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
+                >
+                  {pending ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                  ) : running ? (
+                    <ListPlus className="size-3.5" />
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <path
+                        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>
@@ -1561,6 +1565,12 @@ export function Chat({
     }
   }
 
+  const hasPrChip = Boolean(pullRequest)
+  const hasPrErrorStrip = Boolean(pullRequestError)
+  const hasFilesStrip = Boolean(changedFiles && changedFiles.length > 0 && onReviewFile)
+  const hasStripAboveFiles = hasPrChip || hasPrErrorStrip
+  const hasStripAboveQueue = hasStripAboveFiles || hasFilesStrip
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div
@@ -1640,7 +1650,7 @@ export function Chat({
             {pullRequestError ? (
               <div
                 role="alert"
-                className="relative z-[6] mx-auto -mb-[2px] w-[92%] truncate rounded-t-[16px] border border-b-0 border-border bg-elevated px-2.5 py-1.5 text-[12.5px] text-danger"
+                className={`relative z-[6] mx-auto -mb-[2px] w-[92%] truncate px-2.5 py-1.5 text-[12.5px] text-danger chat-composer-strip${hasPrChip ? ' chat-composer-strip-continued' : ' chat-composer-strip-top'}`}
                 title={pullRequestError}
               >
                 Pull request status unavailable: {pullRequestError}
@@ -1650,6 +1660,7 @@ export function Chat({
               <div className="relative mx-auto -mb-[2px] w-[92%]">
                 <FilesChanged
                   variant="composer"
+                  stackTop={!hasStripAboveFiles}
                   files={changedFiles}
                   activePath={activePath}
                   onSelect={onReviewFile}
@@ -1663,6 +1674,7 @@ export function Chat({
             {queuedMessages.length > 0 ? (
               <div className="relative z-[5] mx-auto -mb-[2px] w-[92%]">
                 <QueuedMessages
+                  stackTop={!hasStripAboveQueue}
                   queued={queuedMessages}
                   running={running}
                   busy={queueBusy}

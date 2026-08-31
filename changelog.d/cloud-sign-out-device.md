@@ -1,1 +1,0 @@
-- Signing out no longer leaves this installation permanently claimed by the previous Open Run account. The device is revoked remotely when possible and gets a fresh local identity, so you can immediately sign in with another account even if the control plane was temporarily unreachable.
