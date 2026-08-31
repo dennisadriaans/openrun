@@ -1,0 +1,42 @@
+name: Release · publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify release commit
+        run: |
+          pnpm exec biome ci src scripts
+          pnpm typecheck
+          pnpm test
+          pnpm build
+
+      - name: Publish when HEAD is a release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm release:publish
