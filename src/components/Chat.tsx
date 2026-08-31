@@ -1253,7 +1253,7 @@ export function Chat({
 
         <div
           ref={composerOverlayRef}
-          className="chat-composer-dock pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+          className="chat-composer-dock pointer-events-none absolute inset-x-0 bottom-0 z-20"
         >
           <div className="chat-composer-horizontal-inset pointer-events-auto relative">
             <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col items-stretch pl-2">
@@ -1306,7 +1306,7 @@ export function Chat({
                   pullRequest ||
                   pullRequestError
                     ? 'relative z-10 w-full'
-                    : 'w-full pt-2'
+                    : 'w-full'
                 }
                 disabled={
                   !running && ((!canFollowUp && !switching) || switchBlockedReason !== null)

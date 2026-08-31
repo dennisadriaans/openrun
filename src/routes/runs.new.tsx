@@ -353,7 +353,7 @@ function NewRun() {
           </div>
         )}
 
-        <div className="chat-composer-dock pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2">
+        <div className="chat-composer-dock pointer-events-none absolute inset-x-0 bottom-0 z-20">
           <div className="chat-composer-horizontal-inset pointer-events-auto relative z-10">
             <Composer
               disabled={blockedReason !== null}
