@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## v0.1.1 — 2026-08-31
+
+- You no longer need to publish a prepared release manually after its automated pull request merges, or find a green publish job that skipped a squash commit carrying its pull request number.
+- You no longer get a failed release because GitHub Actions lacked the identity required to create its annotated tag.
+
+### 🩹 Fixes
+
+- **release:** configure tag author ([#65](https://github.com/dennisadriaans/openrun/pull/65))
+- **release:** publish bot-merged releases ([#64](https://github.com/dennisadriaans/openrun/pull/64))
+
+**Full changelog**: [`v0.1.0...v0.1.1`](https://github.com/dennisadriaans/openrun/compare/v0.1.0...v0.1.1)
+
 ## v0.1.0 — 2026-08-31
 
 > **2 breaking changes.** Read the entries below before upgrading.
