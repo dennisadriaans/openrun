@@ -140,6 +140,16 @@ export function reconcileWorkspaces(projectId?: string): void {
     "UPDATE workspaces SET status = 'archived', archivedAt = ? WHERE id = ?",
   )
   const remove = db.prepare('DELETE FROM workspaces WHERE id = ?')
+  const insertMain = db.prepare(
+    `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
+     VALUES (@id, @projectId, 'main checkout', @branch, @path, 'main', 'ready', '', NULL, '', '', 0, @baseCommit, @createdAt, NULL)`,
+  )
+  const refreshMain = db.prepare(
+    `UPDATE workspaces
+     SET branch = ?, path = ?, status = 'ready', setupLog = '', setupExitCode = NULL,
+         blockedKind = '', blockedReason = '', blockedAt = 0, archivedAt = NULL
+     WHERE id = ?`,
+  )
 
   for (const project of projects) {
     if (!existsSync(project.path) || !git.isRepo(project.path)) continue
@@ -166,12 +176,27 @@ export function reconcileWorkspaces(projectId?: string): void {
       recorded.map((workspace) => [canonicalPath(workspace.path), workspace]),
     )
 
-    // Old versions modeled the primary checkout as a workspace. Keep only a
-    // tombstone when task/run history still points at it.
-    const legacyMainRows = db
+    // Interactive chats may deliberately share the checkout open in the
+    // user's editor. Keep one stable row for it, but never treat it as an
+    // app-owned worktree: archive/restore and unattended policies distinguish
+    // `kind='main'` below.
+    const mainRows = db
       .prepare("SELECT * FROM workspaces WHERE projectId = ? AND kind = 'main'")
       .all(project.id) as WorkspaceRow[]
-    for (const workspace of legacyMainRows) {
+    const mainWorkspace = mainRows[0]
+    if (mainWorkspace) {
+      refreshMain.run(primaryBranch || project.defaultBranch, primaryPath, mainWorkspace.id)
+    } else {
+      insertMain.run({
+        id: id('ws'),
+        projectId: project.id,
+        branch: primaryBranch || project.defaultBranch,
+        path: primaryPath,
+        baseCommit: git.resolveCommit(project.path, 'HEAD'),
+        createdAt: project.createdAt,
+      })
+    }
+    for (const workspace of mainRows.slice(1)) {
       const refs = references.get(workspace.id, workspace.id) as {
         hasTask: number
         hasRun: number
@@ -784,8 +809,8 @@ export function resolveWorkspacePath(workspaceId: string): string {
   const workspace = getWorkspace(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
   const project = getProject(workspace.projectId)
-  if (workspace.kind !== 'worktree') {
-    throw new Error('Pick an isolated worktree. Agents cannot run in the primary checkout.')
+  if (workspace.kind !== 'worktree' && workspace.kind !== 'main') {
+    throw new Error('Unsupported workspace kind')
   }
   // Chat already refused non-ready workspaces; automations used to only check
   // that an id was present and then spawn into a half-baked creating/error tree.
@@ -801,7 +826,7 @@ export function resolveWorkspacePath(workspaceId: string): string {
       .run(message, workspace.id)
     throw new Error(message)
   }
-  if (project && git.isRepo(project.path)) {
+  if (workspace.kind === 'worktree' && project && git.isRepo(project.path)) {
     const inventory = git.inspectWorktrees(project.path)
     const registered = inventory.entries.some(
       (entry) => !entry.bare && canonicalPath(entry.path) === canonicalPath(workspace.path),

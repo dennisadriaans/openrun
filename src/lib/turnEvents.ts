@@ -112,3 +112,37 @@ export type TurnEventRow = {
   payload: string
   createdAt: number
 }
+
+const MAX_CONVERSATION_EVENT_PAYLOAD_CHARS = 4_000
+
+/**
+ * Keep conversation polls light without shortening anything the agent said.
+ * Assistant prose and the final result are transcript content, not diagnostic
+ * payloads; only oversized work rows may be abbreviated.
+ */
+export function slimConversationEvent(ev: TurnEventRow): TurnEventRow {
+  if (
+    ev.payload.length <= MAX_CONVERSATION_EVENT_PAYLOAD_CHARS ||
+    ev.kind === 'assistant' ||
+    ev.kind === 'turn_done'
+  ) {
+    return ev
+  }
+  try {
+    const obj = JSON.parse(ev.payload) as Record<string, unknown>
+    for (const key of ['content', 'input', 'text', 'result']) {
+      const val = obj[key]
+      if (typeof val === 'string' && val.length > 1_500) {
+        obj[key] = `${val.slice(0, 1_500)}…`
+      }
+    }
+    const next = JSON.stringify(obj)
+    if (next.length <= MAX_CONVERSATION_EVENT_PAYLOAD_CHARS) return { ...ev, payload: next }
+  } catch {
+    // Fall through to a bounded representation of malformed work payloads.
+  }
+  return {
+    ...ev,
+    payload: `${ev.payload.slice(0, MAX_CONVERSATION_EVENT_PAYLOAD_CHARS)}…`,
+  }
+}

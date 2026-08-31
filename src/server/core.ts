@@ -33,6 +33,7 @@ import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay, RUNTIME_PRESETS } from '../lib/runtimePresets'
 import { resolveRuntimeLabel } from '../lib/runtimeLabel'
 import { runActivitySummary, runListTitle } from '../lib/runPreview'
+import { slimConversationEvent } from '../lib/turnEvents.ts'
 import { acpTransportRefusal, parseTransport } from '../lib/acpTransport'
 import type { WebhookFilters } from '../lib/integrations/types'
 import {
@@ -1027,6 +1028,11 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     assertTaskWorkspaceIdle(tid)
   }
 
+  const taskWorkspace = getWorkspace(workspaceId)
+  if (taskWorkspace?.kind === 'main') {
+    throw new Error('Pick an isolated worktree. Automations cannot run in the primary checkout.')
+  }
+
   // cwd stays the source of truth for git operations (executor, diff panel,
   // etc.) — resolve once here so cwd stays in sync with the workspace path.
   const cwd = resolveWorkspacePath(workspaceId)
@@ -1524,12 +1530,25 @@ export async function runWorkspaceBaseline(workspaceId: string): Promise<Baselin
 }
 
 /** Most recent non-archived run in a workspace, or null when none exist yet. */
-export function getLatestRunForWorkspace(workspaceId: string): RunRow | null {
+export function getLatestRunForWorkspace(workspaceId: string): { id: string } | null {
   const row = getDb()
     .prepare(
-      'SELECT * FROM runs WHERE workspaceId = ? AND archivedAt IS NULL ORDER BY startedAt DESC LIMIT 1',
+      'SELECT id FROM runs WHERE workspaceId = ? AND archivedAt IS NULL ORDER BY startedAt DESC LIMIT 1',
     )
-    .get(workspaceId) as RunRow | undefined
+    .get(workspaceId) as { id: string } | undefined
+  return row ?? null
+}
+
+/** Most recent non-archived run in any of a project's worktrees. */
+export function getLatestRunForProject(projectId: string): { id: string } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT r.id FROM runs r
+       JOIN workspaces w ON w.id = r.workspaceId
+       WHERE w.projectId = ? AND r.archivedAt IS NULL
+       ORDER BY r.startedAt DESC LIMIT 1`,
+    )
+    .get(projectId) as { id: string } | undefined
   return row ?? null
 }
 
@@ -1621,6 +1640,10 @@ export type RunSummary = Omit<RunRow, 'stdout' | 'stderr'> & {
   activitySummary: string
   /** Agent wrote something after the user last opened the run. */
   unread: boolean
+  /** Hierarchy labels used by conversation navigation. Empty for legacy runs. */
+  projectId: string
+  projectName: string
+  workspaceBranch: string
 }
 
 function runsListWhere(opts?: { taskId?: string; includeArchived?: boolean }): {
@@ -1651,6 +1674,9 @@ export function countRuns(opts?: {
 type RunListRow = Omit<RunRow, 'stdout' | 'stderr'> & {
   stdoutBytes: number
   stderrBytes: number
+  projectId: string | null
+  projectName: string | null
+  workspaceBranch: string | null
 }
 
 function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
@@ -1660,7 +1686,6 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
   const ids = rows.map((row) => row.id)
   const placeholders = ids.map(() => '?').join(',')
   const db = getDb()
-
   const firstPrompt = new Map<string, string>()
   const promptRows = db
     .prepare(
@@ -1712,8 +1737,22 @@ function decorateRunSummaries(rows: RunListRow[]): RunSummary[] {
       }),
       activitySummary: summary ?? '',
       unread: (lastAgentAt.get(row.id) ?? 0) > row.lastReadAt,
+      projectId: row.projectId ?? '',
+      projectName: row.projectName ?? '',
+      workspaceBranch: row.workspaceBranch ?? row.headBranch ?? row.baseBranch ?? '',
     }
   })
+}
+
+/** Task ids with a live run — cheap status dots for the automations list. */
+export function listRunningTaskIds(): string[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT taskId FROM runs
+       WHERE status = 'running' AND taskId IS NOT NULL AND taskId != ''`,
+    )
+    .all() as Array<{ taskId: string }>
+  return rows.map((row) => row.taskId)
 }
 
 export function listRuns(opts?: {
@@ -1728,13 +1767,86 @@ export function listRuns(opts?: {
   const { where, params } = runsListWhere(opts)
   const rows = getDb()
     .prepare(
-      `SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
-              length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
-              archivedAt, verdict, repairAttempts, timedOut, lastReadAt
-       FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?`,
+      `WITH selected_runs AS (
+         SELECT id, taskId, taskName, runtimeId, trigger, status, command, cwd, pid, exitCode,
+                length(stdout) AS stdoutBytes, length(stderr) AS stderrBytes, startedAt, finishedAt,
+                workspaceId, sessionId, baseBranch, headBranch, baseSnapshot, model, effort,
+                runtimeMode, archivedAt, verdict, repairAttempts, timedOut, lastReadAt
+         FROM runs WHERE ${where} ORDER BY startedAt DESC LIMIT ? OFFSET ?
+       )
+       SELECT r.*, w.projectId, p.name AS projectName, w.branch AS workspaceBranch
+       FROM selected_runs r
+       LEFT JOIN workspaces w ON w.id = r.workspaceId
+       LEFT JOIN projects p ON p.id = w.projectId
+       ORDER BY r.startedAt DESC`,
     )
     .all(...params, limit, offset) as RunListRow[]
   return decorateRunSummaries(rows)
+}
+
+export type ConversationNavigationRun = Pick<
+  RunSummary,
+  | 'id'
+  | 'chatTitle'
+  | 'runtimeId'
+  | 'runtimeLabel'
+  | 'startedAt'
+  | 'workspaceId'
+  | 'workspaceBranch'
+  | 'projectId'
+  | 'projectName'
+  | 'unread'
+>
+
+/** Minimal, unpaginated conversation index for the global header navigator. */
+export function listConversationNavigationRuns(): ConversationNavigationRun[] {
+  const labelById = new Map(listRuntimes().map((runtime) => [runtime.id, runtime.label] as const))
+  const rows = getDb()
+    .prepare(
+      `SELECT r.id, r.runtimeId, r.trigger, r.taskName, r.startedAt, r.workspaceId,
+              r.lastReadAt, w.branch AS workspaceBranch, w.projectId,
+              p.name AS projectName,
+              (SELECT content FROM messages
+               WHERE runId = r.id AND role = 'user'
+               ORDER BY createdAt ASC LIMIT 1) AS firstPrompt,
+              (SELECT MAX(createdAt) FROM messages
+               WHERE runId = r.id AND role = 'assistant') AS lastAgentAt
+       FROM runs r
+       LEFT JOIN workspaces w ON w.id = r.workspaceId
+       LEFT JOIN projects p ON p.id = w.projectId
+       WHERE r.archivedAt IS NULL
+       ORDER BY r.startedAt DESC`,
+    )
+    .all() as Array<{
+    id: string
+    runtimeId: string
+    trigger: string
+    taskName: string | null
+    startedAt: number
+    workspaceId: string
+    lastReadAt: number
+    workspaceBranch: string | null
+    projectId: string | null
+    projectName: string | null
+    firstPrompt: string | null
+    lastAgentAt: number | null
+  }>
+  return rows.map((row) => ({
+    id: row.id,
+    chatTitle: runListTitle({
+      trigger: row.trigger,
+      taskName: row.taskName ?? '',
+      prompt: row.firstPrompt ?? '',
+    }),
+    runtimeId: row.runtimeId,
+    runtimeLabel: resolveRuntimeLabel(labelById.get(row.runtimeId), row.runtimeId),
+    startedAt: row.startedAt,
+    workspaceId: row.workspaceId,
+    workspaceBranch: row.workspaceBranch ?? '',
+    projectId: row.projectId ?? '',
+    projectName: row.projectName ?? '',
+    unread: (row.lastAgentAt ?? 0) > row.lastReadAt,
+  }))
 }
 
 /** Verification results for a run, oldest pass first. */
@@ -1833,27 +1945,6 @@ export type ChatMessage = Omit<MessageRow, 'diffSummary' | 'usage'> & {
   usage: TurnUsage | null
 }
 
-const MAX_EVENT_PAYLOAD_CHARS = 4_000
-
-/** Truncate oversized tool payloads so conversation polls stay light. */
-function slimTurnEvent(ev: TurnEventRow): TurnEventRow {
-  if (ev.payload.length <= MAX_EVENT_PAYLOAD_CHARS) return ev
-  try {
-    const obj = JSON.parse(ev.payload) as Record<string, unknown>
-    for (const key of ['content', 'input', 'text', 'result']) {
-      const val = obj[key]
-      if (typeof val === 'string' && val.length > 1_500) {
-        obj[key] = `${val.slice(0, 1_500)}…`
-      }
-    }
-    const next = JSON.stringify(obj)
-    if (next.length <= MAX_EVENT_PAYLOAD_CHARS) return { ...ev, payload: next }
-  } catch {
-    // fall through
-  }
-  return { ...ev, payload: `${ev.payload.slice(0, MAX_EVENT_PAYLOAD_CHARS)}…` }
-}
-
 /**
  * Chat-focused conversation payload (no git/`gh` work). Right panel data lives
  * in `getRunWorkspace` so polling the live chat does not re-shell git.
@@ -1867,7 +1958,7 @@ export function getConversation(runId: string) {
   const eventsByMessage = new Map<string, TurnEventRow[]>()
   for (const ev of listTurnEventsForRun(runId)) {
     const list = eventsByMessage.get(ev.messageId) ?? []
-    list.push(slimTurnEvent(ev))
+    list.push(slimConversationEvent(ev))
     eventsByMessage.set(ev.messageId, list)
   }
   const messages: ChatMessage[] =

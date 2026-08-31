@@ -303,6 +303,15 @@ export function useCommandPreviewForRuntime(
 
 export const RUNS_PAGE_SIZE = 10
 
+export function useRunningTaskIds() {
+  const streamHealthy = useActivityStreamHealthy()
+  return useQuery({
+    queryKey: ['runs', 'runningTaskIds'],
+    queryFn: () => fns.listRunningTaskIds(),
+    refetchInterval: streamHealthy ? false : 3000,
+  })
+}
+
 export function useRuns(
   taskId?: string,
   includeArchived = false,
@@ -315,6 +324,15 @@ export function useRuns(
     queryKey: ['runs', taskId ?? 'all', includeArchived ? 'archived' : 'active', limit, offset],
     queryFn: () => fns.listRuns({ data: { taskId, limit, offset, includeArchived } }),
     // Activity SSE invalidates on run_changed; poll only when the stream is down.
+    refetchInterval: streamHealthy ? false : 3000,
+  })
+}
+
+export function useConversationNavigationRuns() {
+  const streamHealthy = useActivityStreamHealthy()
+  return useQuery({
+    queryKey: ['runs', 'conversation-navigation'],
+    queryFn: () => fns.listConversationNavigationRuns(),
     refetchInterval: streamHealthy ? false : 3000,
   })
 }
@@ -1087,6 +1105,10 @@ export function useStartChat() {
 
 export async function fetchLatestRunForWorkspace(workspaceId: string) {
   return fns.getLatestRunForWorkspace({ data: { workspaceId } })
+}
+
+export async function fetchLatestRunForProject(projectId: string) {
+  return fns.getLatestRunForProject({ data: { projectId } })
 }
 
 // --- Integrations ----------------------------------------------------------

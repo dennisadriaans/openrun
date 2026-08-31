@@ -36,10 +36,10 @@ export const OPENRUN_RUN_ID_ENV = 'OPENRUN_RUN_ID'
 /**
  * Env var carrying the directory Open Run itself runs from.
  *
- * The server process is spawned by the agent, so it inherits the *worktree* as
- * its cwd — and the database path is resolved from cwd. Without this the
- * server would quietly create an empty `data/openrun.db` inside the user's
- * repository instead of reading the real one.
+ * The server process is spawned by the agent inside the worktree. The
+ * database lives under `OPENRUN_HOME`, so this is no longer how we find it;
+ * the MCP stdio server still requires it as proof the process was started by
+ * Open Run rather than by hand.
  */
 export const OPENRUN_APP_DIR_ENV = 'OPENRUN_APP_DIR'
 

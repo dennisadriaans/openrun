@@ -9,15 +9,15 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Composer } from '../components/Chat'
-import { BranchPicker, ProjectPicker, RuntimePicker } from '../components/ComposerControls'
+import { Composer } from '../components/chat/Composer'
+import { RuntimePicker } from '../components/ComposerControls'
 import { AddProjectModal } from '../components/AddProjectModal'
 import { SidebarToggle, useSidebar } from '../components/AppChrome'
 import { WorkingIndicator } from '../components/chat/WorkingIndicator'
 import { NativeSessionMenu } from '../components/NativeSessionMenu'
 import { NewWorkspaceModal } from '../components/NewWorkspaceModal'
 import { Button } from '../components/ui'
-import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
+import { WorkspaceBreadcrumb } from '../components/workspace/WorkspaceBreadcrumb'
 import {
   defaultEffort,
   defaultModel,
@@ -107,7 +107,6 @@ function NewRun() {
   const [sent, setSent] = useState<{ prompt: string; startedAt: number } | null>(null)
   const [addingProject, setAddingProject] = useState(false)
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
-  const [openingBranch, setOpeningBranch] = useState('')
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
@@ -115,24 +114,8 @@ function NewRun() {
   const nativeQuery = useNativeSessions({ workspaceId }, { enabled: Boolean(workspaceId) })
   const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
-    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived' && w.kind === 'worktree'),
+    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
     [allWorkspaces],
-  )
-  const branchChoices = useMemo(
-    () =>
-      projectBranchChoices({
-        gitBranches: gitBranches ?? [],
-        workspaces: workspaces.map((w) => ({
-          id: w.id,
-          branch: w.configuredBranch,
-          kind: w.kind,
-          status: w.status,
-          activeRunId: w.activeRunId,
-          exists: w.exists,
-        })),
-        selectedWorkspaceId: workspaceId,
-      }),
-    [gitBranches, workspaces, workspaceId],
   )
 
   useEffect(() => {
@@ -144,7 +127,9 @@ function NewRun() {
   useEffect(() => {
     if (workspaces.some((w) => w.id === workspaceId)) return
     const preferred =
-      workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId) ?? workspaces[0]
+      workspaces.find(
+        (w) => w.kind === 'worktree' && isWorkspaceReady(w.status) && !w.activeRunId,
+      ) ?? workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId)
     setWorkspaceId(preferred?.id ?? '')
   }, [workspaces, workspaceId])
 
@@ -199,29 +184,9 @@ function NewRun() {
             ? 'Pick a runtime.'
             : null
 
-  const selectBranch = async (id: string) => {
+  const selectBranch = (id: string) => {
     setWorkspaceError(null)
-    const pending = parsePendingGitBranchId(id)
-    if (!pending) {
-      setWorkspaceId(id)
-      return
-    }
-    if (!projectId) return
-    const gitRow = (gitBranches ?? []).find((row) => row.name === pending)
-    setOpeningBranch(pending)
-    try {
-      const created = await createWorkspace.mutateAsync({
-        projectId,
-        branch: pending,
-        fromBranch: pending,
-        useExistingBranch: gitRow ? !gitRow.remote : true,
-      })
-      setWorkspaceId(created.id)
-    } catch (err) {
-      setWorkspaceError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setOpeningBranch('')
-    }
+    setWorkspaceId(id)
   }
 
   const openNewWorkspace = () => {
@@ -299,34 +264,21 @@ function NewRun() {
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-0.5">
-          <ProjectPicker
-            projects={projects ?? []}
-            projectId={projectId}
-            disabled={startChat.isPending}
-            onChange={(id) => {
-              setProjectId(id)
-              setWorkspaceId('')
-            }}
-            onAddProject={() => setAddingProject(true)}
-          />
-          <span aria-hidden className="shrink-0 text-muted-foreground/40">
-            /
-          </span>
-          <BranchPicker
-            workspaces={branchChoices}
-            workspaceId={workspaceId}
-            disabled={startChat.isPending || createWorkspace.isPending}
-            busyLabel={openingBranch ? `Opening ${openingBranch}…` : undefined}
-            newBranchLabel="New branch and workspace"
-            onChange={(id) => void selectBranch(id)}
-            onRequestNewBranch={projectId ? openNewWorkspace : undefined}
-          />
-          {!sent ? (
-            <>
-              <span aria-hidden className="shrink-0 text-muted-foreground/40">
-                /
-              </span>
+        <WorkspaceBreadcrumb
+          projectId={projectId}
+          projectName={project?.name}
+          workspace={workspace}
+          workspaces={workspaces}
+          branchDisabled={startChat.isPending || createWorkspace.isPending}
+          onAddProject={() => setAddingProject(true)}
+          onSelectProject={(id) => {
+            setProjectId(id)
+            setWorkspaceId('')
+          }}
+          onSelectWorkspace={selectBranch}
+          onRequestNewBranch={projectId ? openNewWorkspace : undefined}
+          trailing={
+            !sent ? (
               <NativeSessionMenu
                 workspaceId={workspaceId}
                 groups={nativeQuery.data?.groups ?? []}
@@ -343,9 +295,9 @@ function NewRun() {
                 }}
                 onSelect={pickNativeSession}
               />
-            </>
-          ) : null}
-        </nav>
+            ) : undefined
+          }
+        />
       </header>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -478,7 +430,8 @@ function NewRun() {
       {newWorkspaceOpen && project ? (
         <NewWorkspaceModal
           projectName={project.name}
-          defaultBaseBranch={workspace?.branch || project.defaultBranch || ''}
+          defaultBaseBranch={project.defaultBranch || ''}
+          baseBranches={gitBranches ?? []}
           pending={createWorkspace.isPending}
           onClose={() => setNewWorkspaceOpen(false)}
           onCreate={async (input) => {

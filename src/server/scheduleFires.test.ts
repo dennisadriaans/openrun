@@ -6,6 +6,8 @@ import { after, describe, it } from 'node:test'
 
 const root = mkdtempSync(join(tmpdir(), 'openrun-schedule-fires-'))
 const cwdBefore = process.cwd()
+const previousHome = process.env.OPENRUN_HOME
+process.env.OPENRUN_HOME = join(root, '.openrun')
 process.chdir(root)
 
 const { closeDb } = await import('./db.ts')
@@ -16,6 +18,8 @@ const { latestScheduleFires, recordScheduleFire, settleScheduleFire } = await im
 after(() => {
   closeDb()
   process.chdir(cwdBefore)
+  if (previousHome === undefined) delete process.env.OPENRUN_HOME
+  else process.env.OPENRUN_HOME = previousHome
   rmSync(root, { recursive: true, force: true })
 })
 

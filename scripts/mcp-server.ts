@@ -27,9 +27,9 @@ import {
 import { callOpenrunTool } from '../src/server/openrunTools.ts'
 
 /**
- * The agent spawned us inside the worktree, and the database path is resolved
- * from the working directory — so move to Open Run's own directory first, and
- * refuse to answer rather than create an empty database in the user's repo.
+ * The agent spawned us inside the worktree. The database lives under
+ * `OPENRUN_HOME`, but we still chdir to Open Run's own directory and refuse
+ * to answer without it — a hand-started process is not attached to a run.
  */
 function enterAppDir(): boolean {
   const dir = process.env[OPENRUN_APP_DIR_ENV] ?? ''

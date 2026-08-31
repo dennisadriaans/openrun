@@ -20,6 +20,20 @@ test('a settled turn keeps edit cards visible next to the answer', () => {
   )
 })
 
+test('a settled turn keeps every assistant message visible', () => {
+  const rows = [
+    { id: 'commentary', kind: 'text' as const },
+    { id: 'tool', kind: 'work' as const },
+    { id: 'answer', kind: 'text' as const },
+  ]
+  const plan = planTurnFold(rows, true)
+  const { visible } = foldedRows(rows, plan, 'closed')
+  assert.deepEqual(
+    visible.map((row) => row.id),
+    ['commentary', 'answer'],
+  )
+})
+
 test('an in-flight turn hides its work but keeps the streaming answer', () => {
   const rows = [
     { id: 'thought', kind: 'work' as const },

@@ -9,9 +9,9 @@
  *
  * Layout is adapted from the t3code chat view (MIT, T3 Tools Inc.).
  */
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { createContext, memo, useContext, useMemo, useState, type ReactNode } from 'react'
 import { Check, Copy, WrapText } from 'lucide-react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   fenceTitleFromInfo,
@@ -20,10 +20,69 @@ import {
 } from '../../lib/codeLanguage'
 import { parseFilePathToken, relativeToWorkspace } from '../../lib/filePathToken'
 import { highlightLines } from '../../lib/highlight'
+import { githubPullRequestUrl } from '../../lib/githubPrLink'
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
 import { FileTypeIcon } from '../FileTypeIcon'
 
-const REMARK_PLUGINS = [remarkGfm]
+const REMARK_PLUGINS: NonNullable<Options['remarkPlugins']> = [remarkGfm]
+const ChatRepositoryContext = createContext<string | undefined>(undefined)
+
+type MarkdownNode = {
+  type: string
+  value?: string
+  url?: string
+  children?: MarkdownNode[]
+}
+
+function remarkPullRequestLinks(repositoryUrl?: string) {
+  return (tree: MarkdownNode) => {
+    const visit = (node: MarkdownNode) => {
+      if (!node.children || node.type === 'link') return
+      for (let index = 0; index < node.children.length; index += 1) {
+        const child = node.children[index]!
+        if (child.type !== 'text' || !child.value) {
+          visit(child)
+          continue
+        }
+        const parts: MarkdownNode[] = []
+        const pattern = /\b(?:PR|pull request)\s+#([1-9]\d*)\b/gi
+        let cursor = 0
+        for (const match of child.value.matchAll(pattern)) {
+          const start = match.index ?? 0
+          if (start > cursor) parts.push({ type: 'text', value: child.value.slice(cursor, start) })
+          const number = Number(match[1])
+          const url = githubPullRequestUrl(repositoryUrl, number)
+          if (url) {
+            parts.push({ type: 'link', url, children: [{ type: 'text', value: match[0] }] })
+          } else {
+            parts.push({ type: 'text', value: match[0] })
+          }
+          cursor = start + match[0].length
+        }
+        if (parts.length === 0) continue
+        if (cursor < child.value.length)
+          parts.push({ type: 'text', value: child.value.slice(cursor) })
+        node.children.splice(index, 1, ...parts)
+        index += parts.length - 1
+      }
+    }
+    visit(tree)
+  }
+}
+
+export function ChatRepositoryProvider({
+  repositoryUrl,
+  children,
+}: {
+  repositoryUrl?: string
+  children: ReactNode
+}) {
+  return (
+    <ChatRepositoryContext.Provider value={repositoryUrl}>
+      {children}
+    </ChatRepositoryContext.Provider>
+  )
+}
 
 function nodeText(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
@@ -156,6 +215,11 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   workspaceRoot,
   className,
 }: ChatMarkdownProps) {
+  const repositoryUrl = useContext(ChatRepositoryContext)
+  const remarkPlugins = useMemo<NonNullable<Options['remarkPlugins']>>(
+    () => (repositoryUrl ? [remarkGfm, [remarkPullRequestLinks, repositoryUrl]] : REMARK_PLUGINS),
+    [repositoryUrl],
+  )
   const components = useMemo<Components>(() => {
     return {
       code({ node, className: codeClass, children, ...props }) {
@@ -230,7 +294,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 
   return (
     <div className={`chat-markdown min-w-0 ${className ?? ''}`}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {text}
       </ReactMarkdown>
     </div>

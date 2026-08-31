@@ -1,6 +1,6 @@
 /**
  * The tool server reads the database and the run's worktree, so these tests use
- * a throwaway cwd (where `getDb()` resolves from) and a real one-commit repo.
+ * a throwaway OPENRUN_HOME and a real one-commit repo.
  */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -12,9 +12,8 @@ import { after, before, describe, it } from 'node:test'
 const root = mkdtempSync(join(tmpdir(), 'openrun-tools-'))
 const repo = mkdtempSync(join(tmpdir(), 'openrun-tools-repo-'))
 const cwdBefore = process.cwd()
-
-// getDb() resolves `data/openrun.db` from the cwd at first call, so the chdir
-// has to happen before anything touches the module.
+const previousHome = process.env.OPENRUN_HOME
+process.env.OPENRUN_HOME = join(root, '.openrun')
 process.chdir(root)
 
 const { getDb, closeDb } = await import('./db.ts')
@@ -111,6 +110,8 @@ before(() => {
 after(() => {
   closeDb()
   process.chdir(cwdBefore)
+  if (previousHome === undefined) delete process.env.OPENRUN_HOME
+  else process.env.OPENRUN_HOME = previousHome
   rmSync(root, { recursive: true, force: true })
   rmSync(repo, { recursive: true, force: true })
 })
