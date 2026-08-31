@@ -713,6 +713,13 @@ body {
   word-break: break-word;
 }
 
+.chat-user__text.chat-markdown {
+  font-family: var(--chat-user-font-family);
+  font-size: var(--chat-user-font-size);
+  line-height: var(--chat-user-leading);
+  color: var(--chat-user-color);
+}
+
 .chat-markdown > :first-child {
   margin-top: 0;
 }
