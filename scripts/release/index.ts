@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { parseCadence, isReleaseDue } from './cadence.ts'
+import { isReleaseCommitSubject } from './conventional.ts'
 import { extractRelease, insertRelease, renderReleaseNotes, splitChangelog } from './notes.ts'
 import type { Fragment } from './notes.ts'
 import { planRelease, summariseCounts } from './plan.ts'
@@ -356,9 +357,12 @@ function commandPublish(argv: string[]): number {
     return 0
   }
 
-  const subject = git('log', '-1', '--format=%s')
-  if (subject !== `chore(release): ${tag}`) {
-    console.log(`HEAD is "${subject}", not the release commit for ${tag} — nothing to publish.`)
+  const releaseCommit = gitQuiet('log', '--format=%H%x1f%s')
+    .split('\n')
+    .map((line) => line.split('\x1f'))
+    .find(([, subject = '']) => isReleaseCommitSubject(subject, tag))?.[0]
+  if (!releaseCommit) {
+    console.log(`No release commit for ${tag} exists in HEAD's history — nothing to publish.`)
     setOutput('published', 'false')
     return 0
   }
@@ -367,12 +371,12 @@ function commandPublish(argv: string[]): number {
   if (!notes) throw new ReleaseError(`CHANGELOG.md has no "## v${version}" section to publish.`)
 
   if (dryRun) {
-    console.log(`Would tag ${tag} at ${git('rev-parse', 'HEAD')} with:\n\n${notes}`)
+    console.log(`Would tag ${tag} at ${releaseCommit} with:\n\n${notes}`)
     setOutput('published', 'false')
     return 0
   }
 
-  git('tag', '-a', tag, '-m', `Open Run ${tag}`)
+  git('tag', '-a', tag, releaseCommit, '-m', `Open Run ${tag}`)
   git('push', 'origin', tag)
 
   const notesFile = join(ROOT, '.release-notes.md')
