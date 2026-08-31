@@ -258,7 +258,9 @@ export function NavigationWorkspacePicker({
                 key={workspace.id}
                 role="menuitem"
                 className={`group/workspace flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors ${
-                  active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
+                  active
+                    ? 'bg-secondary text-foreground'
+                    : 'text-foreground/85 hover:bg-secondary/70'
                 }`}
               >
                 <button
@@ -273,7 +275,9 @@ export function NavigationWorkspacePicker({
                 >
                   <GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] leading-tight">{workspace.branch}</span>
+                    <span className="block truncate text-[12.5px] leading-tight">
+                      {workspace.branch}
+                    </span>
                     {workspace.kind === 'main' ? (
                       <span className="block truncate text-[10px] leading-tight text-muted-foreground">
                         main
@@ -290,12 +294,19 @@ export function NavigationWorkspacePicker({
                 </button>
                 <span className="relative size-3.5 shrink-0">
                   {active ? (
-                    <Check className="absolute inset-0 size-3.5 transition-opacity group-hover/workspace:opacity-0" aria-hidden="true" />
+                    <Check
+                      className="absolute inset-0 size-3.5 transition-opacity group-hover/workspace:opacity-0"
+                      aria-hidden="true"
+                    />
                   ) : null}
                   <button
                     type="button"
                     onClick={() => void copyBranch(workspace.id, workspace.branch)}
-                    aria-label={copied ? `Copied branch ${workspace.branch}` : `Copy branch ${workspace.branch}`}
+                    aria-label={
+                      copied
+                        ? `Copied branch ${workspace.branch}`
+                        : `Copy branch ${workspace.branch}`
+                    }
                     title={copied ? 'Copied' : 'Copy branch name'}
                     className={`absolute inset-0 flex items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 group-hover/workspace:opacity-100 ${
                       copied ? 'text-success' : 'text-muted-foreground hover:text-foreground'
