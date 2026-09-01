@@ -377,6 +377,9 @@ function RunDetail() {
 
   const newRunRuntimeId = data?.runtime?.id ?? fallbackRuntime?.id
   const firstPrompt = messages.find((message) => message.role === 'user')?.content.trim() ?? ''
+  const runTitle = run
+    ? runListTitle({ trigger: run.trigger, taskName: run.taskName, prompt: firstPrompt })
+    : ''
   const newRunBlockedReason = !run
     ? 'Loading run details'
     : runBusy
@@ -484,22 +487,7 @@ function RunDetail() {
                 workspaces={workspaces}
                 branchDisabled={booting}
                 onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
-                trailing={
-                  run ? (
-                    <ThreadStack
-                      runId={run.id}
-                      title={runListTitle({
-                        trigger: run.trigger,
-                        taskName: run.taskName,
-                        prompt: firstPrompt,
-                      })}
-                      runtimeId={data?.runtime?.id ?? run.runtimeId}
-                      runtimeLabel={data?.runtime?.label ?? run.runtimeId}
-                      workspaceId={workspace?.id ?? run.workspaceId}
-                      projectId={project?.id ?? workspace?.projectId ?? ''}
-                    />
-                  ) : null
-                }
+                runTitle={runTitle}
               />
 
               <div className="flex shrink-0 items-center gap-0.5">
@@ -514,6 +502,17 @@ function RunDetail() {
                   >
                     <Ban className="size-3.5" />
                   </button>
+                ) : null}
+                {run ? (
+                  <ThreadStack
+                    appearance="icon"
+                    runId={run.id}
+                    title={runTitle}
+                    runtimeId={data?.runtime?.id ?? run.runtimeId}
+                    runtimeLabel={data?.runtime?.label ?? run.runtimeId}
+                    workspaceId={workspace?.id ?? run.workspaceId}
+                    projectId={project?.id ?? workspace?.projectId ?? ''}
+                  />
                 ) : null}
                 <button
                   type="button"

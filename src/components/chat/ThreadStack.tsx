@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router'
-import { ChevronDown, GitBranch, Search } from 'lucide-react'
+import { ChevronDown, GitBranch, MessagesSquare, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { relativeTime } from '../../lib/format'
 import { useConversationNavigationRuns } from '../../lib/queries'
@@ -8,7 +8,14 @@ import { truncateNavTitle } from '../../lib/truncateLabel.ts'
 import { ProviderIcon } from '../ProviderIcons'
 
 /** Change this default to `plain` to remove the wallet-card affordance only. */
-export const DEFAULT_THREAD_SELECTOR_APPEARANCE: 'stack' | 'plain' = 'stack'
+export const DEFAULT_THREAD_SELECTOR_APPEARANCE: ThreadSelectorAppearance = 'stack'
+
+/**
+ * `icon` is the top-bar action form: a square button beside "New chat", where
+ * switching conversations sits next to starting one. `stack` and `plain` are
+ * the wide forms that carry the current title themselves.
+ */
+export type ThreadSelectorAppearance = 'stack' | 'plain' | 'icon'
 
 function runtimeKind(runtimeId: string, label: string) {
   const value = `${runtimeId} ${label}`.toLocaleLowerCase()
@@ -35,7 +42,7 @@ export function ThreadStack({
   runtimeLabel: string
   workspaceId: string
   projectId: string
-  appearance?: 'stack' | 'plain'
+  appearance?: ThreadSelectorAppearance
 }) {
   const { data: runs = [] } = useConversationNavigationRuns()
   const [open, setOpen] = useState(false)
@@ -92,6 +99,116 @@ export function ThreadStack({
     void navigate({ to: '/runs/$runId', params: { runId: id } })
   }
 
+  const popover = (
+    <div
+      role="dialog"
+      aria-label="Conversation context"
+      className={`absolute top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border bg-elevated shadow-2xl shadow-black/40 ${
+        appearance === 'icon' ? 'right-0' : 'left-0'
+      }`}
+    >
+      <div className="relative border-b border-border p-2.5">
+        <Search className="absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search this worktree, or type to reach others…"
+          aria-label="Search conversations"
+          className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-12 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring/50"
+        />
+        <kbd className="absolute right-5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+          ⌘K
+        </kbd>
+      </div>
+      <div className="max-h-[min(30rem,65vh)] overflow-y-auto p-2">
+        {groups.map((group) => (
+          <section key={group.key} className="not-first:mt-2">
+            {query.trim() || group.kind !== 'current' ? (
+              <h3 className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                {group.kind === 'workspace' ? <GitBranch className="size-3" /> : null}
+                {group.label}
+                {group.runs.some((item) => item.unread) ? (
+                  <span
+                    aria-label="New activity in this worktree"
+                    title="New activity in this worktree"
+                    className="size-1.5 rounded-full bg-accent"
+                  />
+                ) : null}
+              </h3>
+            ) : null}
+            {group.runs.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={(event) => select(item.id, event.metaKey || event.ctrlKey)}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-secondary/70 ${
+                  item.id === runId ? 'bg-secondary text-foreground' : 'text-foreground/85'
+                }`}
+              >
+                <ProviderIcon
+                  kind={runtimeKind(item.runtimeId, item.runtimeLabel)}
+                  className="size-3.5 shrink-0"
+                />
+                <span className="min-w-0 flex-1 truncate text-[13px]">{item.chatTitle}</span>
+                {item.unread ? (
+                  <span
+                    role="img"
+                    aria-label="New activity"
+                    title="New activity"
+                    className="size-1.5 shrink-0 rounded-full bg-accent"
+                  />
+                ) : null}
+                <span
+                  className="max-w-[4.5rem] shrink-0 truncate text-[11px] text-muted-foreground"
+                  title={item.runtimeLabel}
+                >
+                  {item.runtimeLabel}
+                </span>
+                <span className="w-10 shrink-0 text-right text-[11px] text-muted-foreground/70">
+                  {relativeTime(item.startedAt).replace(' ago', '')}
+                </span>
+              </button>
+            ))}
+          </section>
+        ))}
+        {groups.length === 0 ? (
+          <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+            No conversations found
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
+
+  if (appearance === 'icon') {
+    return (
+      <div ref={rootRef} className="relative">
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label="Conversations"
+          title={`Conversations · ${title}`}
+          onClick={() => setOpen((value) => !value)}
+          className={`relative inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground ${
+            open ? 'bg-secondary text-foreground' : ''
+          }`}
+        >
+          <MessagesSquare className="size-3.5" />
+          {hasUnreadCurrentThread ? (
+            <span
+              role="img"
+              aria-label="New activity in another conversation"
+              className="absolute right-1 top-1 size-1.5 rounded-full bg-accent"
+            />
+          ) : null}
+        </button>
+        {open ? popover : null}
+      </div>
+    )
+  }
+
   return (
     <div ref={rootRef} className="relative min-w-0">
       <div className="relative min-w-0">
@@ -127,85 +244,7 @@ export function ThreadStack({
         </button>
       </div>
 
-      {open ? (
-        <div
-          role="dialog"
-          aria-label="Conversation context"
-          className="absolute left-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border bg-elevated shadow-2xl shadow-black/40"
-        >
-          <div className="relative border-b border-border p-2.5">
-            <Search className="absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search this worktree, or type to reach others…"
-              aria-label="Search conversations"
-              className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-12 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring/50"
-            />
-            <kbd className="absolute right-5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-              ⌘K
-            </kbd>
-          </div>
-          <div className="max-h-[min(30rem,65vh)] overflow-y-auto p-2">
-            {groups.map((group) => (
-              <section key={group.key} className="not-first:mt-2">
-                {query.trim() || group.kind !== 'current' ? (
-                  <h3 className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                    {group.kind === 'workspace' ? <GitBranch className="size-3" /> : null}
-                    {group.label}
-                    {group.runs.some((item) => item.unread) ? (
-                      <span
-                        aria-label="New activity in this worktree"
-                        title="New activity in this worktree"
-                        className="size-1.5 rounded-full bg-accent"
-                      />
-                    ) : null}
-                  </h3>
-                ) : null}
-                {group.runs.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={(event) => select(item.id, event.metaKey || event.ctrlKey)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-secondary/70 ${
-                      item.id === runId ? 'bg-secondary text-foreground' : 'text-foreground/85'
-                    }`}
-                  >
-                    <ProviderIcon
-                      kind={runtimeKind(item.runtimeId, item.runtimeLabel)}
-                      className="size-3.5 shrink-0"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{item.chatTitle}</span>
-                    {item.unread ? (
-                      <span
-                        role="img"
-                        aria-label="New activity"
-                        title="New activity"
-                        className="size-1.5 shrink-0 rounded-full bg-accent"
-                      />
-                    ) : null}
-                    <span
-                      className="max-w-[4.5rem] shrink-0 truncate text-[11px] text-muted-foreground"
-                      title={item.runtimeLabel}
-                    >
-                      {item.runtimeLabel}
-                    </span>
-                    <span className="w-10 shrink-0 text-right text-[11px] text-muted-foreground/70">
-                      {relativeTime(item.startedAt).replace(' ago', '')}
-                    </span>
-                  </button>
-                ))}
-              </section>
-            ))}
-            {groups.length === 0 ? (
-              <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-                No conversations found
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      {open ? popover : null}
     </div>
   )
 }
