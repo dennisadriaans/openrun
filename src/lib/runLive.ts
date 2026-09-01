@@ -5,7 +5,6 @@
 
 import type { QueuedMessage } from './messageQueue'
 import type { TurnEventKind, TurnEventPayload } from './turnEvents'
-import type { TurnUsage } from './turnUsage'
 import type { RunVerdict } from './verdict'
 
 export type RunLiveLogStream = 'stdout' | 'stderr'
@@ -44,12 +43,6 @@ export type RunLiveEvent =
       payload: TurnEventPayload
       createdAt: number
     }
-  /**
-   * Token accounting for the running turn, folded onto the message row. Sent
-   * as its own frame rather than a `turn_event` because it is a gauge that
-   * replaces itself, not a transcript row that appends.
-   */
-  | { type: 'turn_usage'; messageId: string; usage: TurnUsage }
   | {
       type: 'turn_started'
       userMessageId: string
