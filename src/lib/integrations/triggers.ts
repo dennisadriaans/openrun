@@ -70,7 +70,8 @@ export function providerNoun(provider: IntegrationProviderId): string {
 }
 
 /** "an issue", "a work item" — these strings are read by users, not parsed. */
-function an(noun: string): string {
+/** "an issue" / "a work item" — every provider names the thing differently. */
+export function an(noun: string): string {
   return `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`
 }
 

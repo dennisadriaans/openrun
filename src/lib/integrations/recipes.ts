@@ -17,7 +17,7 @@
  * blank line where the instruction was supposed to be.
  */
 import { providerMeta } from './catalog.ts'
-import { providerNoun, triggerOption, type IntegrationTrigger } from './triggers.ts'
+import { an, providerNoun, triggerOption, type IntegrationTrigger } from './triggers.ts'
 import type { IntegrationProviderId } from './types.ts'
 
 export type RecipeId = 'implement-flagged' | 'start-in-progress' | 'triage-new' | 'answer-comment'
@@ -60,7 +60,7 @@ function implementFlagged(provider: IntegrationProviderId): AutomationRecipe {
   return {
     id: 'implement-flagged',
     title: `Implement flagged ${noun}s`,
-    summary: `Add the “${AGENT_LABEL}” label to a ${noun} and the agent implements it.`,
+    summary: `Add the “${AGENT_LABEL}” label to ${an(noun)} and the agent implements it.`,
     trigger: { kind: 'labeled', value: AGENT_LABEL },
     automationName: `Implement flagged ${noun}s`,
     prompt: [
@@ -139,7 +139,7 @@ function answerComment(provider: IntegrationProviderId): AutomationRecipe {
   return {
     id: 'answer-comment',
     title: 'Do what a comment asks',
-    summary: `Runs when someone comments on a ${noun}, and acts on what they wrote.`,
+    summary: `Runs when someone comments on ${an(noun)}, and acts on what they wrote.`,
     trigger: { kind: 'commented', value: '' },
     automationName: 'Act on comments',
     prompt: [

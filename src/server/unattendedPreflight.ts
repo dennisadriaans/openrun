@@ -15,6 +15,7 @@ import {
   unattendedBlockedReason,
   workspaceOwnerMessage,
 } from '../lib/unattendedGate.ts'
+import { missingProjectChecksMessage, verificationDisabledMessage } from '../lib/checks.ts'
 import { hasTaskPrompt } from '../lib/taskPrompt.ts'
 import { hasWorkspaceId } from '../lib/workspaceRef.ts'
 import { isWorkspaceReady } from '../lib/workspaceReady.ts'
@@ -28,19 +29,14 @@ import { checksForWorkspace } from './checks.ts'
 import { checkWorkspace } from './workspaceHealth'
 import { getUnattendedWorkspaceOwner } from './workspaces.ts'
 
-const VERIFICATION_DISABLED_MESSAGE =
-  'Unattended verification is disabled. Enable verification and configure at least one project check before arming scheduled or webhook runs.'
-const VERIFICATION_CHECKS_MISSING_MESSAGE =
-  'Unattended automation needs at least one configured verification check. Add a project check before arming scheduled or webhook runs.'
-
 /** Shared mutation/fire error so an automation cannot be armed unverified. */
 export function unattendedVerificationRefusal(input: {
   workspaceId: string
   verifyEnabled: number | boolean
 }): string | null {
-  if (!input.verifyEnabled) return VERIFICATION_DISABLED_MESSAGE
+  if (!input.verifyEnabled) return verificationDisabledMessage()
   if (checksForWorkspace(input.workspaceId).length === 0) {
-    return VERIFICATION_CHECKS_MISSING_MESSAGE
+    return missingProjectChecksMessage()
   }
   return null
 }

@@ -77,7 +77,11 @@ import {
   type ParsedSchedule,
 } from '../lib/schedule'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
-import { isMainCheckout, pickDefaultWorkspace } from '../lib/pickWorkspace'
+import {
+  isMainCheckout,
+  MAIN_CHECKOUT_AUTOMATION_MESSAGE,
+  pickDefaultWorkspace,
+} from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
 import { hasUnattendedTrigger } from '../lib/taskReadiness'
@@ -1306,9 +1310,6 @@ export function TaskForm({
   // Checks live on the project, so how many exist depends on which repository
   // the automation targets — worth saying out loud here, because with none the
   // "verified" outcome is unreachable no matter what this form is set to.
-  const workspaceUsable =
-    hasWorkspaceId(v.workspaceId) &&
-    Boolean(selectedWorkspace && isWorkspaceReady(selectedWorkspace.status))
   const promptUsable = hasTaskPrompt(v.prompt)
   const workspaceBlockReason =
     workspaceBlockedReason({
@@ -1321,11 +1322,15 @@ export function TaskForm({
     ? 'Saving…'
     : workspaceBlockReason
       ? workspaceBlockReason
-      : !promptUsable
-        ? emptyTaskPromptMessage()
-        : pristine
-          ? 'No changes to save'
-          : undefined
+      : // `upsertTask` throws on the primary checkout, so warning and letting
+        // Save through only moved the refusal to after the click.
+        isMainCheckout(selectedWorkspace)
+        ? MAIN_CHECKOUT_AUTOMATION_MESSAGE
+        : !promptUsable
+          ? emptyTaskPromptMessage()
+          : pristine
+            ? 'No changes to save'
+            : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1355,11 +1360,7 @@ export function TaskForm({
               Cancel
             </Button>
             <span className="inline-flex" title={saveBlockReason}>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={save.isPending || !workspaceUsable || !promptUsable || pristine}
-              >
+              <Button type="submit" variant="primary" disabled={Boolean(saveBlockReason)}>
                 {save.isPending ? 'Saving…' : v.id ? 'Save changes' : 'Create'}
               </Button>
             </span>

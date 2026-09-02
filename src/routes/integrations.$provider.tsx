@@ -7,6 +7,7 @@
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router'
 import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { IntegrationAutomationSetup } from '../components/IntegrationAutomationSetup'
 import { IntegrationBrandIcon } from '../components/IntegrationCard'
 import { IntegrationConnectPanel } from '../components/IntegrationConnect'
 import { IntegrationPage, IntegrationStatusBanner } from '../components/IntegrationPage'
@@ -153,17 +154,14 @@ function ProviderDetail({
       ) : null}
 
       {!showInstall && needsAutomation ? (
-        <Card className="p-4">
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() =>
-              navigate({ to: '/tasks/new', search: { webhookIntegrationId: needsAutomation.id } })
-            }
-          >
-            Create automation
-          </Button>
-        </Card>
+        <IntegrationAutomationSetup
+          integrationId={needsAutomation.id}
+          provider={provider}
+          connectionName={needsAutomation.name}
+          onSkip={() =>
+            navigate({ to: '/tasks/new', search: { webhookIntegrationId: needsAutomation.id } })
+          }
+        />
       ) : null}
 
       {rows.length > 0 ? (
@@ -214,7 +212,10 @@ function ProviderDetail({
                         void testEvent.mutateAsync(integ.id).then((result) => {
                           setRemoteNote(
                             result.ok
-                              ? `Test event delivered · ${result.matched} automation${result.matched === 1 ? '' : 's'} matched.`
+                              ? // Name the event: a bound automation decides which
+                                // one is sent, and "0 matched" on an unnamed event
+                                // reads as a broken connection.
+                                `Test ${result.eventType} delivered · ${result.matched} automation${result.matched === 1 ? '' : 's'} matched.`
                               : result.error || 'Test event failed',
                           )
                         })
