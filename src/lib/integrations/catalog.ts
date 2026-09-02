@@ -152,9 +152,28 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'comment_created', label: 'Comment created' },
       { id: 'comment_updated', label: 'Comment updated' },
       { id: 'comment_deleted', label: 'Comment deleted' },
-      { id: 'worklog_created', label: 'Worklog created' },
-      { id: 'worklog_updated', label: 'Worklog updated' },
-      { id: 'worklog_deleted', label: 'Worklog deleted' },
+      /**
+       * Atlassian's dynamic-webhook API — the one a hosted connection uses —
+       * refuses a registration that asks for worklog events, so a connection
+       * made through Open Run Cloud never receives one. They stay bindable for
+       * a hook registered by a Jira admin, and say so rather than looking
+       * broken.
+       */
+      {
+        id: 'worklog_created',
+        label: 'Worklog created',
+        description: 'Needs a Jira admin-registered hook; hosted connections never receive it',
+      },
+      {
+        id: 'worklog_updated',
+        label: 'Worklog updated',
+        description: 'Needs a Jira admin-registered hook; hosted connections never receive it',
+      },
+      {
+        id: 'worklog_deleted',
+        label: 'Worklog deleted',
+        description: 'Needs a Jira admin-registered hook; hosted connections never receive it',
+      },
     ],
     setupSteps: CONNECT_STEPS,
   },
