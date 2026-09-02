@@ -3,8 +3,8 @@
   launchd agent for Open Run (macOS).
 
   A scheduler that only runs while a terminal tab is open is a scheduler that
-  misses fires. This keeps Open Run running across logouts and restarts, and
-  restarts it if it dies.
+  misses fires. This starts Open Run when you log in and restarts it if it dies.
+  A LaunchAgent stops at logout and loads again at the next login.
 
   Install:
     1. Edit WorkingDirectory and the node path below.

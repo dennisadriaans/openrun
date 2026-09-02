@@ -125,9 +125,9 @@ pnpm start          # serves the build; refuses an unsafe bind
 ```
 
 Templates for launchd (macOS) and systemd (Linux) are in
-[`contrib/service/`](./contrib/service/) — they survive logout and restart the
-app if it dies. Open Run recovers a fire missed in the last fifteen minutes on
-start-up and records older ones as visible misses, but nothing beats being up.
+[`contrib/service/`](./contrib/service/) — they start Open Run with your user
+session and restart the app if it dies. On Linux, lingering can keep the user
+service running after logout.
 
 > Open Run is experimental and in active development.
 

@@ -1,10 +1,8 @@
 # Running Open Run as a service
 
 Open Run schedules agents with cron expressions, and `node-cron` only observes
-ticks a **running process** is there to see. Open Run recovers what it can on
-start-up — a fire from the last fifteen minutes is caught up, and anything older
-is recorded as a visible missed fire — but the only way an automation reliably
-fires at 03:00 is for Open Run to still be running at 03:00.
+ticks a **running process** is there to see. The only way an automation reliably
+fires at 03:00 is for Open Run to be running at 03:00.
 
 `pnpm dev` in a terminal tab is not that. These are.
 
@@ -41,7 +39,8 @@ you enable lingering:
 sudo loginctl enable-linger "$USER"
 ```
 
-On macOS a LaunchAgent already survives logout.
+On macOS a LaunchAgent runs only while you are logged in. It loads again at the
+next login, but it does not keep Open Run running while you are logged out.
 
 ## Why a user service, not a system one
 
