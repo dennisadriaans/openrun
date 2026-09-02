@@ -110,7 +110,18 @@ describe('missedFireDecision', () => {
       since: T0,
       now: T0 + 365 * 24 * HOUR,
     })
-    assert.equal(decision.kind === 'missed' && decision.capped, true)
+    assert.notEqual(decision.kind, 'none')
+    assert.equal(decision.kind !== 'none' && decision.capped, true)
+  })
+
+  it('uses the actual newest occurrence after the count reaches its cap', () => {
+    const now = T0 + 600 * 60_000
+    const decision = missedFireDecision({ cron: '* * * * *', since: T0, now })
+    assert.equal(decision.kind, 'catch-up')
+    if (decision.kind !== 'catch-up') return
+    assert.equal(decision.scheduledFor, now)
+    assert.equal(decision.missedCount, MAX_COUNTED_MISSES)
+    assert.equal(decision.capped, true)
   })
 })
 

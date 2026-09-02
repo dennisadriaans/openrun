@@ -74,6 +74,19 @@ export function occurrencesBetween(cron: string, since: number, now: number): nu
   return out
 }
 
+/** The newest occurrence in the window, independent of the counting cap. */
+function latestOccurrenceBetween(cron: string, since: number, now: number): number | null {
+  if (!cron.trim() || !Number.isFinite(since) || !Number.isFinite(now) || since >= now) return null
+  try {
+    // `prev()` is strict, so advance one millisecond to include a fire exactly at `now`.
+    const iterator = parser.parseExpression(cron, { currentDate: new Date(now + 1) })
+    const latest = iterator.prev().getTime()
+    return latest > since && latest <= now ? latest : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * What to do about a recurring automation on boot.
  *
@@ -90,7 +103,8 @@ export function missedFireDecision(input: {
   const occurrences = occurrencesBetween(input.cron, input.since, input.now)
   if (occurrences.length === 0) return { kind: 'none' }
 
-  const scheduledFor = occurrences[occurrences.length - 1]!
+  const scheduledFor = latestOccurrenceBetween(input.cron, input.since, input.now)
+  if (scheduledFor === null) return { kind: 'none' }
   const missedCount = occurrences.length
   const capped = missedCount >= MAX_COUNTED_MISSES
   const graceMs = input.graceMs ?? MISSED_FIRE_CATCHUP_GRACE_MS
