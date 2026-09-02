@@ -17,7 +17,13 @@ import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDb, type CheckResultRow, type MessageRow, type RuntimeRow, type TaskRow } from './db'
-import { changedFiles, currentBranch, captureBaseSnapshot } from './git'
+import {
+  changedFiles,
+  commit as gitCommit,
+  currentBranch,
+  captureBaseSnapshot,
+  repoInfo,
+} from './git'
 import {
   buildTurnCommand,
   extractSessionId,
@@ -43,6 +49,11 @@ import {
 import { assertWorkspaceFree, resolveWorkspacePath } from './workspaces'
 import { recordRunOutcomeForWorkspace } from './workspaceHealth'
 import { missingRunCwdMessage } from '../lib/workspaceHealth.ts'
+import {
+  shouldCommitUnattendedChanges,
+  unattendedCommitFailedMessage,
+  unattendedCommitMessage,
+} from '../lib/unattendedCommit.ts'
 import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
@@ -2018,6 +2029,73 @@ function failureSummaries(results: CheckResultRow[]): FailedCheckSummary[] {
  * hostage to a test suite after every message you type is a cost with no
  * matching benefit, since you are right there to judge the result yourself.
  */
+/**
+ * Commit whatever an unattended turn left in an app-managed worktree.
+ *
+ * Without this the tree stays dirty, and `workspaceHealth` refuses the *next*
+ * unattended fire for that workspace — so a recurring automation that writes
+ * files would run exactly once and then report "the workspace has uncommitted
+ * changes" forever. The commit lands on the worktree's own branch and stays
+ * reversible through `git.runCommits` / Undo.
+ *
+ * Best-effort by design: a failure is recorded on the run and the run still
+ * finalizes. Taking a finished run down because a commit did not land would
+ * trade a blocked schedule for a lost result.
+ */
+function commitUnattendedChanges(input: {
+  runId: string
+  messageId: string
+  cwd: string
+  workspaceId: string
+  taskName: string
+  verdict: RunVerdict
+}): void {
+  const db = getDb()
+  const workspace = db.prepare('SELECT kind FROM workspaces WHERE id = ?').get(input.workspaceId) as
+    | { kind: string }
+    | undefined
+  if (!workspace) return
+
+  let dirty = false
+  try {
+    dirty = repoInfo(input.cwd).dirty
+  } catch {
+    // A cwd we cannot inspect is one we must not commit in.
+    return
+  }
+
+  if (
+    !shouldCommitUnattendedChanges({
+      workspaceKind: workspace.kind,
+      dirty,
+      verdict: input.verdict,
+    })
+  ) {
+    return
+  }
+
+  try {
+    const { sha } = gitCommit(
+      input.cwd,
+      unattendedCommitMessage({
+        taskName: input.taskName,
+        verdict: input.verdict,
+        runId: input.runId,
+      }),
+    )
+    console.info(`[executor] committed ${input.runId} changes as ${sha}`)
+  } catch (err) {
+    const note = `\n${unattendedCommitFailedMessage(err instanceof Error ? err.message : String(err))}\n`
+    db.prepare('UPDATE runs SET stderr = stderr || ? WHERE id = ?').run(note, input.runId)
+    publishRunLive(input.runId, {
+      type: 'log',
+      stream: 'stderr',
+      chunk: note,
+      messageId: input.messageId,
+    })
+  }
+}
+
 async function concludeTurn(input: {
   runId: string
   assistantMessageId: string
@@ -2154,6 +2232,17 @@ async function concludeTurn(input: {
     const taskName = db.prepare('SELECT taskName FROM runs WHERE id = ?').get(input.runId) as
       | { taskName: string }
       | undefined
+    // Commit before recording the outcome: the health check the next fire runs
+    // reads the tree, and a dirty tree refuses that fire regardless of how well
+    // this run went.
+    commitUnattendedChanges({
+      runId: input.runId,
+      messageId: input.assistantMessageId,
+      cwd: input.cwd,
+      workspaceId: run.workspaceId,
+      taskName: taskName?.taskName ?? 'a scheduled run',
+      verdict,
+    })
     recordRunOutcomeForWorkspace({
       workspaceId: run.workspaceId,
       taskName: taskName?.taskName ?? 'a scheduled run',
