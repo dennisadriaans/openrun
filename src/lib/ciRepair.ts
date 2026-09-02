@@ -46,6 +46,17 @@ export function canRepairCi(input: Parameters<typeof ciRepairRefusal>[0]): boole
   return ciRepairRefusal(input) === null
 }
 
+/** Whether the pull-request strip should render the repair action at all. */
+export function showCiRepairAction(
+  input: Pick<Parameters<typeof ciRepairRefusal>[0], 'state' | 'checks' | 'failingChecks'>,
+): boolean {
+  return (
+    (input.state === 'open' || input.state === 'draft') &&
+    input.checks === 'failing' &&
+    input.failingChecks.length > 0
+  )
+}
+
 /**
  * The brief handed to the agent.
  *

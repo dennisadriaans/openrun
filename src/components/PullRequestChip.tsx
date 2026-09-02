@@ -10,7 +10,12 @@
  * instead of the worktree.
  */
 import { ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed, Wrench } from 'lucide-react'
-import { buildCiRepairPrompt, ciRepairLabel, ciRepairRefusal } from '../lib/ciRepair'
+import {
+  buildCiRepairPrompt,
+  ciRepairLabel,
+  ciRepairRefusal,
+  showCiRepairAction,
+} from '../lib/ciRepair'
 import {
   isPullRequestLive,
   pullRequestStateLabel,
@@ -83,7 +88,7 @@ export function PullRequestChip({
             {pullRequestStateLabel(pr.state)}
           </span>
         ) : null}
-        {runId ? <FixCiButton pr={pr} runId={runId} busy={busy} /> : null}
+        {runId && showCiRepairAction(pr) ? <FixCiButton pr={pr} runId={runId} busy={busy} /> : null}
       </span>
     </div>
   )
@@ -104,9 +109,6 @@ function FixCiButton({ pr, runId, busy }: { pr: RunPullRequest; runId: string; b
     failingChecks: pr.failingChecks,
     busy: busy || sendMessage.isPending,
   })
-  // Nothing red: no button at all, rather than a permanently disabled one.
-  if (pr.checks !== 'failing' || pr.failingChecks.length === 0) return null
-
   return (
     <Button
       variant="primary"

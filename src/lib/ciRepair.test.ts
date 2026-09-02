@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildCiRepairPrompt, canRepairCi, ciRepairLabel, ciRepairRefusal } from './ciRepair.ts'
+import {
+  buildCiRepairPrompt,
+  canRepairCi,
+  ciRepairLabel,
+  ciRepairRefusal,
+  showCiRepairAction,
+} from './ciRepair.ts'
 import type { FailingCheck } from './pullRequest.ts'
 
 const failing: FailingCheck[] = [
@@ -52,6 +58,17 @@ describe('ciRepairRefusal', () => {
   it('reports a settled pull request ahead of a busy agent', () => {
     // Ordering matters for the hover text: "merged" is the useful reason.
     assert.match(String(ciRepairRefusal(input({ state: 'merged', busy: true }))), /merged/)
+  })
+})
+
+describe('showCiRepairAction', () => {
+  it('shows only live pull requests with named failing checks', () => {
+    assert.equal(showCiRepairAction(input()), true)
+    assert.equal(showCiRepairAction(input({ state: 'draft' })), true)
+    assert.equal(showCiRepairAction(input({ state: 'merged' })), false)
+    assert.equal(showCiRepairAction(input({ state: 'closed' })), false)
+    assert.equal(showCiRepairAction(input({ checks: 'passing' })), false)
+    assert.equal(showCiRepairAction(input({ failingChecks: [] })), false)
   })
 })
 
