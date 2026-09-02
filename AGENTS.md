@@ -189,7 +189,7 @@ Neither hook may open an `EventSource` of its own.
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (relayed from the control plane) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx` |
 | Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationConnect.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
-| Binding a connection to a workspace + runtime | `server/integrations/automation.ts`, `components/IntegrationAutomationSetup.tsx`; event narrowing in `lib/integrations/automation.ts` |
+| Binding a connection to a workspace + runtime | `server/integrations/automation.ts` (+ `getAutomationSetupContext` / `createIntegrationAutomation` in `fns` and `lib/queries.ts`); event narrowing in `lib/integrations/automation.ts`. **No UI consumes these yet** — after Connect, `routes/integrations.$provider.tsx` sends you to `/tasks/new?webhookIntegrationId=…`, so `lib/integrations/recipes.ts` is unused too |
 | "When a ticket moves to X" → events + filters | `lib/integrations/triggers.ts` — compiled on the server write path too, so the form's preview *is* the binding |
 | Named automation starting points (trigger + prompt) | `lib/integrations/recipes.ts`; gated on `ProviderMeta.emitsCommentText` and on the trigger existing |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
