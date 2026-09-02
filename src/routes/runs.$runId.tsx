@@ -11,7 +11,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
 import { Chat } from '../components/Chat'
 import { ChatDebugMenuItem } from '../components/chat/ChatDebugToggle'
-import { ContextMeter } from '../components/chat/ContextMeter'
 import { ThreadStack } from '../components/chat/ThreadStack'
 import { TerminalPaletteMenuItems } from '../components/chat/TerminalPalettePicker'
 import { useChatTheme } from '../components/chat/ChatThemeProvider'
@@ -329,9 +328,6 @@ function RunDetail() {
 
   const run = data?.run
   const messages = data?.messages ?? []
-  // The newest turn that reported any: context is a property of the session,
-  // so it survives a turn that said nothing about itself.
-  const contextUsage = [...messages].reverse().find((m) => m.usage)?.usage ?? null
   const files = workspacePanel?.files ?? []
   const repo = workspacePanel?.repo ?? {
     isRepo: false,
@@ -503,7 +499,6 @@ function RunDetail() {
               />
 
               <div className="flex shrink-0 items-center gap-0.5">
-                <ContextMeter usage={contextUsage} />
                 {run?.status === 'running' ? (
                   <button
                     type="button"
@@ -850,7 +845,7 @@ function RunDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-md rounded-2xl border border-border bg-elevated p-5 shadow-2xl">
             <div className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
-              <ChevronRight className="size-4 opacity-0" />
+              <ChevronRight className="size-4" />
               New branch workspace
             </div>
             <p className="mb-4 text-xs text-muted-foreground">

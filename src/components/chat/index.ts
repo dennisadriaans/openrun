@@ -16,7 +16,6 @@ export { TurnFold } from './TurnFold'
 export { WorkGroup } from './WorkGroup'
 export { ChatThemeProvider, useChatTheme, useChatThemeBehaviour } from './ChatThemeProvider'
 export { ChatDebugMenuItem } from './ChatDebugToggle'
-export { ContextMeter } from './ContextMeter'
 export { QueuedMessages } from './QueuedMessages'
 export { TerminalPaletteMenuItems } from './TerminalPalettePicker'
 export {

@@ -172,7 +172,6 @@ Neither hook may open an `EventSource` of its own.
 | Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `lib/models.ts`; stored as `hiddenModels` in `lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |
 | Hiding runtimes from the picker | `visibleRuntimes` / `hiddenRuntimesIn` / `toggleHiddenRuntime` in `lib/pickRuntime.ts`; stored as `hiddenRuntimes` in `lib/pickerPrefs.ts` (same display-only contract) |
 | CLI stdout → chat events | `lib/agentEvents/` — one adapter per CLI (`claude.ts`, `codex.ts`, `grok.ts`, `acp.ts`); `server/turnEvents.ts` is the server-side re-export |
-| Live context gauge (how full the window is) | `lib/turnUsage.ts` (the math + fallback context windows), per-CLI extraction in the `lib/agentEvents/` adapters, `server/turnUsage.ts` (folds it onto the message, publishes `turn_usage`), `components/chat/ContextMeter.tsx` |
 | The event vocabulary itself (ACP subset) | `lib/acp.ts` (+ `lib/acpConformance.ts` guard), shapes in `lib/turnEvents.ts` |
 | ACP transport: driving an agent over JSON-RPC | `server/acpTurn.ts`, `lib/acpTransport.ts` |
 | Verification checks, verdicts, the repair loop | `lib/checks.ts` (defs), `server/checks.ts` (runner), `lib/verdict.ts` (judgement); `executor.concludeTurn` decides *whether* a turn is verified — unattended turns only |

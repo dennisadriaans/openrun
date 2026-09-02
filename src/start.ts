@@ -6,6 +6,7 @@
 import { createCsrfMiddleware, createMiddleware, createStart } from '@tanstack/react-start'
 
 import { isClientAbort } from './lib/clientAbort.ts'
+import { securityHeaders, shouldSendSecurityHeaders } from './lib/securityHeaders.ts'
 
 // Server functions are same-origin RPC, so a cross-site page must not drive them with ambient
 // credentials. API routes are exempt: the mobile surface carries its own bearer token.
@@ -20,6 +21,34 @@ const abortGuard = createMiddleware({ type: 'request' }).server(async ({ next })
   } catch (error) {
     if (!isClientAbort(error)) throw error
     return new Response(null, { status: 499 })
+  }
+})
+
+// Open Run renders a lot of text it did not write — assistant prose, command
+// output, `gh` titles. React escaping is the first lock; a content policy is
+// the second, and `connect-src 'self'` is the one that matters: injected script
+// still cannot post your source anywhere.
+const headerGuard = createMiddleware({ type: 'request' }).server(async ({ next }) => {
+  const result = await next()
+  const response = result.response
+  if (!shouldSendSecurityHeaders(response.headers.get('content-type'))) return result
+
+  const headers = securityHeaders({ dev: import.meta.env.DEV })
+  try {
+    for (const [name, value] of Object.entries(headers)) response.headers.set(name, value)
+    return result
+  } catch {
+    // Some responses (anything returned from `fetch`) have immutable headers.
+    const merged = new Headers(response.headers)
+    for (const [name, value] of Object.entries(headers)) merged.set(name, value)
+    return {
+      ...result,
+      response: new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: merged,
+      }),
+    }
   }
 })
 
@@ -38,5 +67,5 @@ const accessGuard = createMiddleware({ type: 'request' }).server(async ({ reques
 })
 
 export const startInstance = createStart(() => ({
-  requestMiddleware: [abortGuard, csrfGuard, accessGuard],
+  requestMiddleware: [abortGuard, headerGuard, csrfGuard, accessGuard],
 }))
