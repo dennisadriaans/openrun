@@ -256,24 +256,24 @@ describe('git argv leading-dash refusal', () => {
     assert.throws(() => createBranch(cwd, '--help'), /Invalid branch name/)
   })
 
-  it('cloneRepo refuses a URL that starts with -', () => {
+  it('cloneRepo refuses a URL that starts with -', async () => {
     const dest = join(makeRepo(), 'clone-dest')
-    assert.throws(() => cloneRepo({ url: '--upload-pack=true', dest }), /Invalid clone URL/)
+    await assert.rejects(() => cloneRepo({ url: '--upload-pack=true', dest }), /Invalid clone URL/)
   })
 })
 
 describe('push / createPullRequest origin gate', () => {
-  it('push refuses a repo with no origin remote', () => {
+  it('push refuses a repo with no origin remote', async () => {
     const cwd = makeRepo()
-    assert.throws(
+    await assert.rejects(
       () => push(cwd),
       (err: Error) => err.message === missingOriginRemoteMessage(),
     )
   })
 
-  it('createPullRequest refuses a repo with no origin before calling gh', () => {
+  it('createPullRequest refuses a repo with no origin before calling gh', async () => {
     const cwd = makeRepo()
-    assert.throws(
+    await assert.rejects(
       () => createPullRequest({ cwd, title: 't', body: 'b' }),
       (err: Error) => err.message === missingOriginRemoteMessage(),
     )

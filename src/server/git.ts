@@ -16,6 +16,14 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { workspaceRelPath } from './files.ts'
+import { runCommand } from './command.ts'
+import {
+  CLONE_TIMEOUT_MS,
+  PR_CREATE_TIMEOUT_MS,
+  PUSH_TIMEOUT_MS,
+  commandOutputTooLargeMessage,
+  commandTimedOutMessage,
+} from '../lib/commandBudget.ts'
 import { extractHunkPatch, parseUnifiedDiff } from '../lib/diff.ts'
 import {
   ghNotAuthenticatedMessage,
@@ -66,6 +74,11 @@ function refuseLeadingDash(value: string, label: string): string {
     throw new Error(`Invalid ${label}`)
   }
   return trimmed
+}
+
+/** Async command runner with a budget — see `server/command.ts` for why. */
+function timedOutError(label: string, timeoutMs: number): Error {
+  return new Error(commandTimedOutMessage(label, timeoutMs))
 }
 
 function gitEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
@@ -804,8 +817,14 @@ export function createBranch(cwd: string, name: string) {
   return { branch }
 }
 
-/** Push the current branch, setting upstream when it has none. */
-export function push(cwd: string): { branch: string; output: string } {
+/**
+ * Push the current branch, setting upstream when it has none.
+ *
+ * Async and budgeted: a push talks to a network the app cannot see, and doing
+ * it synchronously froze every other request (and the SSE heartbeats) for the
+ * duration.
+ */
+export async function push(cwd: string): Promise<{ branch: string; output: string }> {
   if (!isRepo(cwd)) throw new Error('Not a git repository')
   const branch = currentBranch(cwd)
   if (!branch || branch === 'HEAD') throw new Error('Cannot push a detached HEAD')
@@ -816,8 +835,16 @@ export function push(cwd: string): { branch: string; output: string } {
   const args = info.hasUpstream
     ? ['push', 'origin', branch]
     : ['push', '--set-upstream', 'origin', branch]
-  const res = git(cwd, args)
-  if (!res.ok) throw new Error(res.stderr.trim() || 'git push failed')
+  const res = await runCommand({
+    command: 'git',
+    args,
+    cwd,
+    env: gitEnv(),
+    timeoutMs: PUSH_TIMEOUT_MS,
+  })
+  if (res.timedOut) throw timedOutError('git push', PUSH_TIMEOUT_MS)
+  if (res.outputTooLarge) throw new Error(commandOutputTooLargeMessage('git push'))
+  if (res.status !== 0) throw new Error(res.stderr.trim() || 'git push failed')
   // git push writes progress to stderr even on success.
   return { branch, output: (res.stdout + res.stderr).trim() }
 }
@@ -1109,12 +1136,12 @@ export async function ghStatusAsync(): Promise<{ installed: boolean; authenticat
 }
 
 /** Open a pull request with the gh CLI. Returns the PR URL it prints. */
-export function createPullRequest(input: {
+export async function createPullRequest(input: {
   cwd: string
   title: string
   body: string
   base?: string
-}): { url: string } {
+}): Promise<{ url: string }> {
   const { cwd, title, body, base } = input
   if (!isRepo(cwd)) throw new Error('Not a git repository')
 
@@ -1128,8 +1155,14 @@ export function createPullRequest(input: {
   const args = ['pr', 'create', '--title', title, '--body', body]
   if (base) args.push('--base', base)
 
-  const res = spawnSync('gh', args, { cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER })
-  const out = `${res.stdout ?? ''}${res.stderr ?? ''}`
+  const res = await runCommand({
+    command: 'gh',
+    args,
+    cwd,
+    timeoutMs: PR_CREATE_TIMEOUT_MS,
+  })
+  if (res.timedOut) throw timedOutError('gh pr create', PR_CREATE_TIMEOUT_MS)
+  const out = `${res.stdout}${res.stderr}`
   if (res.status !== 0) throw new Error(out.trim() || 'gh pr create failed')
 
   const url = out.match(/https:\/\/\S+/)?.[0] ?? ''
@@ -1230,16 +1263,18 @@ export function removeWorktree(repoPath: string, path: string, force: boolean): 
  * credential fail fast instead of hanging forever on an invisible password
  * prompt from a headless server process.
  */
-export function cloneRepo(input: { url: string; dest: string }): void {
+export async function cloneRepo(input: { url: string; dest: string }): Promise<void> {
   const url = refuseLeadingDash(input.url, 'clone URL')
   const dest = refuseLeadingDash(input.dest, 'clone destination')
-  const res = spawnSync('git', ['clone', '--', url, dest], {
-    encoding: 'utf8',
-    maxBuffer: MAX_BUFFER,
+  const res = await runCommand({
+    command: 'git',
+    args: ['clone', '--', url, dest],
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' },
+    timeoutMs: CLONE_TIMEOUT_MS,
   })
+  if (res.timedOut) throw timedOutError('git clone', CLONE_TIMEOUT_MS)
   if (res.status !== 0) {
-    throw new Error(gitErrorMessage(res.stderr ?? '', 'git clone failed'))
+    throw new Error(gitErrorMessage(res.stderr, 'git clone failed'))
   }
 }
 
