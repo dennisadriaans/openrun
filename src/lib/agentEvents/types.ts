@@ -121,29 +121,6 @@ export function pickString(obj: Record<string, unknown>, ...keys: string[]): str
   return undefined
 }
 
-/** First finite non-negative number among `keys` on a record, or undefined. */
-export function pickNumber(
-  obj: Record<string, unknown> | undefined,
-  ...keys: string[]
-): number | undefined {
-  if (!obj) return undefined
-  for (const key of keys) {
-    const value = obj[key]
-    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
-  }
-  return undefined
-}
-
-/** A nested record, or undefined when the key is missing or not an object. */
-export function recordAt(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-): Record<string, unknown> | undefined {
-  const value = obj?.[key]
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  return value as Record<string, unknown>
-}
-
 /**
  * Recover ACP `locations` from a JSONL tool input.
  *

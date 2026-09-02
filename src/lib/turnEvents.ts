@@ -33,7 +33,6 @@ import type {
   ToolKind,
 } from './acp.ts'
 import type { ToolCallRole } from './toolCallRole.ts'
-import type { TurnUsage } from './turnUsage.ts'
 
 export type TurnEventKind =
   | 'user'
@@ -47,12 +46,6 @@ export type TurnEventKind =
   | 'turn_done'
   | 'error'
   | 'raw'
-  /**
-   * Token accounting the CLI reported about itself mid-turn. Transient: the
-   * executor folds it onto the message row and pushes it live, and it is never
-   * written to `turn_events` — it is a gauge, not transcript content.
-   */
-  | 'usage'
   // Supervised (approval-required) mode: the agent asked to use a tool and is
   // waiting for a human decision, and the decision once it is made.
   | 'approval_request'
@@ -98,8 +91,6 @@ export type TurnEventPayload = {
   plan?: PlanEntry[]
   /** Why the turn ended (ACP `stopReason`), when the agent reports one. */
   stopReason?: StopReason
-  /** Token counts for the last request (kind `usage`). */
-  usage?: Partial<TurnUsage>
 }
 
 export type TurnEventRow = {
