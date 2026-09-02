@@ -114,6 +114,21 @@ pnpm build
 Architecture and module boundaries: [AGENTS.md](./AGENTS.md) and
 [openrun.sh/docs/architecture](https://openrun.sh/docs/architecture).
 
+### Keeping it running
+
+Cron only fires while Open Run is running, so a terminal tab is not where a
+scheduler should live. Build it and run it as a background service:
+
+```bash
+pnpm build
+pnpm start          # serves the build; refuses an unsafe bind
+```
+
+Templates for launchd (macOS) and systemd (Linux) are in
+[`contrib/service/`](./contrib/service/) — they survive logout and restart the
+app if it dies. Open Run recovers a fire missed in the last fifteen minutes on
+start-up and records older ones as visible misses, but nothing beats being up.
+
 > Open Run is experimental and in active development.
 
 ## Contributing

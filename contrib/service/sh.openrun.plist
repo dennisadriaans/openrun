@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for Open Run (macOS).
+
+  A scheduler that only runs while a terminal tab is open is a scheduler that
+  misses fires. This keeps Open Run running across logouts and restarts, and
+  restarts it if it dies.
+
+  Install:
+    1. Edit WorkingDirectory and the node path below.
+    2. cp contrib/service/sh.openrun.plist ~/Library/LaunchAgents/
+    3. launchctl load -w ~/Library/LaunchAgents/sh.openrun.plist
+
+  Check on it:   launchctl list | grep openrun
+  Read the log:  tail -f ~/.openrun/openrun.log
+  Stop it:       launchctl unload -w ~/Library/LaunchAgents/sh.openrun.plist
+
+  A LaunchAgent (not a LaunchDaemon) on purpose: Open Run drives CLIs that are
+  logged in as *you*, so it has to run in your login session with your keychain
+  and your PATH. A system-wide daemon would have neither.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>sh.openrun</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Absolute paths: launchd does not read your shell profile. Find yours
+         with `which node` and `pwd` in the checkout. -->
+    <string>/usr/local/bin/node</string>
+    <string>--experimental-strip-types</string>
+    <string>scripts/start.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/CHANGE_ME/openrun</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd gives a process almost no PATH. Open Run needs to find the
+         agent CLIs (`claude`, `codex`, …) and `git`, so spell it out. -->
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <!-- Uncomment to reach Open Run from a paired phone on the same Wi-Fi.
+         Only /api/mobile/** answers other devices — see SECURITY.md.
+    <key>AGENTOPS_MOBILE</key>
+    <string>1</string>
+    -->
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/CHANGE_ME/.openrun/openrun.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/CHANGE_ME/.openrun/openrun.log</string>
+</dict>
+</plist>
