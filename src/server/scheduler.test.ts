@@ -35,7 +35,7 @@ const vite = await createServer({
 const { getDb, closeDb } = (await vite.ssrLoadModule(
   '/src/server/db.ts',
 )) as typeof import('./db.ts')
-const { syncTask, unscheduleTask } = (await vite.ssrLoadModule(
+const { bootScheduler, syncTask, unscheduleTask } = (await vite.ssrLoadModule(
   '/src/server/scheduler.ts',
 )) as typeof import('./scheduler.ts')
 
@@ -150,5 +150,85 @@ describe('scheduler one-shots', () => {
       enabled: number
     }
     assert.equal(task.enabled, 0)
+  })
+})
+
+/** A recurring (not fire-once) automation whose schedule was last seen at `updatedAt`. */
+function seedRecurringTask(id: string, cron: string, updatedAt: number) {
+  seedTask(id, 0)
+  getDb()
+    .prepare('UPDATE tasks SET cron = ?, fireOnce = 0, enabled = 1, updatedAt = ? WHERE id = ?')
+    .run(cron, updatedAt, id)
+}
+
+/** A daily cron whose most recent occurrence was exactly `hoursAgo` ago. */
+function dailyCronHoursAgo(hoursAgo: number): string {
+  const at = new Date(Date.now() - hoursAgo * 60 * 60_000)
+  return `${at.getMinutes()} ${at.getHours()} * * *`
+}
+
+/** `bootScheduler` is a once-per-process guard; tests need it to run again. */
+function reboot() {
+  ;(globalThis as { __agentopsBooted?: boolean }).__agentopsBooted = false
+  bootScheduler()
+}
+
+describe('recurring fires missed while Open Run was down', () => {
+  it('records an overnight gap as a missed fire instead of losing it', async () => {
+    const db = getDb()
+    db.exec('DELETE FROM tasks; DELETE FROM schedule_fires')
+    const taskId = 'nightly'
+    // Due six hours ago and last seen two days ago: two occurrences went by,
+    // and the newest is far outside the catch-up window.
+    seedRecurringTask(taskId, dailyCronHoursAgo(6), Date.now() - 48 * 60 * 60_000)
+
+    try {
+      reboot()
+      const fire = await waitForFire(taskId)
+      assert.equal(fire.outcome, 'missed')
+      assert.match(fire.detail, /was not running/)
+      assert.match(fire.detail, /2 runs/)
+      assert.match(fire.detail, /6 hours ago/)
+    } finally {
+      unscheduleTask(taskId)
+    }
+  })
+
+  it('catches up a recurring fire that was only just missed', async () => {
+    const db = getDb()
+    db.exec('DELETE FROM tasks; DELETE FROM schedule_fires')
+    const taskId = 'just-missed'
+    // Due five minutes ago — inside the grace window, so it still runs.
+    const at = new Date(Date.now() - 5 * 60_000)
+    seedRecurringTask(taskId, `${at.getMinutes()} ${at.getHours()} * * *`, Date.now() - 60 * 60_000)
+
+    try {
+      reboot()
+      const fire = await waitForFire(taskId)
+      assert.equal(fire.outcome, 'started')
+      assert.match(fire.detail, /running now/)
+      await waitForRunFinished(fire.runId)
+    } finally {
+      unscheduleTask(taskId)
+    }
+  })
+
+  it('says nothing for an automation that never missed a beat', async () => {
+    const db = getDb()
+    db.exec('DELETE FROM tasks; DELETE FROM schedule_fires')
+    const taskId = 'fresh'
+    // Saved a moment ago, next due in the small hours: nothing in between.
+    seedRecurringTask(taskId, dailyCronHoursAgo(-3), Date.now() - 1_000)
+
+    try {
+      reboot()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      const rows = db
+        .prepare('SELECT COUNT(*) AS n FROM schedule_fires WHERE taskId = ?')
+        .get(taskId) as { n: number }
+      assert.equal(rows.n, 0)
+    } finally {
+      unscheduleTask(taskId)
+    }
   })
 })

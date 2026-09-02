@@ -18,6 +18,12 @@
  * run executes in a separate Git worktree.
  */
 import { spawnSync } from 'node:child_process'
+import { runCommand } from './command.ts'
+import {
+  SETUP_TIMEOUT_MS,
+  commandOutputTooLargeMessage,
+  commandTimedOutMessage,
+} from '../lib/commandBudget.ts'
 import {
   existsSync,
   mkdirSync,
@@ -393,7 +399,7 @@ function uniqueDestPath(base: string): string {
   return `${base}-${n}`
 }
 
-export function addProject(input: AddProjectInput): ProjectRow {
+export async function addProject(input: AddProjectInput): Promise<ProjectRow> {
   const db = getDb()
   const now = Date.now()
 
@@ -446,7 +452,7 @@ export function addProject(input: AddProjectInput): ProjectRow {
   const slug = slugFromUrl(url)
   const dest = uniqueDestPath(path.join(openrunHome(), 'repos', slug))
   forgetDeletedProjectPath(dest)
-  git.cloneRepo({ url, dest })
+  await git.cloneRepo({ url, dest })
 
   const name = input.name?.trim() || slug
   const defaultBranch = git.detectDefaultBranch(dest)
@@ -643,12 +649,12 @@ export function getUnattendedWorkspaceOwner(
     .get(taskId, workspaceId) as { id: string; name: string } | undefined
 }
 
-export function createWorkspace(input: {
+export async function createWorkspace(input: {
   projectId: string
   branch: string
   fromBranch?: string
   useExistingBranch?: boolean
-}): WorkspaceRow {
+}): Promise<WorkspaceRow> {
   const db = getDb()
   const project = getProject(input.projectId)
   if (!project) throw new Error('Project not found')
@@ -725,7 +731,7 @@ function refExists(repoPath: string, ref: string): boolean {
   return res.status === 0
 }
 
-export function runSetup(workspaceId: string): WorkspaceRow {
+export async function runSetup(workspaceId: string): Promise<WorkspaceRow> {
   const db = getDb()
   const workspace = getWorkspace(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
@@ -741,15 +747,23 @@ export function runSetup(workspaceId: string): WorkspaceRow {
     return getWorkspace(workspaceId)!
   }
 
-  const res = spawnSync(project.setupCommand, {
+  // Async and budgeted. This is usually `pnpm install`: minutes of work that,
+  // run synchronously, froze every other request and stopped the SSE
+  // heartbeats — and a setup command that waited on stdin froze Open Run for
+  // good.
+  const res = await runCommand({
+    command: project.setupCommand,
     cwd: workspace.path,
     shell: true,
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
     env: process.env,
+    timeoutMs: SETUP_TIMEOUT_MS,
   })
-  const setupLog = `${res.stdout ?? ''}${res.stderr ?? ''}`
-  const exitCode = res.status ?? -1
+  const setupLog = res.timedOut
+    ? `${res.stdout}${res.stderr}\n${commandTimedOutMessage('The setup command', SETUP_TIMEOUT_MS)}\n`
+    : res.outputTooLarge
+      ? `${res.stdout}${res.stderr}\n${commandOutputTooLargeMessage('The setup command')}\n`
+      : `${res.stdout}${res.stderr}`
+  const exitCode = res.timedOut || res.outputTooLarge ? -1 : (res.status ?? -1)
   const status = exitCode === 0 ? 'ready' : 'error'
 
   db.prepare('UPDATE workspaces SET status = ?, setupLog = ?, setupExitCode = ? WHERE id = ?').run(

@@ -7,13 +7,14 @@
  */
 import parser from 'cron-parser'
 import cron, { type TaskContext } from 'node-cron'
+import { caughtUpFireDetail, missedFireDecision, missedFireDetail } from '../lib/missedFires.ts'
 import { oneShotDecision } from '../lib/oneShotSchedule.ts'
 import { hasWorkspaceId } from '../lib/workspaceRef'
 import { getDb, type RuntimeRow, type TaskRow } from './db'
 import { runTask } from './executor'
 import { isShuttingDown } from './processControl'
 import { drainAllQueues, enqueueRun, workspaceBusy, WORKSPACE_BUSY_MESSAGE } from './runQueue'
-import { recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
+import { lastFireObservedAt, recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
 import { isSchedulableCron } from './cronValidation.ts'
 import { unattendedRefusal } from './unattendedPreflight'
 
@@ -64,7 +65,12 @@ function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string
   return null
 }
 
-function fireTask(taskId: string, scheduledFor: number): void {
+/**
+ * `note` explains an out-of-band fire — today, that it is catching up on a
+ * schedule Open Run was not running for. It rides along on whatever outcome
+ * the fire settles on, so the audit says why the run happened off-schedule.
+ */
+function fireTask(taskId: string, scheduledFor: number, note?: string): void {
   if (isShuttingDown()) return
   const db = getDb()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
@@ -80,7 +86,12 @@ function fireTask(taskId: string, scheduledFor: number): void {
 
   const blocked = refusal(task)
   if (blocked) {
-    recordScheduleFire({ taskId, scheduledFor, ...blocked })
+    recordScheduleFire({
+      taskId,
+      scheduledFor,
+      ...blocked,
+      detail: note ? `${note} ${blocked.detail}` : blocked.detail,
+    })
     if (task.fireOnce) disableAfterScheduleFire(task.id)
     return
   }
@@ -90,7 +101,7 @@ function fireTask(taskId: string, scheduledFor: number): void {
     .get(task.runtimeId) as RuntimeRow
   try {
     const runId = runTask(task, runtime, 'schedule')
-    recordScheduleFire({ taskId, scheduledFor, outcome: 'started', runId })
+    recordScheduleFire({ taskId, scheduledFor, outcome: 'started', runId, detail: note ?? '' })
     if (task.fireOnce) disableAfterScheduleFire(task.id)
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
@@ -196,6 +207,55 @@ function scheduleTask(task: TaskRow) {
   jobs().set(task.id, handle)
 }
 
+/**
+ * Account for the fires this automation was due while Open Run was not running.
+ *
+ * `node-cron` only sees ticks a live process is there to observe, so a laptop
+ * closed overnight silently skipped every recurring automation and left no
+ * trace — the page still read "next run in 18 hours". One-shots already had a
+ * grace window; this gives recurring schedules the same treatment.
+ *
+ * At most one catch-up run per automation, for the newest missed occurrence.
+ * Replaying a whole night's backlog the moment a laptop opens would be worse
+ * than missing it.
+ */
+function reconcileMissedFires(task: TaskRow): void {
+  if (task.fireOnce) return
+  if (!task.enabled || !task.cron.trim()) return
+  if (!isSchedulableCron(task.cron)) return
+
+  // Only the window this install is answerable for: the last fire we recorded,
+  // else when the automation was last saved. Without that floor, arming a
+  // brand-new automation would "discover" every occurrence since the epoch.
+  const since = Math.max(lastFireObservedAt(task.id), task.updatedAt || task.createdAt || 0)
+  if (since <= 0) return
+
+  const decision = missedFireDecision({ cron: task.cron, since, now: Date.now() })
+  if (decision.kind === 'none') return
+
+  if (decision.kind === 'missed') {
+    recordScheduleFire({
+      taskId: task.id,
+      scheduledFor: decision.scheduledFor,
+      outcome: 'missed',
+      detail: missedFireDetail({
+        missedCount: decision.missedCount,
+        capped: decision.capped,
+        lateByMs: decision.lateByMs,
+      }),
+    })
+    return
+  }
+
+  // Fresh enough to still be worth running. Deferred so every automation is
+  // armed before any of them starts competing for a workspace.
+  const note = caughtUpFireDetail({
+    missedCount: decision.missedCount,
+    capped: decision.capped,
+  })
+  queueMicrotask(() => fireTask(task.id, decision.scheduledFor, note))
+}
+
 /** (Re)register a single task's trigger, replacing any existing schedule. */
 export function syncTask(taskId: string) {
   unscheduleTask(taskId)
@@ -225,6 +285,13 @@ export function bootScheduler() {
       scheduleTask(task)
     } catch (err) {
       console.error(`[scheduler] failed to arm task ${task.id}:`, err)
+    }
+    // Arming only covers fires from now on. Anything due while the process was
+    // down is accounted for separately, and never at the cost of arming.
+    try {
+      reconcileMissedFires(task)
+    } catch (err) {
+      console.error(`[scheduler] failed to reconcile missed fires for ${task.id}:`, err)
     }
   }
   try {
