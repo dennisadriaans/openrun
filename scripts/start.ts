@@ -7,8 +7,14 @@ import { existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { DEFAULT_HOST, insecureHostWarning, serverBindRefusal } from '../src/lib/serverAccess.ts'
+import {
+  DEFAULT_HOST,
+  REMOTE_ADDRESS_HEADER,
+  insecureHostWarning,
+  serverBindRefusal,
+} from '../src/lib/serverAccess.ts'
 import { openrunEnv } from '../src/lib/openrunEnv.ts'
+import { mobileEnabled } from '../src/server/mobile/config.ts'
 
 // ---------------------------------------------------------------------------
 // 1. Refuse an unsafe bind
@@ -22,13 +28,19 @@ function storedTokenExists(): boolean {
   return existsSync(resolve(home, 'access-token')) || existsSync(resolve(legacy, 'access-token'))
 }
 
-const host = openrunEnv('HOST') || DEFAULT_HOST
+// The companion app reaches this machine over the LAN, so the mobile surface
+// has to bind beyond loopback — the same thing `vite.config.ts` does in dev,
+// which is why `pnpm start` used to serve a mobile build no phone could reach.
+// An explicit OPENRUN_HOST always wins.
+const mobile = mobileEnabled()
+const host = openrunEnv('HOST') || (mobile ? '0.0.0.0' : DEFAULT_HOST)
 const allowInsecureRaw = openrunEnv('ALLOW_INSECURE_HOST').toLowerCase()
 const config = {
   host,
   hasToken: Boolean(openrunEnv('ACCESS_TOKEN') || storedTokenExists()),
   allowInsecureHost:
     allowInsecureRaw === '1' || allowInsecureRaw === 'true' || allowInsecureRaw === 'yes',
+  mobileEnabled: mobile,
 }
 
 const refusal = serverBindRefusal(config)
@@ -92,9 +104,13 @@ function toRequest(req: IncomingMessage, controller: AbortController): Request {
   const headers = new Headers()
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue
+    // Never let a client supply its own peer address: it is set below from the
+    // real socket, and a spoofed value would defeat the mobile guard.
+    if (key.toLowerCase() === REMOTE_ADDRESS_HEADER) continue
     if (Array.isArray(value)) for (const v of value) headers.append(key, v)
     else headers.set(key, value)
   }
+  headers.set(REMOTE_ADDRESS_HEADER, req.socket.remoteAddress ?? '')
 
   return new Request(url, {
     method,
@@ -160,6 +176,9 @@ const server = createServer((req, res) => {
 server.listen(port, host, () => {
   const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host
   console.log(`Open Run listening on http://${shown}:${port}  (bound ${host})`)
+  if (mobile) {
+    console.log('[mobile] /api/mobile/** is reachable from other devices; everything else is not.')
+  }
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
