@@ -234,7 +234,7 @@ function persistRunHeadBranch(runId: string, cwd: string): void {
   db.prepare('UPDATE runs SET headBranch = ? WHERE id = ?').run(finishedBranch, runId)
   if (branchChanged) {
     db.prepare(
-      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prFailingChecks = '', prCheckedAt = 0 WHERE id = ?",
     ).run(runId)
   }
 }
@@ -1784,7 +1784,7 @@ function finalizeRun(
   ).run(status, code, verdict, Date.now(), finishedBranch, runId)
   if (branchChanged) {
     db.prepare(
-      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prCheckedAt = 0 WHERE id = ?",
+      "UPDATE runs SET prNumber = 0, prUrl = '', prTitle = '', prState = '', prChecks = '', prFailingChecks = '', prCheckedAt = 0 WHERE id = ?",
     ).run(runId)
   }
   publishRunStatus(runId, status, code)

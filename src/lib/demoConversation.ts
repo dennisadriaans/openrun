@@ -360,6 +360,7 @@ export function demoConversation(runId: string, now: number = Date.now()) {
       prTitle: '',
       prState: '',
       prChecks: '',
+      prFailingChecks: '',
       prCheckedAt: 0,
     },
     messages: messages(runId, t0, t1),

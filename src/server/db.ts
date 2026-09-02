@@ -186,6 +186,8 @@ export type RunRow = {
   prTitle: string
   prState: string
   prChecks: string
+  /** JSON array of `FailingCheck`; '' on a row cached before it existed. */
+  prFailingChecks: string
   /** When the cache above was last refreshed; 0 = never probed. */
   prCheckedAt: number
 }
@@ -794,6 +796,9 @@ function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'prTitle', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'prState', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'prChecks', "TEXT NOT NULL DEFAULT ''")
+  // JSON array of the red checks, so "Fix CI" can name them without a
+  // second gh round trip. Rows written before this simply have '[]'.
+  addColumn(db, 'runs', 'prFailingChecks', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'prCheckedAt', 'INTEGER NOT NULL DEFAULT 0')
 
   addColumn(db, 'tasks', 'resumeSessionId', "TEXT NOT NULL DEFAULT ''")

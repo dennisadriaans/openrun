@@ -88,6 +88,7 @@ import * as files from './files'
 import * as git from './git'
 import {
   isPullRequestLive,
+  type FailingCheck,
   type PullRequestChecks,
   type PullRequestState,
   type RunPullRequest,
@@ -2060,6 +2061,24 @@ function cachedRunPullRequest(run: RunRow): RunPullRequest | null {
     title: run.prTitle,
     state: run.prState as PullRequestState,
     checks: run.prChecks as PullRequestChecks,
+    failingChecks: parseFailingChecks(run.prFailingChecks),
+  }
+}
+
+/** Tolerant read of the cached failing-check list; '' on older rows. */
+function parseFailingChecks(raw: string | null | undefined): FailingCheck[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return []
+      const row = entry as Record<string, unknown>
+      if (typeof row.name !== 'string') return []
+      return [{ name: row.name, url: typeof row.url === 'string' ? row.url : '' }]
+    })
+  } catch {
+    return []
   }
 }
 
@@ -2067,7 +2086,8 @@ function persistRunPullRequest(runId: string, pr: RunPullRequest | null) {
   getDb()
     .prepare(
       `UPDATE runs SET prNumber = @prNumber, prUrl = @prUrl, prTitle = @prTitle,
-       prState = @prState, prChecks = @prChecks, prCheckedAt = @prCheckedAt WHERE id = @id`,
+       prState = @prState, prChecks = @prChecks, prFailingChecks = @prFailingChecks,
+       prCheckedAt = @prCheckedAt WHERE id = @id`,
     )
     .run({
       id: runId,
@@ -2076,6 +2096,7 @@ function persistRunPullRequest(runId: string, pr: RunPullRequest | null) {
       prTitle: pr?.title ?? '',
       prState: pr?.state ?? '',
       prChecks: pr?.checks ?? '',
+      prFailingChecks: JSON.stringify(pr?.failingChecks ?? []),
       prCheckedAt: Date.now(),
     })
 }
