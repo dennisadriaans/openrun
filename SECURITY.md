@@ -116,8 +116,15 @@ with a pointer here.
 1. Leave the bind address at its default. Do not expose Open Run to a LAN or the
    internet. If you must reach it remotely, put it behind an authenticating
    reverse proxy or a VPN rather than binding to a public address.
-2. Start with read-only prompts and a runtime that is *not* in full-access mode.
-3. Configure project checks so runs must prove themselves before you trust them.
-4. Use supervised mode for anything touching a repository you care about.
-5. Review `~/.openrun` permissions if you have ever copied the directory
+2. The mobile companion (`AGENTOPS_MOBILE=1`) is the one exception, and it is
+   narrow on purpose: Open Run binds every interface so a phone on the same
+   Wi-Fi can reach it, but a caller from another machine is answered only for
+   `/api/mobile/**`, and only with a token issued by pairing that device on the
+   Devices page. Every other path — the app itself, the SSE streams, every
+   server function — returns 403 to a non-loopback caller. Leave the feature
+   off unless you are using the companion.
+3. Start with read-only prompts and a runtime that is *not* in full-access mode.
+4. Configure project checks so runs must prove themselves before you trust them.
+5. Use supervised mode for anything touching a repository you care about.
+6. Review `~/.openrun` permissions if you have ever copied the directory
    between machines.

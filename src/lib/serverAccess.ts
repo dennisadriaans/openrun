@@ -12,6 +12,8 @@
  * applied. No `node:` imports — `server/accessToken.ts` supplies the values.
  */
 
+import { allowRemoteRequest, isMobileApiPath } from './loopback.ts'
+
 /** Interface bound when `OPENRUN_HOST` is unset. */
 export const DEFAULT_HOST = '127.0.0.1'
 
@@ -32,6 +34,15 @@ export const ACCESS_TOKEN_QUERY_PARAM = 'openrun_token'
 
 /** Pre-rebrand query parameter; still accepted and stripped from URLs. */
 export const ACCESS_TOKEN_QUERY_PARAM_LEGACY = 'agentops_token'
+
+/**
+ * Header `scripts/start.ts` stamps with the socket's peer address.
+ *
+ * A `Request` carries no peer address, and the mobile guard needs one. The
+ * production entrypoint sets this from the real socket after deleting anything
+ * a client sent under the same name, so it can never be spoofed from outside.
+ */
+export const REMOTE_ADDRESS_HEADER = 'x-openrun-remote-address'
 
 /** Cookie the browser gets once, so the SPA does not append a token to every URL. */
 export const ACCESS_TOKEN_COOKIE = 'openrun_token'
@@ -124,6 +135,11 @@ export type ServerAccessConfig = {
   allowInsecureHost: boolean
   /** `OPENRUN_ALLOWED_HOSTS` — extra names a request may address us by. */
   allowedHosts?: string[]
+  /**
+   * `AGENTOPS_MOBILE` — the companion surface is on, so a non-loopback caller
+   * is confined to `/api/mobile/**`, which carries its own device token.
+   */
+  mobileEnabled?: boolean
 }
 
 /**
@@ -176,6 +192,11 @@ export function serverBindRefusal(config: ServerAccessConfig): string | null {
   if (isLoopbackHost(config.host)) return null
   if (config.hasToken) return null
   if (config.allowInsecureHost) return null
+  // The mobile surface binds wide on purpose, but every remote caller is
+  // confined to `/api/mobile/**` and must present a paired device token — so
+  // there is nothing here for an app-wide token to protect. This is the same
+  // bargain the dev server has always made in `vite.config.ts`.
+  if (config.mobileEnabled) return null
 
   return (
     `Refusing to bind ${config.host}: Open Run runs agent CLIs with your credentials, ` +
@@ -195,6 +216,13 @@ export function serverBindRefusal(config: ServerAccessConfig): string | null {
  */
 export function insecureHostWarning(config: ServerAccessConfig): string | null {
   if (isLoopbackHost(config.host)) return null
+
+  if (!config.hasToken && config.mobileEnabled && !config.allowInsecureHost) {
+    return (
+      `Open Run is bound to ${config.host} for the mobile companion. Only ` +
+      `/api/mobile/** answers other devices, and only with a paired device token.`
+    )
+  }
 
   if (!config.hasToken && config.allowInsecureHost) {
     return (
@@ -290,6 +318,47 @@ export function hostHeaderRefusal(
     `DNS-rebinding guard. If you are reaching Open Run through a tunnel or a ` +
     `reverse proxy, add that hostname to OPENRUN_ALLOWED_HOSTS.`
   )
+}
+
+/**
+ * Why a request from another machine must be refused, or `null` to let it
+ * through.
+ *
+ * Loopback is always allowed — the desktop browser behaves exactly as it did
+ * before the mobile surface existed. A remote caller gets through only when
+ * mobile is on *and* it is asking for `/api/mobile/**`, the one surface that
+ * authenticates callers itself. The rule lives in `lib/loopback.ts` because
+ * the Vite dev guard applies the identical decision.
+ */
+export function remoteRequestRefusal(
+  config: ServerAccessConfig,
+  request: { address: string | null | undefined; url: string | null | undefined },
+): string | null {
+  if (
+    allowRemoteRequest({
+      address: request.address,
+      url: request.url,
+      mobileEnabled: config.mobileEnabled === true,
+    })
+  ) {
+    return null
+  }
+  return config.mobileEnabled
+    ? 'Only the mobile API is reachable from other devices.'
+    : 'Open Run is not accepting connections from other devices.'
+}
+
+/**
+ * Whether this request authenticates itself and so does not need the app-wide
+ * access token.
+ *
+ * `/api/mobile/**` carries a per-device bearer token with its own scopes
+ * (`lib/mobileScope.ts`), enforced by `requireDeviceOp` on every handler. That
+ * is a *narrower* credential than the app token, so handing the app token to a
+ * phone instead would be the weaker design, not the stronger one.
+ */
+export function selfAuthenticatingPath(url: string | null | undefined): boolean {
+  return isMobileApiPath(url)
 }
 
 /**

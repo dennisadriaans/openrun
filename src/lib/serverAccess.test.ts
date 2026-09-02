@@ -11,6 +11,8 @@ import {
   isLoopbackHost,
   mergeAllowedHosts,
   parseAllowedHosts,
+  remoteRequestRefusal,
+  selfAuthenticatingPath,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
@@ -288,4 +290,83 @@ test('the 401 tells the caller how to authenticate', () => {
   assert.match(message, /pnpm token:print/)
   assert.match(message, /openrun_token=/)
   assert.match(message, /x-openrun-token/)
+})
+
+// ---------------------------------------------------------------------------
+// Mobile companion: the one surface a caller on another machine may reach
+// ---------------------------------------------------------------------------
+
+const MOBILE_BIND = {
+  host: '0.0.0.0',
+  hasToken: false,
+  allowInsecureHost: false,
+  mobileEnabled: true,
+}
+
+test('a wide bind with no token is allowed only for the mobile surface', () => {
+  assert.equal(serverBindRefusal(MOBILE_BIND), null)
+  // …and is still refused when mobile is off, which is the default.
+  assert.match(
+    String(serverBindRefusal({ ...MOBILE_BIND, mobileEnabled: false })),
+    /Refusing to bind/,
+  )
+})
+
+test('a mobile bind says what is actually exposed', () => {
+  assert.match(String(insecureHostWarning(MOBILE_BIND)), /Only \/api\/mobile/)
+})
+
+test('loopback callers are never affected by the mobile guard', () => {
+  for (const address of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    assert.equal(remoteRequestRefusal(MOBILE_BIND, { address, url: '/tasks' }), null)
+    assert.equal(
+      remoteRequestRefusal({ ...MOBILE_BIND, mobileEnabled: false }, { address, url: '/tasks' }),
+      null,
+    )
+  }
+})
+
+test('a remote caller reaches the mobile api and nothing else', () => {
+  const address = '192.168.1.50'
+  assert.equal(remoteRequestRefusal(MOBILE_BIND, { address, url: '/api/mobile/me' }), null)
+  assert.match(
+    String(remoteRequestRefusal(MOBILE_BIND, { address, url: '/tasks' })),
+    /Only the mobile API/,
+  )
+  assert.match(
+    String(remoteRequestRefusal(MOBILE_BIND, { address, url: '/api/runs/r1/stream' })),
+    /Only the mobile API/,
+  )
+})
+
+test('a remote caller reaches nothing at all when mobile is off', () => {
+  const config = { ...MOBILE_BIND, mobileEnabled: false }
+  assert.match(
+    String(remoteRequestRefusal(config, { address: '192.168.1.50', url: '/api/mobile/me' })),
+    /not accepting connections/,
+  )
+})
+
+test('path traversal cannot smuggle a remote caller off the mobile surface', () => {
+  const address = '192.168.1.50'
+  for (const url of [
+    '/api/mobile/../runs',
+    '/api/mobile/%2e%2e/runs',
+    '/api/mobile',
+    '//api/mobile/me',
+  ]) {
+    assert.notEqual(
+      remoteRequestRefusal(MOBILE_BIND, { address, url }),
+      null,
+      `${url} should not be treated as the mobile surface`,
+    )
+  }
+})
+
+test('only the mobile surface authenticates itself', () => {
+  assert.equal(selfAuthenticatingPath('/api/mobile/runs'), true)
+  assert.equal(selfAuthenticatingPath('/api/mobile/pair'), true)
+  assert.equal(selfAuthenticatingPath('/api/runs/r1/stream'), false)
+  assert.equal(selfAuthenticatingPath('/tasks'), false)
+  assert.equal(selfAuthenticatingPath(null), false)
 })
