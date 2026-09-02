@@ -50,4 +50,12 @@ describe('server function validators', () => {
       `These server functions declare a validator that does not check anything: ${offenders.join(', ')}`,
     )
   })
+
+  it('validates the integration automation identifiers', () => {
+    const declaration = declarations().find(({ name }) => name === 'createIntegrationAutomation')
+    assert.ok(declaration)
+    for (const field of ['integrationId', 'workspaceId', 'runtimeId']) {
+      assert.match(declaration.body, new RegExp(`${field}: 'string'`))
+    }
+  })
 })

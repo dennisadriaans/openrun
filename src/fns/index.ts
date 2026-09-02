@@ -762,7 +762,18 @@ export const getAutomationSetupContext = createServerFn({ method: 'GET' }).handl
 
 /** Bind a connected integration to a workspace + runtime so deliveries run. */
 export const createIntegrationAutomation = createServerFn({ method: 'POST' })
-  .validator((d: CreateIntegrationAutomationInput) => shape(d, {}))
+  .validator((d: CreateIntegrationAutomationInput) =>
+    shape(d, {
+      integrationId: 'string',
+      workspaceId: 'string',
+      runtimeId: 'string',
+      trigger: 'object?',
+      events: 'string[]?',
+      name: 'string?',
+      prompt: 'string?',
+      enabled: 'boolean?',
+    }),
+  )
   .handler(async ({ data }) => (await core()).createIntegrationAutomation(data))
 
 /** Soft type re-export for UI forms. */
