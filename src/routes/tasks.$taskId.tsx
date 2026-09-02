@@ -6,6 +6,7 @@ import { WorkspaceReadiness } from '../components/WorkspaceReadiness'
 import { useTopBarActions } from '../components/AppChrome'
 import { Button, Card, EmptyState, StatusBadge, VerdictBadge } from '../components/ui'
 import { duration, relativeTime } from '../lib/format'
+import { isDemoDetailTask, isDemoMode } from '../lib/demoData.ts'
 import { useDeleteTask, useRunNow, useRuns, useTask } from '../lib/queries'
 import { runNowBlockedReason } from '../lib/runNowGate'
 import { taskFormInitial } from '../lib/taskFormInitial'
@@ -17,6 +18,7 @@ export const Route = createFileRoute('/tasks/$taskId')({
 
 function TaskDetail() {
   const { taskId } = Route.useParams()
+  const demo = isDemoMode() && isDemoDetailTask(taskId)
   const { data: task, isLoading } = useTask(taskId)
   const { data: runs } = useRuns(taskId)
   const navigate = useNavigate()
@@ -27,7 +29,7 @@ function TaskDetail() {
   const runBlocked = task ? runNowBlockedReason(task) : null
 
   useTopBarActions(
-    task ? (
+    task && !demo ? (
       <>
         <Button
           variant="primary"
@@ -94,10 +96,12 @@ function TaskDetail() {
       <TaskForm
         key={task.id}
         initial={taskFormInitial(task)}
-        readiness={<WorkspaceReadiness task={task} />}
+        readiness={demo ? undefined : <WorkspaceReadiness task={task} />}
         workspaceChangeBlockedReason={taskWorkspaceChangeBlockedReason(task)}
+        demoPreview={demo}
         onCancel={() => navigate({ to: '/tasks' })}
         onSaved={() => {
+          if (demo) return
           qc.invalidateQueries({ queryKey: ['task', taskId] })
           qc.invalidateQueries({ queryKey: ['tasks'] })
         }}

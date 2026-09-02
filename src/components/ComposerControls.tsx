@@ -3,7 +3,7 @@
  *
  * Layout adapted from the t3code chat composer footer (MIT, T3 Tools Inc.).
  */
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { createPortal } from 'react-dom'
 import {
@@ -71,6 +71,8 @@ export function FooterMenu({
   invalid,
   'aria-describedby': ariaDescribedBy,
   onOpen,
+  initiallyOpen = false,
+  keepOpen = false,
   children,
 }: {
   label: string
@@ -85,6 +87,10 @@ export function FooterMenu({
   invalid?: boolean
   'aria-describedby'?: string
   onOpen?: () => void
+  /** Open after hydration, used by static previews that showcase a picker. */
+  initiallyOpen?: boolean
+  /** Keep a preview menu visible while interacting with the rest of the page. */
+  keepOpen?: boolean
   children: (close: () => void) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -98,7 +104,15 @@ export function FooterMenu({
     maxHeight: number
   } | null>(null)
 
-  useClickOutside(open, () => setOpen(false), [triggerRef, menuRef])
+  useEffect(() => {
+    if (initiallyOpen) setOpen(true)
+  }, [initiallyOpen])
+
+  const close = () => {
+    if (!keepOpen) setOpen(false)
+  }
+
+  useClickOutside(open, close, [triggerRef, menuRef])
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) {
@@ -149,7 +163,7 @@ export function FooterMenu({
       aria-describedby={ariaDescribedBy}
       onClick={() => {
         if (!open) onOpen?.()
-        setOpen((v) => !v)
+        if (!keepOpen) setOpen((v) => !v)
       }}
       className={
         compact
@@ -207,7 +221,7 @@ export function FooterMenu({
               }}
               className="min-w-52 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
             >
-              {children(() => setOpen(false))}
+              {children(close)}
             </div>,
             document.body,
           )
@@ -844,12 +858,16 @@ export function RuntimePicker({
   runtimeId,
   disabled,
   align = 'end',
+  initiallyOpen,
+  keepOpen,
   onChange,
 }: {
   runtimes: RuntimeOption[]
   runtimeId: string
   disabled?: boolean
   align?: 'start' | 'end'
+  initiallyOpen?: boolean
+  keepOpen?: boolean
   onChange: (id: string) => void
 }) {
   const { prefs, remember } = usePickerPrefs()
@@ -869,6 +887,8 @@ export function RuntimePicker({
       title={selected.description || selected.label}
       disabled={disabled}
       align={align}
+      initiallyOpen={initiallyOpen}
+      keepOpen={keepOpen}
       leading={
         <ProviderIcon kind={modelKindForBin(selected.bin)} className="h-3.5 w-3.5 shrink-0" />
       }
