@@ -55,6 +55,20 @@ export function settleScheduleFire(
   if (row) publishActivityLive({ type: 'task_changed', taskId: row.taskId })
 }
 
+/**
+ * When this automation's schedule was last observed, or 0 when it never was.
+ * The boot-time miss detector uses it as the start of the window it is
+ * responsible for — anything older belongs to a previous install, not to us.
+ */
+export function lastFireObservedAt(taskId: string): number {
+  const row = getDb()
+    .prepare(
+      'SELECT observedAt FROM schedule_fires WHERE taskId = ? ORDER BY observedAt DESC, rowid DESC LIMIT 1',
+    )
+    .get(taskId) as { observedAt: number } | undefined
+  return row?.observedAt ?? 0
+}
+
 export function latestScheduleFires(taskIds?: string[]): Record<string, ScheduleFireRow> {
   if (taskIds && taskIds.length === 0) return {}
   const rows = getDb()
