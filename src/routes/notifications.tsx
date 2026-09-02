@@ -155,14 +155,20 @@ function NotificationsPage() {
               <div key={d.id} className="flex items-center justify-between gap-4 px-4 py-2.5">
                 <div className="min-w-0">
                   <div className="truncate text-ui-sm text-tier-secondary">
-                    <Link
-                      to="/runs/$runId"
-                      params={{ runId: d.runId }}
-                      viewTransition
-                      className="mono text-tier-secondary underline underline-offset-2 hover:text-foreground"
-                    >
-                      {d.runId}
-                    </Link>
+                    {d.runId ? (
+                      <Link
+                        to="/runs/$runId"
+                        params={{ runId: d.runId }}
+                        viewTransition
+                        className="mono text-tier-secondary underline underline-offset-2 hover:text-foreground"
+                      >
+                        {d.runId}
+                      </Link>
+                    ) : (
+                      /* A refused fire never became a run, so there is nothing
+                         to link to — say so instead of linking to nowhere. */
+                      <span className="text-tier-secondary">Scheduled fire</span>
+                    )}
                     <span className="text-tier-quaternary"> · </span>
                     <span>{resolveNotifierName(d.notifierName, d.notifierId)}</span>
                     <span className="text-tier-quaternary"> · </span>
