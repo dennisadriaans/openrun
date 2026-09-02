@@ -2,11 +2,16 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   assertWebhookUrl,
+  buildFireRefusalNotification,
   buildRunNotification,
   detectWebhookShape,
+  fireRefusalWebhookPayload,
+  isRefusedFireOutcome,
   notifierMatches,
+  notifierMatchesRefusal,
   parseVerdictList,
   resolveNotifierName,
+  shouldNotifyRefusal,
   unknownNotifierLabel,
   webhookPayload,
   type RunNotificationInput,
@@ -175,5 +180,117 @@ describe('resolveNotifierName', () => {
     assert.equal(resolveNotifierName(''), unknownNotifierLabel())
     assert.equal(resolveNotifierName(null, null), unknownNotifierLabel())
     assert.equal(resolveNotifierName(undefined, '  '), unknownNotifierLabel())
+  })
+})
+
+describe('refused scheduled fires', () => {
+  it('counts only the outcomes where the automation did not run', () => {
+    assert.equal(isRefusedFireOutcome('failed'), true)
+    assert.equal(isRefusedFireOutcome('missed'), true)
+    assert.equal(isRefusedFireOutcome('started'), false)
+    assert.equal(isRefusedFireOutcome('queued'), false)
+    assert.equal(isRefusedFireOutcome('skipped'), false)
+  })
+
+  it('reaches every enabled notifier regardless of its verdict filter', () => {
+    assert.equal(notifierMatchesRefusal({ enabled: true, verdicts: ['verified'] }), true)
+    assert.equal(notifierMatchesRefusal({ enabled: false, verdicts: [] }), false)
+  })
+
+  it('notifies the first time a fire is refused', () => {
+    assert.equal(
+      shouldNotifyRefusal({ outcome: 'failed', detail: 'dirty worktree', previous: null }),
+      true,
+    )
+  })
+
+  it('stays quiet while the same refusal is still in force', () => {
+    assert.equal(
+      shouldNotifyRefusal({
+        outcome: 'failed',
+        detail: 'dirty worktree',
+        previous: { outcome: 'failed', detail: 'dirty worktree' },
+      }),
+      false,
+    )
+  })
+
+  it('speaks up again when the reason changes', () => {
+    assert.equal(
+      shouldNotifyRefusal({
+        outcome: 'failed',
+        detail: 'gh is logged out',
+        previous: { outcome: 'failed', detail: 'dirty worktree' },
+      }),
+      true,
+    )
+  })
+
+  it('speaks up again after a recovery', () => {
+    assert.equal(
+      shouldNotifyRefusal({
+        outcome: 'failed',
+        detail: 'dirty worktree',
+        previous: { outcome: 'started', detail: '' },
+      }),
+      true,
+    )
+  })
+
+  it('never notifies for a fire that actually ran', () => {
+    assert.equal(shouldNotifyRefusal({ outcome: 'started', detail: '', previous: null }), false)
+  })
+
+  it('names the automation and links to it', () => {
+    const notification = buildFireRefusalNotification({
+      taskId: 'task_1',
+      taskName: 'Nightly bump',
+      outcome: 'failed',
+      detail: 'The workspace has uncommitted changes.',
+      scheduledFor: 1700000000000,
+    })
+    assert.equal(notification.title, 'Did not run · Nightly bump')
+    assert.equal(notification.body, 'The workspace has uncommitted changes.')
+    assert.equal(notification.path, '/tasks/task_1')
+  })
+
+  it('labels a missed fire differently from a refused one', () => {
+    const missed = buildFireRefusalNotification({
+      taskId: 't',
+      taskName: 'Nightly bump',
+      outcome: 'missed',
+      detail: '',
+      scheduledFor: 0,
+    })
+    assert.equal(missed.title, 'Missed · Nightly bump')
+    assert.equal(missed.body, 'No reason was recorded.')
+  })
+
+  it('posts a discord-shaped body to a discord webhook', () => {
+    const notification = buildFireRefusalNotification({
+      taskId: 't',
+      taskName: 'Nightly bump',
+      outcome: 'failed',
+      detail: 'gh is logged out',
+      scheduledFor: 0,
+    })
+    const body = fireRefusalWebhookPayload(notification, 'discord', 'http://localhost:3000/')
+    assert.match(String(body.content), /Did not run · Nightly bump/)
+    assert.match(String(body.content), /http:\/\/localhost:3000\/tasks\/t/)
+  })
+
+  it('names its own event type in a generic body', () => {
+    const notification = buildFireRefusalNotification({
+      taskId: 't',
+      taskName: 'Nightly bump',
+      outcome: 'failed',
+      detail: 'gh is logged out',
+      scheduledFor: 5,
+    })
+    const body = fireRefusalWebhookPayload(notification, 'generic', 'http://localhost:3000')
+    assert.equal(body.event, 'fire.refused')
+    assert.equal(body.outcome, 'failed')
+    assert.equal(body.detail, 'gh is logged out')
+    assert.equal(body.url, 'http://localhost:3000/tasks/t')
   })
 })

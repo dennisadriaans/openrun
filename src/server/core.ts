@@ -101,7 +101,6 @@ import {
   unattendedVerificationRefusal,
 } from './unattendedPreflight'
 import type { TurnEventRow } from '../lib/turnEvents'
-import { parseTurnUsage, type TurnUsage } from '../lib/turnUsage'
 import { assistantTextFromEvents } from './turnEvents'
 import { assertRuntimeOnPath, checkRuntimeInstalled } from './runtimePath'
 import {
@@ -1938,12 +1937,10 @@ export function deleteRuns(runIds: string[]): void {
 // Conversation
 // ---------------------------------------------------------------------------
 
-export type ChatMessage = Omit<MessageRow, 'diffSummary' | 'usage'> & {
+export type ChatMessage = Omit<MessageRow, 'diffSummary'> & {
   diffSummary: git.DiffFile[]
   /** Structured turn events for this message (empty for legacy / generic runs). */
   events: TurnEventRow[]
-  /** What the runtime reported about its own context; null when it reports none. */
-  usage: TurnUsage | null
 }
 
 /**
@@ -1977,7 +1974,6 @@ export function getConversation(runId: string) {
             stdout: hasEvents ? '' : m.stdout,
             stderr: hasEvents ? '' : m.stderr,
             diffSummary: parseDiffSummary(m.diffSummary),
-            usage: parseTurnUsage(m.usage),
             events,
           }
         })
@@ -2160,7 +2156,6 @@ function synthesizeLegacyMessages(run: RunRow): ChatMessage[] {
       status: run.status,
       exitCode: run.exitCode,
       diffSummary: [],
-      usage: null,
       sourceProvider: '',
       sourceUrl: '',
       sourceLabel: '',
