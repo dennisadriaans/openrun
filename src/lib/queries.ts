@@ -9,7 +9,7 @@ import {
 } from './applyRunLiveEvent'
 import { useActivityStreamHealthy } from './useActivityLive'
 import { demoConversation, demoFileDiff, demoRunWorkspace } from './demoConversation.ts'
-import { isDemoDetailRun, isDemoMode } from './demoData.ts'
+import { demoTaskDetail, isDemoDetailRun, isDemoDetailTask, isDemoMode } from './demoData.ts'
 import { fileToBase64 } from './attachments.ts'
 import { newMessageId } from './messageId.ts'
 import type { PlanProposal } from './planProposals.ts'
@@ -222,10 +222,11 @@ export function useTasks() {
 
 export function useTask(id: string) {
   const streamHealthy = useActivityStreamHealthy()
+  const demo = isDemoMode() && isDemoDetailTask(id)
   return useQuery({
     queryKey: ['task', id],
-    queryFn: () => fns.getTask({ data: { id } }),
-    refetchInterval: streamHealthy ? 15_000 : 5000,
+    queryFn: () => (demo ? demoTaskDetail(id) : fns.getTask({ data: { id } })),
+    refetchInterval: demo ? false : streamHealthy ? 15_000 : 5000,
   })
 }
 
@@ -318,13 +319,17 @@ export function useRuns(
   opts?: { limit?: number; offset?: number },
 ) {
   const streamHealthy = useActivityStreamHealthy()
+  const demoTask = isDemoMode() && Boolean(taskId && isDemoDetailTask(taskId))
   const limit = opts?.limit ?? 100
   const offset = opts?.offset ?? 0
   return useQuery({
     queryKey: ['runs', taskId ?? 'all', includeArchived ? 'archived' : 'active', limit, offset],
-    queryFn: () => fns.listRuns({ data: { taskId, limit, offset, includeArchived } }),
+    queryFn: () =>
+      demoTask
+        ? Promise.resolve([])
+        : fns.listRuns({ data: { taskId, limit, offset, includeArchived } }),
     // Activity SSE invalidates on run_changed; poll only when the stream is down.
-    refetchInterval: streamHealthy ? false : 3000,
+    refetchInterval: demoTask || streamHealthy ? false : 3000,
   })
 }
 

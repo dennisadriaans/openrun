@@ -845,7 +845,7 @@ function RunDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-md rounded-2xl border border-border bg-elevated p-5 shadow-2xl">
             <div className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
-              <ChevronRight className="size-4 opacity-0" />
+              <ChevronRight className="size-4" />
               New branch workspace
             </div>
             <p className="mb-4 text-xs text-muted-foreground">

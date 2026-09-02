@@ -2,6 +2,7 @@
  * Sample Runs + Automations for screenshots. `pnpm dev -- --demo` sets
  * OPENRUN_DEMO=1; lists overlay this on top of the real DB (nothing is written).
  */
+import type { TaskWithMeta } from '../fns'
 
 export function isDemoMode(): boolean {
   const raw = (process.env.OPENRUN_DEMO ?? process.env.AGENTOPS_DEMO ?? '').trim().toLowerCase()
@@ -21,10 +22,85 @@ export type DemoRun = {
 }
 
 export const DEMO_RUNNING_TASK_ID = 'demo-task-1'
+export const DEMO_DETAIL_TASK_ID = DEMO_RUNNING_TASK_ID
 export const DEMO_DETAIL_RUN_ID = 'demo-run-5'
+
+export function isDemoDetailTask(taskId: string): boolean {
+  return taskId === DEMO_DETAIL_TASK_ID
+}
 
 export function isDemoDetailRun(runId: string): boolean {
   return runId === DEMO_DETAIL_RUN_ID
+}
+
+export function demoTaskDetail(taskId: string, now: number = Date.now()): TaskWithMeta | null {
+  if (!isDemoDetailTask(taskId)) return null
+
+  const cwd = '/Users/demo/Developer/open-run-nightly-deps'
+  return {
+    id: taskId,
+    name: 'Nightly dependency bump',
+    description: 'Keep dependencies current and leave a reviewed pull request ready each morning.',
+    runtimeId: 'grok',
+    prompt: `Review the workspace for outdated dependencies.
+
+Apply safe patch and minor updates, update the lockfile, and run the existing checks. Summarize anything that needs a manual major-version migration.`,
+    cwd,
+    workspaceId: 'demo-workspace-nightly-deps',
+    cron: '0 18 * * *',
+    enabled: 1,
+    model: '',
+    effort: 'high',
+    webhookIntegrationId: '',
+    webhookEvents: '[]',
+    webhookFilters: '{}',
+    verifyEnabled: 1,
+    maxRepairAttempts: 1,
+    timeoutMs: 30 * 60_000,
+    resumeSessionId: '',
+    resumeSessionLabel: '',
+    fireOnce: 0,
+    scheduledAt: 0,
+    requireIsolation: 1,
+    requireGhAuth: 1,
+    createdAt: now - 30 * 86400_000,
+    updatedAt: now - 2 * 86400_000,
+    lastRunAt: now - 2 * 60_000,
+    runtimeLabel: 'Grok CLI',
+    nextRunAt: now + 20 * 60_000,
+    cronValid: true,
+    workspaceValid: true,
+    workspaceReady: true,
+    workspaceStatus: 'ready',
+    runtimeInstalled: true,
+    runtimeValid: true,
+    runtimeBin: 'grok',
+    promptValid: true,
+    resumeSessionValid: true,
+    checkCount: 3,
+    queuedCount: 0,
+    effectiveTimeoutMs: 30 * 60_000,
+    lastScheduleFire: null,
+    workspaceKind: 'worktree',
+    workspaceHealth: {
+      code: 'ok',
+      path: cwd,
+      configuredBranch: 'chore/nightly-dependencies',
+      actualBranch: 'chore/nightly-dependencies',
+      dirty: false,
+      detail: '',
+    },
+    requiresGh: true,
+    ghInstalled: true,
+    ghAuthenticated: true,
+    unattendedBlockedReason: null,
+    activeRunId: null,
+    promptDeliveryValid: true,
+    promptDeliveryReason: null,
+    triggerReady: true,
+    triggerBlockReason: null,
+    readinessBlockers: [],
+  }
 }
 
 export type DemoTask = {
