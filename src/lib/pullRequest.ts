@@ -21,12 +21,32 @@ export type RunPullRequest = {
   title: string
   state: PullRequestState
   checks: PullRequestChecks
+  /**
+   * The checks that are red, when `checks` is `failing`. Empty otherwise, and
+   * empty on a row cached before this existed — readers must tolerate that
+   * rather than assume a backfill.
+   */
+  failingChecks: FailingCheck[]
 }
 
 type CheckNode = {
   status?: string | null
   conclusion?: string | null
   state?: string | null
+  /** Check-run name; legacy commit statuses use `context` instead. */
+  name?: string | null
+  context?: string | null
+  /** Present on a check run that belongs to a workflow. */
+  workflowName?: string | null
+  detailsUrl?: string | null
+  targetUrl?: string | null
+}
+
+/** One red check on a pull request, named well enough to go in a prompt. */
+export type FailingCheck = {
+  name: string
+  /** Where a human (or `gh`) can read the log. Empty when gh gave us none. */
+  url: string
 }
 
 export type GhPullRequestParseResult =
@@ -75,10 +95,47 @@ export function rollupChecks(nodes: CheckNode[] | null | undefined): PullRequest
   return passing ? 'passing' : 'none'
 }
 
+/** A check node's display name, preferring the most specific thing gh gave us. */
+function checkNodeName(node: CheckNode): string {
+  const workflow = (node.workflowName ?? '').trim()
+  const name = (node.name ?? node.context ?? '').trim()
+  if (workflow && name) return `${workflow} / ${name}`
+  return name || workflow || 'an unnamed check'
+}
+
+function checkNodeFailing(node: CheckNode): boolean {
+  const verdict = (node.conclusion || node.state || node.status || '').toUpperCase()
+  return FAILING_CONCLUSIONS.has(verdict) || verdict === 'ERROR'
+}
+
+/**
+ * The red checks, named and linked.
+ *
+ * `rollupChecks` collapses everything to one word for the chip; this keeps the
+ * detail, which is what a repair turn needs to know where to look.
+ */
+export function failingChecks(nodes: CheckNode[] | null | undefined): FailingCheck[] {
+  if (!nodes) return []
+  const out: FailingCheck[] = []
+  for (const node of nodes) {
+    if (!checkNodeFailing(node)) continue
+    out.push({
+      name: checkNodeName(node),
+      url: (node.detailsUrl ?? node.targetUrl ?? '').trim(),
+    })
+  }
+  return out
+}
+
 function isCheckNode(value: unknown): value is CheckNode {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const node = value as Record<string, unknown>
   const fields = ['status', 'conclusion', 'state']
+  const optionalStrings = ['name', 'context', 'workflowName', 'detailsUrl', 'targetUrl']
+  for (const key of optionalStrings) {
+    const field = node[key]
+    if (field !== undefined && field !== null && typeof field !== 'string') return false
+  }
   // An empty object is not a check result. Accept vendor-added fields, but
   // require at least one of the status fields we know how to roll up.
   if (!fields.some((key) => Object.hasOwn(node, key))) return false
@@ -146,6 +203,7 @@ export function parseGhPullRequestResult(stdout: string): GhPullRequestParseResu
     if (reason) return { kind: 'invalid', reason }
   }
   const checks = rollupChecks(raw.statusCheckRollup)
+  const failing = failingChecks(raw.statusCheckRollup)
 
   const ghState = raw.state.toUpperCase()
   if (ghState !== 'OPEN' && ghState !== 'CLOSED' && ghState !== 'MERGED') {
@@ -168,6 +226,7 @@ export function parseGhPullRequestResult(stdout: string): GhPullRequestParseResu
       title: raw.title,
       state,
       checks,
+      failingChecks: failing,
     },
   }
 }

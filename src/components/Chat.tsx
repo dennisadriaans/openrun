@@ -1259,7 +1259,7 @@ export function Chat({
             <div className="mx-auto flex w-full min-w-0 max-w-[51rem] flex-col items-stretch">
               {pullRequest ? (
                 <div className="relative z-[6] mx-auto -mb-[2px] w-[92%]">
-                  <PullRequestChip pr={pullRequest} />
+                  <PullRequestChip pr={pullRequest} runId={runId} busy={running} />
                 </div>
               ) : null}
               {pullRequestError ? (

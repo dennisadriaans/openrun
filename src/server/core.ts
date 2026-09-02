@@ -89,6 +89,7 @@ import * as files from './files'
 import * as git from './git'
 import {
   isPullRequestLive,
+  type FailingCheck,
   type PullRequestChecks,
   type PullRequestState,
   type RunPullRequest,
@@ -1375,7 +1376,7 @@ export function runTaskNow(taskId: string): { runId: string } {
  * onto it. Doing that by hand across a backlog of automations is where people
  * give up and switch isolation off instead, so it is one call.
  */
-export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
+export async function isolateTaskWorkspace(taskId: string): Promise<TaskWithMeta> {
   const db = getDb()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
   if (!task) throw new Error('Task not found')
@@ -1411,7 +1412,7 @@ export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
   const base = slugify(task.name) || 'automation'
   const branch = `openrun/${base}-${task.id.split('_').pop() ?? Date.now().toString(36)}`
 
-  const workspace = createWorkspace({
+  const workspace = await createWorkspace({
     projectId: project.id,
     branch,
     fromBranch: project.defaultBranch,
@@ -2057,6 +2058,24 @@ function cachedRunPullRequest(run: RunRow): RunPullRequest | null {
     title: run.prTitle,
     state: run.prState as PullRequestState,
     checks: run.prChecks as PullRequestChecks,
+    failingChecks: parseFailingChecks(run.prFailingChecks),
+  }
+}
+
+/** Tolerant read of the cached failing-check list; '' on older rows. */
+function parseFailingChecks(raw: string | null | undefined): FailingCheck[] {
+  if (!raw?.trim()) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return []
+      const row = entry as Record<string, unknown>
+      if (typeof row.name !== 'string') return []
+      return [{ name: row.name, url: typeof row.url === 'string' ? row.url : '' }]
+    })
+  } catch {
+    return []
   }
 }
 
@@ -2064,7 +2083,8 @@ function persistRunPullRequest(runId: string, pr: RunPullRequest | null) {
   getDb()
     .prepare(
       `UPDATE runs SET prNumber = @prNumber, prUrl = @prUrl, prTitle = @prTitle,
-       prState = @prState, prChecks = @prChecks, prCheckedAt = @prCheckedAt WHERE id = @id`,
+       prState = @prState, prChecks = @prChecks, prFailingChecks = @prFailingChecks,
+       prCheckedAt = @prCheckedAt WHERE id = @id`,
     )
     .run({
       id: runId,
@@ -2073,6 +2093,7 @@ function persistRunPullRequest(runId: string, pr: RunPullRequest | null) {
       prTitle: pr?.title ?? '',
       prState: pr?.state ?? '',
       prChecks: pr?.checks ?? '',
+      prFailingChecks: JSON.stringify(pr?.failingChecks ?? []),
       prCheckedAt: Date.now(),
     })
 }
@@ -2394,7 +2415,7 @@ export function createBranch(input: { runId: string; name: string }) {
   return git.createBranch(runCwd(input.runId), input.name)
 }
 
-export function openPullRequest(input: {
+export async function openPullRequest(input: {
   runId: string
   title: string
   body: string
@@ -2416,7 +2437,9 @@ export function openPullRequest(input: {
     base = project?.defaultBranch
   }
 
-  const result = git.createPullRequest({
+  // Await before invalidating: the cache must only be dropped once a PR
+  // actually exists, or the next probe re-reads and re-caches "no PR".
+  const result = await git.createPullRequest({
     cwd: run.cwd,
     title: input.title,
     body: input.body,
