@@ -13,51 +13,7 @@
 import { isToolCallStatus, isToolKind, resolveToolKind } from '../acp.ts'
 import type { PlanEntry, ToolCallLocation, ToolCallStatus, ToolKind } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
-import {
-  pickNumber,
-  pickString,
-  recordAt,
-  toolResultContent,
-  type ParsedTurnEvent,
-} from './types.ts'
-import type { TurnUsage } from '../turnUsage.ts'
-
-/**
- * `usage_update` → a context snapshot.
- *
- * The update is not part of the ACP subset in `lib/acp.ts` (it is session
- * metadata, not transcript content), and agents spell it differently, so this
- * reads defensively: any of the well-known key names, nested under `usage` or
- * flat on the update.
- */
-function acpUsage(update: AcpSessionUpdate): Partial<TurnUsage> | undefined {
-  const u =
-    recordAt(update as Record<string, unknown>, 'usage') ?? (update as Record<string, unknown>)
-  const input = pickNumber(u, 'inputTokens', 'input_tokens', 'promptTokens') ?? 0
-  const output = pickNumber(u, 'outputTokens', 'output_tokens', 'completionTokens') ?? 0
-  const cacheRead =
-    pickNumber(u, 'cachedTokens', 'cached_tokens', 'cacheReadTokens', 'cache_read_input_tokens') ??
-    0
-  const used = pickNumber(u, 'usedTokens', 'used_tokens', 'totalTokens', 'total_tokens')
-  const limit = pickNumber(
-    u,
-    'maxTokens',
-    'max_tokens',
-    'contextWindow',
-    'context_window',
-    'contextLimit',
-  )
-  if (input + output + cacheRead <= 0 && !used) return undefined
-  return {
-    input,
-    output,
-    cacheRead,
-    cacheWrite: 0,
-    contextTokens: used ?? input + cacheRead + output,
-    ...(limit ? { contextLimit: limit } : {}),
-    ...(pickString(u, 'model') ? { model: pickString(u, 'model') as string } : {}),
-  }
-}
+import { pickString, toolResultContent, type ParsedTurnEvent } from './types.ts'
 
 /** The subset of an ACP session update this adapter reads. */
 export type AcpSessionUpdate = Record<string, unknown> & { sessionUpdate?: string }
@@ -142,10 +98,8 @@ function statusFrom(update: AcpSessionUpdate, fallback?: ToolCallStatus) {
  * Map one `session/update` notification into zero or more turn events.
  *
  * Updates we deliberately drop: `available_commands_update`,
- * `current_mode_update`, `config_option_update` and `session_info_update` are
- * session metadata, not transcript content. `usage_update` is metadata too,
- * but it drives the live context gauge, so it becomes a transient `usage`
- * event the executor folds onto the message instead of a transcript row.
+ * `current_mode_update`, `config_option_update`, `usage_update` and
+ * `session_info_update` are session metadata, not transcript content.
  */
 export function parseAcpSessionUpdate(update: AcpSessionUpdate): ParsedTurnEvent[] {
   switch (update.sessionUpdate) {
@@ -213,11 +167,6 @@ export function parseAcpSessionUpdate(update: AcpSessionUpdate): ParsedTurnEvent
           },
         },
       ]
-    }
-    case 'usage_update':
-    case 'usage': {
-      const usage = acpUsage(update)
-      return usage ? [{ kind: 'usage', payload: { usage } }] : []
     }
     case 'plan':
     case 'plan_update': {
