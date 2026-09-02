@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { runCommand } from './command.ts'
+import { MAX_OUTPUT_BYTES, runCommand } from './command.ts'
 
 const node = JSON.stringify(process.execPath)
 
@@ -109,5 +109,18 @@ describe('runCommand', () => {
       }
     }
     assert.equal(alive, false, 'the grandchild should have been killed with the group')
+  })
+
+  it('stops buffering after the output cap while a child ignores SIGTERM', async () => {
+    const res = await runCommand({
+      command: process.execPath,
+      args: [
+        '-e',
+        `process.on('SIGTERM',()=>{});const c=Buffer.alloc(1024*1024);function w(){while(process.stdout.write(c)){}process.stdout.once('drain',w)}w()`,
+      ],
+      timeoutMs: 10_000,
+    })
+    assert.equal(res.outputTooLarge, true)
+    assert.ok(Buffer.byteLength(res.stdout) <= MAX_OUTPUT_BYTES)
   })
 })

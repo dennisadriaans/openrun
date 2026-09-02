@@ -17,7 +17,7 @@ import { spawn } from 'node:child_process'
 import { killChildTree } from './processControl.ts'
 
 /** Output kept per stream. Past this the command is stopped, not truncated. */
-const MAX_OUTPUT_BYTES = 32 * 1024 * 1024
+export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024
 
 export type CommandResult = {
   /** Exit code, or null when the child was signalled. */
@@ -54,6 +54,8 @@ export function runCommand(input: RunCommandInput): Promise<CommandResult> {
     let settled = false
     let timedOut = false
     let outputTooLarge = false
+    let stdoutBytes = 0
+    let stderrBytes = 0
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const finish = (status: number | null) => {
@@ -94,18 +96,32 @@ export function runCommand(input: RunCommandInput): Promise<CommandResult> {
     child.stdout?.setEncoding('utf8')
     child.stderr?.setEncoding('utf8')
     child.stdout?.on('data', (chunk: string) => {
-      stdout += chunk
-      if (stdout.length > MAX_OUTPUT_BYTES) {
+      if (outputTooLarge) return
+      const bytes = Buffer.byteLength(chunk)
+      const remaining = MAX_OUTPUT_BYTES - stdoutBytes
+      if (bytes > remaining) {
+        stdout += Buffer.from(chunk).subarray(0, remaining).toString('utf8')
+        stdoutBytes = MAX_OUTPUT_BYTES
         outputTooLarge = true
         stop()
+        return
       }
+      stdout += chunk
+      stdoutBytes += bytes
     })
     child.stderr?.on('data', (chunk: string) => {
-      stderr += chunk
-      if (stderr.length > MAX_OUTPUT_BYTES) {
+      if (outputTooLarge) return
+      const bytes = Buffer.byteLength(chunk)
+      const remaining = MAX_OUTPUT_BYTES - stderrBytes
+      if (bytes > remaining) {
+        stderr += Buffer.from(chunk).subarray(0, remaining).toString('utf8')
+        stderrBytes = MAX_OUTPUT_BYTES
         outputTooLarge = true
         stop()
+        return
       }
+      stderr += chunk
+      stderrBytes += bytes
     })
 
     child.on('error', (err) => {
