@@ -95,8 +95,8 @@ export function importNativeTranscript(input: {
 
   const db = getDb()
   const insertMessage = db.prepare(
-    `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, usage, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
-     VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', @usage, '', '', '', @createdAt, @finishedAt)`,
+    `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
+     VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', '', '', '', @createdAt, @finishedAt)`,
   )
   const insertEvent = db.prepare(
     `INSERT INTO turn_events (id, messageId, runId, seq, kind, payload, createdAt)
@@ -132,7 +132,6 @@ export function importNativeTranscript(input: {
       role: 'system',
       content: text,
       status: 'success',
-      usage: '',
       createdAt,
       finishedAt: createdAt,
     })
@@ -149,7 +148,6 @@ export function importNativeTranscript(input: {
           role: 'user',
           content: turn.prompt,
           status: 'success',
-          usage: '',
           createdAt,
           finishedAt: createdAt,
         })
@@ -165,7 +163,6 @@ export function importNativeTranscript(input: {
         // Chat reads assistant text back out of the events, as it does live.
         content: '',
         status: 'success',
-        usage: turn.usage ? JSON.stringify(turn.usage) : '',
         createdAt,
         finishedAt: createdAt,
       })
