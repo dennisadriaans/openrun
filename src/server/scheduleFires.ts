@@ -1,6 +1,22 @@
 import { randomUUID } from 'node:crypto'
 import { publishActivityLive } from './activityLive.ts'
 import { getDb, type ScheduleFireOutcome, type ScheduleFireRow } from './db.ts'
+import { notifyScheduleFireRefused } from './notify.ts'
+
+/** The fire recorded before `excludeId`, used to de-duplicate refusal alerts. */
+function previousFire(
+  taskId: string,
+  excludeId: string,
+): { outcome: string; detail: string } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT outcome, detail FROM schedule_fires
+       WHERE taskId = ? AND id != ?
+       ORDER BY observedAt DESC, rowid DESC LIMIT 1`,
+    )
+    .get(taskId, excludeId) as { outcome: string; detail: string } | undefined
+  return row ?? null
+}
 
 export function recordScheduleFire(input: {
   taskId: string
@@ -35,6 +51,15 @@ export function recordScheduleFire(input: {
     )
     .run(row.taskId, row.taskId)
   publishActivityLive({ type: 'task_changed', taskId: row.taskId })
+  // A refused fire never becomes a run, so the run-finished notifier cannot
+  // report it. Tell the same destinations here instead.
+  notifyScheduleFireRefused({
+    taskId: row.taskId,
+    outcome: row.outcome,
+    detail: row.detail,
+    scheduledFor: row.scheduledFor,
+    previous: previousFire(row.taskId, row.id),
+  })
   return row
 }
 
@@ -52,7 +77,17 @@ export function settleScheduleFire(
        SET observedAt = ?, outcome = ?, runId = ?, detail = ?
        WHERE id = ?`,
   ).run(Date.now(), input.outcome, input.runId ?? '', input.detail ?? '', fireId)
-  if (row) publishActivityLive({ type: 'task_changed', taskId: row.taskId })
+  if (!row) return
+  publishActivityLive({ type: 'task_changed', taskId: row.taskId })
+  // A queued fire that settles as failed/missed was refused just as surely as
+  // one refused up front.
+  notifyScheduleFireRefused({
+    taskId: row.taskId,
+    outcome: input.outcome,
+    detail: input.detail ?? '',
+    scheduledFor: 0,
+    previous: previousFire(row.taskId, fireId),
+  })
 }
 
 export function latestScheduleFires(taskIds?: string[]): Record<string, ScheduleFireRow> {
