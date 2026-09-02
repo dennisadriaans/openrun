@@ -17,37 +17,26 @@ import {
   describeTrigger,
   type IntegrationTrigger,
 } from '../../lib/integrations/triggers.ts'
+import { PICK_RUNTIME_MESSAGE, PICK_WORKSPACE_MESSAGE } from '../../lib/integrations/setupGate.ts'
 import type { WebhookFilters } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow } from '../db.ts'
 import { checkRuntimeInstalled } from '../runtimePath.ts'
-import { listProjects } from '../workspaces.ts'
 import { getIntegration } from './connections.ts'
 
 export type AutomationSetupContext = {
   runtimes: Array<{ id: string; label: string; bin: string; installed: boolean }>
-  projects: Array<{
-    id: string
-    name: string
-    remoteUrl: string
-    workspaces: Array<{ id: string; name: string; status: string; kind: string }>
-  }>
 }
 
-/** Everything the "finish setup" form picks from: runtimes and workspaces. */
+/**
+ * The half of the "finish setup" form the app cannot already answer.
+ *
+ * Projects and workspaces are deliberately absent: `WorkspacePicker` owns that
+ * pair everywhere else, including creating a project when there is none, and a
+ * second listing here would be one more thing to keep in step. `installed` is
+ * the part only the server knows — a runtime whose binary is off PATH cannot
+ * arm an automation.
+ */
 export function getAutomationSetupContext(): AutomationSetupContext {
-  const projects: AutomationSetupContext['projects'] = listProjects().map((p) => ({
-    id: p.id,
-    name: p.name,
-    remoteUrl: p.remoteUrl,
-    workspaces: getDb()
-      .prepare(
-        `SELECT id, name, status, kind FROM workspaces
-         WHERE projectId = ? AND status != 'archived'
-         ORDER BY kind = 'main' DESC, createdAt ASC`,
-      )
-      .all(p.id) as Array<{ id: string; name: string; status: string; kind: string }>,
-  }))
-
   const runtimes = (
     getDb().prepare('SELECT * FROM runtimes ORDER BY createdAt ASC').all() as RuntimeRow[]
   ).map((r) => ({
@@ -57,7 +46,7 @@ export function getAutomationSetupContext(): AutomationSetupContext {
     installed: checkRuntimeInstalled(r.bin).installed,
   }))
 
-  return { runtimes, projects }
+  return { runtimes }
 }
 
 export type CreateIntegrationAutomationInput = {
@@ -100,10 +89,10 @@ export function createIntegrationAutomation(
   if (!meta) throw new Error(`Unknown provider: ${integration.provider}`)
 
   const workspaceId = input.workspaceId.trim()
-  if (!workspaceId) throw new Error('Pick a project workspace for the automation.')
+  if (!workspaceId) throw new Error(PICK_WORKSPACE_MESSAGE)
 
   const runtimeId = input.runtimeId.trim()
-  if (!runtimeId) throw new Error('Pick a runtime for the automation.')
+  if (!runtimeId) throw new Error(PICK_RUNTIME_MESSAGE)
   const runtime = getDb().prepare('SELECT id FROM runtimes WHERE id = ?').get(runtimeId) as
     | Pick<RuntimeRow, 'id'>
     | undefined

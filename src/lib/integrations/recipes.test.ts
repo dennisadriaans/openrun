@@ -50,11 +50,11 @@ describe('availableRecipes', () => {
         `${provider} offers a comment recipe but never fills extra.comment`,
       )
     }
-    // Linear parses a Comment delivery as an issue and fills neither the issue
-    // fields nor extra.comment, so the recipe must stay off it.
+    // Linear reads a Comment delivery's nested issue and puts the text in
+    // extra.comment, so the recipe is offered there.
     assert.equal(
       availableRecipes('linear').some((r) => r.id === 'answer-comment'),
-      false,
+      true,
     )
     assert.equal(
       availableRecipes('azure-devops').some((r) => r.id === 'answer-comment'),

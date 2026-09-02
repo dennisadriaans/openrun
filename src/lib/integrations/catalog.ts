@@ -152,18 +152,21 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
       { id: 'comment_created', label: 'Comment created' },
       { id: 'comment_updated', label: 'Comment updated' },
       { id: 'comment_deleted', label: 'Comment deleted' },
-      { id: 'worklog_created', label: 'Worklog created' },
-      { id: 'worklog_updated', label: 'Worklog updated' },
-      { id: 'worklog_deleted', label: 'Worklog deleted' },
+      /*
+       * No worklog events. Atlassian's dynamic-webhook API — the only one a
+       * connection made here uses — refuses a registration that asks for them,
+       * so they could never arrive and an automation bound to one would look
+       * armed and never fire.
+       */
     ],
     setupSteps: CONNECT_STEPS,
   },
   {
     id: 'linear',
     label: 'Linear',
-    description: 'Linear issue create, update, remove, and status-change events.',
+    description: 'Linear issue create, update, remove, status-change, and comment events.',
     docsUrl: 'https://linear.app/developers/webhooks',
-    emitsCommentText: false,
+    emitsCommentText: true,
     events: [
       { id: 'Issue.create', label: 'Created' },
       { id: 'Issue.update', label: 'Updated' },
@@ -178,7 +181,11 @@ export const INTEGRATION_PROVIDERS: ProviderMeta[] = [
         label: 'Assigned',
         description: 'Derived when assigneeId changes on update',
       },
-      { id: 'Comment.create', label: 'Comment created' },
+      {
+        id: 'Comment.create',
+        label: 'Comment created',
+        description: 'Comment text is available as {{extra.comment}}',
+      },
       { id: 'Comment.update', label: 'Comment updated' },
       { id: 'Comment.remove', label: 'Comment removed' },
       { id: 'Project.create', label: 'Project created' },

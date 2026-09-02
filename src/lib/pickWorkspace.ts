@@ -53,9 +53,17 @@ export function pickDefaultWorkspaceId(
 
 /**
  * Whether a chosen workspace is the checkout shared with the user's editor.
- * Drives the warning on automation forms, which is the only thing standing
- * between a cron trigger and the user's open files.
+ * Drives the refusal on automation forms, which is the only thing standing
+ * between a cron or webhook trigger and the user's open files.
  */
 export function isMainCheckout(workspace: WorkspacePickCandidate | undefined): boolean {
   return workspace?.kind === 'main'
 }
+
+/**
+ * What `upsertTask` throws when an automation targets the primary checkout.
+ * Shared so the forms refuse with the server's own words instead of warning
+ * and then surfacing the throw after the click.
+ */
+export const MAIN_CHECKOUT_AUTOMATION_MESSAGE =
+  'Pick an isolated worktree. Automations cannot run in the primary checkout.'

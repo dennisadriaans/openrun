@@ -188,7 +188,7 @@ Neither hook may open an `EventSource` of its own.
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (relayed from the control plane) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx` |
 | Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationConnect.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
-| Binding a connection to a workspace + runtime | `server/integrations/automation.ts`, `components/IntegrationAutomationSetup.tsx`; event narrowing in `lib/integrations/automation.ts` |
+| Binding a connection to a workspace + runtime | `components/IntegrationAutomationSetup.tsx` (the panel after Connect) → `server/integrations/automation.ts`; refuse conditions mirrored in `lib/integrations/setupGate.ts`, event narrowing in `lib/integrations/automation.ts` |
 | "When a ticket moves to X" → events + filters | `lib/integrations/triggers.ts` — compiled on the server write path too, so the form's preview *is* the binding |
 | Named automation starting points (trigger + prompt) | `lib/integrations/recipes.ts`; gated on `ProviderMeta.emitsCommentText` and on the trigger existing |
 | Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
@@ -211,7 +211,8 @@ Neither hook may open an `EventSource` of its own.
 | Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
 | Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
 | Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
-| Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` |
+| Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` / `lib/integrations/setupGate.ts` |
+| What "Send test event" sends | `lib/integrations/testEvent.ts` shapes it from the connection's own bindings; `cloud/hosted.ts` `ingestTestEvent` delivers it |
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
 | Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
 | Open-core boundary (what is free vs. commercial) | `lib/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |

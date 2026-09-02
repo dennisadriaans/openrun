@@ -86,6 +86,19 @@ export function serializeChecks(defs: CheckDef[]): string {
   return JSON.stringify(defs)
 }
 
+/**
+ * Developer-facing refusals when an automation nobody is watching would be
+ * armed without a definition of done. Shared with the setup and automation
+ * forms so the button explains itself instead of throwing after the click.
+ */
+export function verificationDisabledMessage(): string {
+  return 'Unattended verification is disabled. Enable verification and configure at least one project check before arming scheduled or webhook runs.'
+}
+
+export function missingProjectChecksMessage(): string {
+  return 'Unattended automation needs at least one configured verification check. Add a project check before arming scheduled or webhook runs.'
+}
+
 export function tooManyChecksMessage(): string {
   return `A project can have at most ${MAX_CHECKS} checks — they run one after another after every turn.`
 }

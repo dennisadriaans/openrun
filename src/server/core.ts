@@ -18,6 +18,7 @@ import {
   type TaskReadinessBlocker,
 } from '../lib/taskReadiness.ts'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
+import { MAIN_CHECKOUT_AUTOMATION_MESSAGE } from '../lib/pickWorkspace'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import {
   requiresGhAuth,
@@ -1030,7 +1031,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
 
   const taskWorkspace = getWorkspace(workspaceId)
   if (taskWorkspace?.kind === 'main') {
-    throw new Error('Pick an isolated worktree. Automations cannot run in the primary checkout.')
+    throw new Error(MAIN_CHECKOUT_AUTOMATION_MESSAGE)
   }
 
   // cwd stays the source of truth for git operations (executor, diff panel,

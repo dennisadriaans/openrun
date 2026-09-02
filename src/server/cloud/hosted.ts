@@ -7,12 +7,7 @@
  * No vendor credential ever reaches this process.
  */
 import { isIntegrationProviderId, providerMeta } from '../../lib/integrations/catalog.ts'
-import {
-  emptyActor,
-  emptyIssue,
-  type CanonicalWebhookEvent,
-  type IntegrationProviderId,
-} from '../../lib/integrations/types.ts'
+import { emptyActor, emptyIssue, type CanonicalWebhookEvent } from '../../lib/integrations/types.ts'
 import { CLOUD_PATHS, integrationConnectionPath } from '../../lib/cloud/url.ts'
 import {
   createIntegration,
@@ -22,7 +17,10 @@ import {
   getIntegrationPublic,
   type IntegrationPublic,
 } from '../integrations/connections.ts'
+import { getDb } from '../db.ts'
 import { cloudConnectionIdFromConfig } from '../../lib/integrations/automation.ts'
+import { parseWebhookEvents, parseWebhookFilters } from '../../lib/integrations/match.ts'
+import { testEventShape, type TestEventBinding } from '../../lib/integrations/testEvent.ts'
 import { ingestCanonicalEvent } from '../integrations/dispatcher.ts'
 import { hostedDisconnectDecision } from '../../lib/cloud/hostedDisconnect.ts'
 import { configuredCloudUrl, currentAccessToken } from './login.ts'
@@ -179,28 +177,39 @@ export async function disconnectHostedIntegration(integrationId: string): Promis
   }
 }
 
-/** Event id each provider fires first, so a test event matches a real binding. */
-const TEST_EVENT_TYPE: Record<IntegrationProviderId, string> = {
-  github: 'issues.opened',
-  gitlab: 'issue.open',
-  bitbucket: 'issue:created',
-  jira: 'jira:issue_created',
-  linear: 'Issue.create',
-  'azure-devops': 'workitem.created',
+/**
+ * Enabled automations bound to this connection, newest binding first, so the
+ * test event can be shaped like something they actually watch.
+ */
+function bindingsFor(integrationId: string): TestEventBinding[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT webhookEvents, webhookFilters FROM tasks
+       WHERE webhookIntegrationId = ? AND enabled = 1
+       ORDER BY createdAt DESC`,
+    )
+    .all(integrationId) as Array<{ webhookEvents: string; webhookFilters: string }>
+  return rows.map((row) => ({
+    events: parseWebhookEvents(row.webhookEvents),
+    filters: parseWebhookFilters(row.webhookFilters),
+  }))
 }
 
 export async function ingestTestEvent(integrationId: string): Promise<{
   ok: boolean
   matched: number
   runIds: string[]
+  /** The event that was sent, so the UI can name it rather than just count. */
+  eventType: string
   error?: string
 }> {
   const integration = getIntegration(integrationId)
   if (!integration) throw new Error('Integration not found')
 
+  const shape = testEventShape(integration.provider, bindingsFor(integrationId))
   const event: CanonicalWebhookEvent = {
     provider: integration.provider,
-    eventType: TEST_EVENT_TYPE[integration.provider] ?? 'issues.opened',
+    eventType: shape.eventType,
     deliveryId: `test_${Date.now()}`,
     occurredAt: Date.now(),
     issue: emptyIssue({
@@ -209,9 +218,11 @@ export async function ingestTestEvent(integrationId: string): Promise<{
       title: 'Test webhook event',
       body: 'Sent from Open Run to verify matching and runs.',
       url: '',
-      status: 'To Do',
-      assignees: ['Ada'],
-      project: 'TEST',
+      status: shape.status,
+      previousStatus: shape.previousStatus,
+      labels: shape.labels,
+      assignees: shape.assignees,
+      project: shape.project,
     }),
     actor: emptyActor({ name: 'Open Run' }),
     extra: { source: 'test' },
@@ -225,6 +236,7 @@ export async function ingestTestEvent(integrationId: string): Promise<{
     ok: result.ok,
     matched: Number(result.body.matched ?? 0),
     runIds: runs.map((row) => row.runId).filter((id): id is string => Boolean(id)),
+    eventType: shape.eventType,
     error: result.ok ? undefined : String(result.body.error ?? 'ingest failed'),
   }
 }
