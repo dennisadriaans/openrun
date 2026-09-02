@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { after, describe, it } from 'node:test'
-import { DEMO_RUNNING_TASK_ID, demoRuns, demoTasks, isDemoMode } from './demoData.ts'
+import {
+  DEMO_RUNNING_TASK_ID,
+  demoRuns,
+  demoTaskDetail,
+  demoTasks,
+  isDemoMode,
+} from './demoData.ts'
 
 describe('isDemoMode', () => {
   const prevOpenrun = process.env.OPENRUN_DEMO
@@ -44,5 +50,18 @@ describe('demo lists', () => {
     assert.ok(rows.some((t) => t.webhookIntegrationId && !t.cron))
     assert.ok(rows.some((t) => t.enabled === 0))
     assert.ok(rows.some((t) => t.queuedCount > 1))
+  })
+})
+
+describe('demo automation detail', () => {
+  it('provides a ready, isolated preview for the featured automation', () => {
+    const task = demoTaskDetail(DEMO_RUNNING_TASK_ID, 1_700_000_000_000)
+    assert.equal(task?.name, 'Nightly dependency bump')
+    assert.equal(task?.workspaceHealth?.code, 'ok')
+    assert.equal(task?.readinessBlockers.length, 0)
+  })
+
+  it('does not fabricate details for the other demo rows', () => {
+    assert.equal(demoTaskDetail('demo-task-2'), null)
   })
 })

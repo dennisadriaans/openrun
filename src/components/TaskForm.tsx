@@ -909,12 +909,15 @@ export function TaskForm({
   onCancel,
   readiness,
   workspaceChangeBlockedReason,
+  demoPreview = false,
 }: {
   initial?: Partial<TaskFormValues>
   onSaved: (id: string) => void
   onCancel: () => void
   readiness?: ReactNode
   workspaceChangeBlockedReason?: string | null
+  /** Interactive, page-local preview that never persists an automation. */
+  demoPreview?: boolean
 }) {
   const { data: runtimes } = useRuntimes()
   const { data: projects } = useProjects()
@@ -1233,6 +1236,9 @@ export function TaskForm({
   // Validate + save. Returns the saved task, or null when validation blocked
   // the write (errors are surfaced inline). Shared by Create/Save and "Run once".
   const persist = async (): Promise<{ id: string; name: string } | null> => {
+    if (demoPreview) {
+      return { id: v.id ?? 'demo-task-preview', name: v.name.trim() || 'Untitled' }
+    }
     const cron = v.cron.trim()
     if (!isValidCron(cron)) {
       setTriggerError(invalidCronMessage(cron))
@@ -1320,17 +1326,21 @@ export function TaskForm({
   const pristine = Boolean(v.id) && !dirty
   const saveBlockReason = save.isPending
     ? 'Saving…'
-    : workspaceBlockReason
-      ? workspaceBlockReason
-      : // `upsertTask` throws on the primary checkout, so warning and letting
-        // Save through only moved the refusal to after the click.
-        isMainCheckout(selectedWorkspace)
-        ? MAIN_CHECKOUT_AUTOMATION_MESSAGE
-        : !promptUsable
-          ? emptyTaskPromptMessage()
-          : pristine
-            ? 'No changes to save'
-            : undefined
+    : demoPreview
+      ? pristine
+        ? 'No preview changes to apply'
+        : undefined
+      : workspaceBlockReason
+        ? workspaceBlockReason
+        : // `upsertTask` throws on the primary checkout, so warning and letting
+          // Save through only moved the refusal to after the click.
+          isMainCheckout(selectedWorkspace)
+          ? MAIN_CHECKOUT_AUTOMATION_MESSAGE
+          : !promptUsable
+            ? emptyTaskPromptMessage()
+            : pristine
+              ? 'No changes to save'
+              : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1339,7 +1349,7 @@ export function TaskForm({
     setDirty(false)
     toast.add({
       type: 'success',
-      title: v.id ? 'Changes saved' : 'Automation created',
+      title: demoPreview ? 'Preview updated' : v.id ? 'Changes saved' : 'Automation created',
     })
     onSaved(saved.id)
   }
@@ -1360,8 +1370,19 @@ export function TaskForm({
               Cancel
             </Button>
             <span className="inline-flex" title={saveBlockReason}>
+              {/*
+                Every refusal in one place: `saveBlockReason` already folds in
+                the demo-preview case, so the button cannot be enabled for a
+                reason the tooltip does not name.
+              */}
               <Button type="submit" variant="primary" disabled={Boolean(saveBlockReason)}>
-                {save.isPending ? 'Saving…' : v.id ? 'Save changes' : 'Create'}
+                {save.isPending
+                  ? 'Saving…'
+                  : demoPreview
+                    ? 'Apply preview'
+                    : v.id
+                      ? 'Save changes'
+                      : 'Create'}
               </Button>
             </span>
           </div>
@@ -1604,6 +1625,8 @@ export function TaskForm({
                   runtimes={runtimes}
                   runtimeId={v.runtimeId}
                   align="start"
+                  initiallyOpen={demoPreview}
+                  keepOpen={demoPreview}
                   onChange={changeRuntimeId}
                 />
               ) : null}
@@ -1613,6 +1636,8 @@ export function TaskForm({
                     runtimes={runtimes}
                     runtimeId={v.runtimeId}
                     align="end"
+                    initiallyOpen={demoPreview}
+                    keepOpen={demoPreview}
                     onChange={changeRuntimeId}
                   />
                 </div>
