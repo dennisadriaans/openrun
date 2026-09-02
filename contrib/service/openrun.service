@@ -1,0 +1,47 @@
+# systemd user unit for Open Run (Linux).
+#
+# A scheduler that only runs while a terminal tab is open is a scheduler that
+# misses fires. This keeps Open Run running across logouts and reboots.
+#
+# Install:
+#   1. Edit WorkingDirectory and ExecStart below.
+#   2. mkdir -p ~/.config/systemd/user
+#      cp contrib/service/openrun.service ~/.config/systemd/user/
+#   3. systemctl --user daemon-reload
+#      systemctl --user enable --now openrun
+#   4. Survive logout:  sudo loginctl enable-linger "$USER"
+#
+# Check on it:  systemctl --user status openrun
+# Read the log: journalctl --user -u openrun -f
+#
+# A *user* unit, not a system one: Open Run drives CLIs that are logged in as
+# you, so it needs your home directory, your credentials and your PATH.
+
+[Unit]
+Description=Open Run — schedule coding agents on your machine
+Documentation=https://openrun.sh/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Absolute paths: systemd does not read your shell profile. Find yours with
+# `which node` and `pwd` in the checkout.
+WorkingDirectory=%h/openrun
+ExecStart=/usr/bin/node --experimental-strip-types scripts/start.ts
+
+Environment=NODE_ENV=production
+# systemd gives a service almost no PATH. Open Run needs to find the agent CLIs
+# (`claude`, `codex`, …) and `git`, so spell it out — include the directory
+# your CLIs installed into.
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+
+# Uncomment to reach Open Run from a paired phone on the same Wi-Fi. Only
+# /api/mobile/** answers other devices — see SECURITY.md.
+#Environment=AGENTOPS_MOBILE=1
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

@@ -19,6 +19,9 @@ import {
   isDocumentRequest,
   mergeAllowedHosts,
   parseAllowedHosts,
+  REMOTE_ADDRESS_HEADER,
+  remoteRequestRefusal,
+  selfAuthenticatingPath,
   serverBindRefusal,
   tokenRequiredForRequests,
   tokensMatch,
@@ -109,6 +112,7 @@ export function serverAccessConfig(): ServerAccessConfig {
       parseAllowedHosts(openrunEnv('ALLOWED_HOSTS')),
       mobileEnabled() ? lanAddresses() : [],
     ),
+    mobileEnabled: mobileEnabled(),
   }
 }
 
@@ -204,6 +208,16 @@ function presentedToken(request: Request): string | null {
   return null
 }
 
+/** Path + query of a request, or null when the URL will not parse. */
+function requestPath(request: Request): string | null {
+  try {
+    const url = new URL(request.url)
+    return `${url.pathname}${url.search}`
+  } catch {
+    return null
+  }
+}
+
 /** Whether the token may be marked `Secure` — i.e. this connection is HTTPS. */
 function requestIsSecure(request: Request): boolean {
   const forwarded = request.headers.get('x-forwarded-proto')
@@ -259,6 +273,21 @@ export function accessDecision(request: Request): AccessDecision {
   // token is configured, and the default install has none.
   const hostRefusal = hostHeaderRefusal(config, request.headers.get('host'))
   if (hostRefusal) return refuse(hostRefusal, 403)
+
+  // Same decision the Vite dev guard has always applied, now in production too:
+  // a caller on another machine reaches `/api/mobile/**` or nothing.
+  const address = request.headers.get(REMOTE_ADDRESS_HEADER)
+  const path = requestPath(request)
+  if (address) {
+    const remoteRefusal = remoteRequestRefusal(config, { address, url: path })
+    if (remoteRefusal) return refuse(remoteRefusal, 403)
+  }
+
+  // The mobile surface carries a per-device bearer token with its own scopes,
+  // enforced by `requireDeviceOp` on every handler. Pairing never conveys the
+  // app-wide token — deliberately, since a scoped credential on a phone is the
+  // safer of the two — so requiring it here would lock the companion out.
+  if (config.mobileEnabled && selfAuthenticatingPath(path)) return PROCEED
 
   if (!tokenRequiredForRequests(config)) return PROCEED
 

@@ -33,6 +33,18 @@ export function parseVerdictList(raw: string | null | undefined): RunVerdict[] {
   }
 }
 
+/**
+ * Whether a *refused* scheduled fire should reach this notifier.
+ *
+ * Deliberately not verdict-filtered. A refusal means the automation did not
+ * run at all — there is no verdict to match, and no verdict filter can express
+ * "tell me when this stops working". A notifier narrowed to `verified` still
+ * wants to hear that its automation has been refused for three days.
+ */
+export function notifierMatchesRefusal(rule: NotifierRule): boolean {
+  return rule.enabled
+}
+
 /** Whether a settled run should reach this notifier. */
 export function notifierMatches(rule: NotifierRule, verdict: RunVerdict): boolean {
   if (!rule.enabled) return false
@@ -40,6 +52,39 @@ export function notifierMatches(rule: NotifierRule, verdict: RunVerdict): boolea
   if (!verdict) return false
   if (rule.verdicts.length === 0) return verdictNeedsAttention(verdict)
   return rule.verdicts.includes(verdict)
+}
+
+/**
+ * What the delivery log stores in its `verdict` column for a refused fire.
+ * A refusal has no run and no verdict; this keeps the one column honest.
+ */
+export const REFUSED_DELIVERY_VERDICT = 'refused'
+
+/** Fire outcomes that mean the automation did not run and nobody was told. */
+export type RefusedFireOutcome = 'failed' | 'missed'
+
+export function isRefusedFireOutcome(outcome: string): outcome is RefusedFireOutcome {
+  return outcome === 'failed' || outcome === 'missed'
+}
+
+/**
+ * Whether this refusal is worth a notification, given the fire before it.
+ *
+ * A broken automation on a minutely cron would otherwise notify every minute.
+ * The same outcome with the same reason twice running is the *same* refusal
+ * still in force, and you were told the first time; a new reason, or a
+ * recovery followed by a fresh break, notifies again.
+ */
+export function shouldNotifyRefusal(input: {
+  outcome: string
+  detail: string
+  /** The task's previous fire, if it had one. */
+  previous: { outcome: string; detail: string } | null
+}): boolean {
+  if (!isRefusedFireOutcome(input.outcome)) return false
+  const previous = input.previous
+  if (!previous) return true
+  return !(previous.outcome === input.outcome && previous.detail === input.detail)
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +145,36 @@ export function buildRunNotification(input: RunNotificationInput): RunNotificati
   }
 }
 
+export type FireRefusalNotificationInput = {
+  taskId: string
+  taskName: string
+  outcome: RefusedFireOutcome
+  /** Why the fire was refused, in the words the gate used. */
+  detail: string
+  scheduledFor: number
+}
+
+export type FireRefusalNotification = FireRefusalNotificationInput & {
+  title: string
+  body: string
+  /** App-relative link to the automation. */
+  path: string
+}
+
+export function buildFireRefusalNotification(
+  input: FireRefusalNotificationInput,
+): FireRefusalNotification {
+  const name = input.taskName.trim() || 'an automation'
+  const title = input.outcome === 'missed' ? `Missed · ${name}` : `Did not run · ${name}`
+  const detail = input.detail.trim() || 'No reason was recorded.'
+  return {
+    ...input,
+    title,
+    body: detail,
+    path: `/tasks/${encodeURIComponent(input.taskId)}`,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Destination payloads
 // ---------------------------------------------------------------------------
@@ -142,6 +217,29 @@ export function webhookPayload(
     failedChecks: notification.failedChecks,
     repairAttempts: notification.repairAttempts,
     durationMs: notification.durationMs,
+    title: notification.title,
+    body: notification.body,
+    url: link,
+  }
+}
+
+/** The JSON body to POST when a scheduled fire was refused. */
+export function fireRefusalWebhookPayload(
+  notification: FireRefusalNotification,
+  shape: WebhookShape,
+  baseUrl: string,
+): Record<string, unknown> {
+  const link = `${baseUrl.replace(/\/+$/, '')}${notification.path}`
+  const text = `${notification.title}\n${notification.body}\n${link}`
+
+  if (shape === 'discord') return { content: text }
+  return {
+    event: 'fire.refused',
+    taskId: notification.taskId,
+    taskName: notification.taskName,
+    outcome: notification.outcome,
+    detail: notification.detail,
+    scheduledFor: notification.scheduledFor,
     title: notification.title,
     body: notification.body,
     url: link,
