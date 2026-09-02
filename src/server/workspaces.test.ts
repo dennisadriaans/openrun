@@ -43,14 +43,16 @@ after(async () => {
 })
 
 describe('Git worktree reconciliation', () => {
-  it('imports manually added worktrees and deletes removed unreferenced rows', () => {
-    const project = workspaces.addProject({ mode: 'register', path: repo })
+  it('imports manually added worktrees and deletes removed unreferenced rows', async () => {
+    const project = await workspaces.addProject({ mode: 'register', path: repo })
     const [main] = workspaces.listWorkspaces(project.id)
     assert.equal(main?.kind, 'main')
     assert.equal(main?.branch, 'main')
     assert.equal(main?.path, realpathSync(repo))
     assert.equal(workspaces.resolveWorkspacePath(main!.id), realpathSync(repo))
-    assert.throws(
+    // `createWorkspace` is async now (worktree setup no longer blocks the
+    // event loop), so the refusal arrives as a rejection.
+    await assert.rejects(
       () =>
         workspaces.createWorkspace({
           projectId: project.id,

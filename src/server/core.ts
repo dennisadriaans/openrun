@@ -1375,7 +1375,7 @@ export function runTaskNow(taskId: string): { runId: string } {
  * onto it. Doing that by hand across a backlog of automations is where people
  * give up and switch isolation off instead, so it is one call.
  */
-export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
+export async function isolateTaskWorkspace(taskId: string): Promise<TaskWithMeta> {
   const db = getDb()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
   if (!task) throw new Error('Task not found')
@@ -1411,7 +1411,7 @@ export function isolateTaskWorkspace(taskId: string): TaskWithMeta {
   const base = slugify(task.name) || 'automation'
   const branch = `openrun/${base}-${task.id.split('_').pop() ?? Date.now().toString(36)}`
 
-  const workspace = createWorkspace({
+  const workspace = await createWorkspace({
     projectId: project.id,
     branch,
     fromBranch: project.defaultBranch,
@@ -2398,7 +2398,7 @@ export function createBranch(input: { runId: string; name: string }) {
   return git.createBranch(runCwd(input.runId), input.name)
 }
 
-export function openPullRequest(input: {
+export async function openPullRequest(input: {
   runId: string
   title: string
   body: string
@@ -2420,7 +2420,9 @@ export function openPullRequest(input: {
     base = project?.defaultBranch
   }
 
-  const result = git.createPullRequest({
+  // Await before invalidating: the cache must only be dropped once a PR
+  // actually exists, or the next probe re-reads and re-caches "no PR".
+  const result = await git.createPullRequest({
     cwd: run.cwd,
     title: input.title,
     body: input.body,
