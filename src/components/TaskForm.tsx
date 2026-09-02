@@ -905,12 +905,15 @@ export function TaskForm({
   onCancel,
   readiness,
   workspaceChangeBlockedReason,
+  demoPreview = false,
 }: {
   initial?: Partial<TaskFormValues>
   onSaved: (id: string) => void
   onCancel: () => void
   readiness?: ReactNode
   workspaceChangeBlockedReason?: string | null
+  /** Interactive, page-local preview that never persists an automation. */
+  demoPreview?: boolean
 }) {
   const { data: runtimes } = useRuntimes()
   const { data: projects } = useProjects()
@@ -1229,6 +1232,9 @@ export function TaskForm({
   // Validate + save. Returns the saved task, or null when validation blocked
   // the write (errors are surfaced inline). Shared by Create/Save and "Run once".
   const persist = async (): Promise<{ id: string; name: string } | null> => {
+    if (demoPreview) {
+      return { id: v.id ?? 'demo-task-preview', name: v.name.trim() || 'Untitled' }
+    }
     const cron = v.cron.trim()
     if (!isValidCron(cron)) {
       setTriggerError(invalidCronMessage(cron))
@@ -1319,13 +1325,17 @@ export function TaskForm({
   const pristine = Boolean(v.id) && !dirty
   const saveBlockReason = save.isPending
     ? 'Saving…'
-    : workspaceBlockReason
-      ? workspaceBlockReason
-      : !promptUsable
-        ? emptyTaskPromptMessage()
-        : pristine
-          ? 'No changes to save'
-          : undefined
+    : demoPreview
+      ? pristine
+        ? 'No preview changes to apply'
+        : undefined
+      : workspaceBlockReason
+        ? workspaceBlockReason
+        : !promptUsable
+          ? emptyTaskPromptMessage()
+          : pristine
+            ? 'No changes to save'
+            : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1334,7 +1344,7 @@ export function TaskForm({
     setDirty(false)
     toast.add({
       type: 'success',
-      title: v.id ? 'Changes saved' : 'Automation created',
+      title: demoPreview ? 'Preview updated' : v.id ? 'Changes saved' : 'Automation created',
     })
     onSaved(saved.id)
   }
@@ -1358,9 +1368,19 @@ export function TaskForm({
               <Button
                 type="submit"
                 variant="primary"
-                disabled={save.isPending || !workspaceUsable || !promptUsable || pristine}
+                disabled={
+                  save.isPending ||
+                  (!demoPreview && (!workspaceUsable || !promptUsable)) ||
+                  pristine
+                }
               >
-                {save.isPending ? 'Saving…' : v.id ? 'Save changes' : 'Create'}
+                {save.isPending
+                  ? 'Saving…'
+                  : demoPreview
+                    ? 'Apply preview'
+                    : v.id
+                      ? 'Save changes'
+                      : 'Create'}
               </Button>
             </span>
           </div>
@@ -1603,6 +1623,8 @@ export function TaskForm({
                   runtimes={runtimes}
                   runtimeId={v.runtimeId}
                   align="start"
+                  initiallyOpen={demoPreview}
+                  keepOpen={demoPreview}
                   onChange={changeRuntimeId}
                 />
               ) : null}
@@ -1612,6 +1634,8 @@ export function TaskForm({
                     runtimes={runtimes}
                     runtimeId={v.runtimeId}
                     align="end"
+                    initiallyOpen={demoPreview}
+                    keepOpen={demoPreview}
                     onChange={changeRuntimeId}
                   />
                 </div>
