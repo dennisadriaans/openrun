@@ -82,7 +82,6 @@ describe('parseClaudeTranscript', () => {
         prompt: 'old',
         promptAt: 1,
         events: [event('old')],
-        usage: null,
         endedAt: 2,
       },
       {
@@ -100,7 +99,6 @@ describe('parseClaudeTranscript', () => {
           { kind: 'turn_done', payload: { stopReason: 'end_turn' } },
           event('more history'),
         ],
-        usage: null,
         endedAt: 4,
       },
     ]
@@ -124,7 +122,7 @@ describe('parseClaudeTranscript', () => {
 })
 
 describe('parseCodexTranscript', () => {
-  it('imports user, assistant, tool, and usage history from rollout JSONL', () => {
+  it('imports user, assistant, and tool history from rollout JSONL', () => {
     const turns = parseCodexTranscript(
       [
         JSON.stringify({
@@ -177,7 +175,6 @@ describe('parseCodexTranscript', () => {
       turns[0]?.events.map((item) => item.kind),
       ['tool_start', 'tool_result', 'assistant', 'turn_done'],
     )
-    assert.equal(turns[0]?.usage?.contextTokens, 12)
   })
 
   it('skips Codex environment bootstrap messages', () => {

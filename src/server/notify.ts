@@ -14,11 +14,18 @@ import { isFailingOutcome, latestPass } from '../lib/checkPass.ts'
 import { openrunEnv } from '../lib/openrunEnv.ts'
 import {
   assertWebhookUrl,
+  buildFireRefusalNotification,
   buildRunNotification,
   detectWebhookShape,
+  fireRefusalWebhookPayload,
+  isRefusedFireOutcome,
   notifierMatches,
+  REFUSED_DELIVERY_VERDICT,
+  notifierMatchesRefusal,
   parseVerdictList,
+  shouldNotifyRefusal,
   webhookPayload,
+  type FireRefusalNotification,
   type NotifierKind,
   type RunNotification,
 } from '../lib/notify.ts'
@@ -146,8 +153,9 @@ export function listNotificationDeliveries(opts?: {
 
 function recordDelivery(input: {
   notifierId: string
+  /** Empty for a refused fire — no run was ever created. */
   runId: string
-  verdict: RunVerdict
+  verdict: RunVerdict | typeof REFUSED_DELIVERY_VERDICT
   status: 'ok' | 'error'
   detail?: string
 }) {
@@ -171,8 +179,7 @@ function recordDelivery(input: {
 // Delivery
 // ---------------------------------------------------------------------------
 
-async function deliverWebhook(url: string, notification: RunNotification): Promise<void> {
-  const body = webhookPayload(notification, detectWebhookShape(url), appBaseUrl())
+async function postWebhook(url: string, body: Record<string, unknown>): Promise<void> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -184,12 +191,16 @@ async function deliverWebhook(url: string, notification: RunNotification): Promi
   }
 }
 
+function deliverWebhook(url: string, notification: RunNotification): Promise<void> {
+  return postWebhook(url, webhookPayload(notification, detectWebhookShape(url), appBaseUrl()))
+}
+
 /**
  * Raise an OS notification with whatever the platform provides. There is no
  * dependency to add here — every desktop OS ships something — and a missing
  * binary is reported as a failed delivery rather than crashing the run.
  */
-function deliverDesktop(notification: RunNotification): Promise<void> {
+function deliverDesktop(notification: { title: string; body: string }): Promise<void> {
   const { title, body } = notification
   const [bin, args] =
     process.platform === 'darwin'
@@ -298,6 +309,89 @@ export function notifyRunFinished(runId: string, changedFiles: number): void {
   for (const notifier of matching) {
     void deliver(notifier, notification)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Refused scheduled fires
+// ---------------------------------------------------------------------------
+
+async function deliverRefusal(
+  notifier: NotifierRow,
+  notification: FireRefusalNotification,
+): Promise<void> {
+  try {
+    if (notifier.kind === 'webhook') {
+      await postWebhook(
+        notifier.target,
+        fireRefusalWebhookPayload(notification, detectWebhookShape(notifier.target), appBaseUrl()),
+      )
+    } else {
+      await deliverDesktop(notification)
+    }
+    // No run row exists for a refusal — the fire never became one. An empty
+    // runId is what the deliveries list reads as "this was not about a run".
+    recordDelivery({
+      notifierId: notifier.id,
+      runId: '',
+      verdict: REFUSED_DELIVERY_VERDICT,
+      status: 'ok',
+    })
+  } catch (err) {
+    recordDelivery({
+      notifierId: notifier.id,
+      runId: '',
+      verdict: REFUSED_DELIVERY_VERDICT,
+      status: 'error',
+      detail: String(err),
+    })
+  }
+}
+
+/**
+ * Tell every enabled notifier that a scheduled fire was refused.
+ *
+ * Notifiers only ever fired on a finished *run*, so an automation that was
+ * refused before it started — a dirty worktree, a logged-out `gh`, a missing
+ * runtime — failed in total silence, every day, until somebody happened to
+ * open the Automations page. This is the other half of that story.
+ *
+ * Never throws and never awaited by the scheduler: a notifier that is down
+ * must not take a fire record down with it.
+ */
+export function notifyScheduleFireRefused(input: {
+  taskId: string
+  outcome: string
+  detail: string
+  scheduledFor: number
+  /** The fire recorded immediately before this one, for de-duplication. */
+  previous: { outcome: string; detail: string } | null
+}): void {
+  if (!isRefusedFireOutcome(input.outcome)) return
+  if (!shouldNotifyRefusal(input)) return
+
+  let notifiers: NotifierRow[]
+  try {
+    notifiers = listNotifiers().filter((n) =>
+      notifierMatchesRefusal({ enabled: n.enabled === 1, verdicts: parseVerdictList(n.verdicts) }),
+    )
+  } catch {
+    return
+  }
+  if (notifiers.length === 0) return
+
+  const task = getDb().prepare('SELECT name FROM tasks WHERE id = ?').get(input.taskId) as
+    | { name: string }
+    | undefined
+
+  const notification = buildFireRefusalNotification({
+    taskId: input.taskId,
+    taskName: task?.name ?? '',
+    outcome: input.outcome,
+    detail: input.detail,
+    scheduledFor: input.scheduledFor,
+  })
+
+  for (const notifier of notifiers) void deliverRefusal(notifier, notification)
 }
 
 /** Send a fixed sample through one notifier so the user can prove it works. */
