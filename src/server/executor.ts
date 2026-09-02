@@ -34,7 +34,6 @@ import {
 } from './resume'
 import { publishActivityLive } from './activityLive'
 import { publishRunLive } from './runLive'
-import { createTurnUsageSink } from './turnUsage'
 import { pushApprovalRequest, pushApprovalSettled } from './mobile/apns'
 import {
   AssistantDeltaCoalescer,
@@ -1005,19 +1004,12 @@ function spawnTurn(input: {
     }
   >()
 
-  const recordUsage = createTurnUsageSink(db, runId, assistantMsgId)
-
   const persistEvents = (events: ParsedTurnEvent[]) => {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
     if (current?.status === 'cancelled' || cancellationMap().has(runId)) return
     for (const ev of events) {
-      // A gauge, not a transcript row: fold it onto the message and move on.
-      if (ev.kind === 'usage') {
-        recordUsage(ev.payload.usage)
-        continue
-      }
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
           name: ev.payload.name,
@@ -1473,19 +1465,12 @@ function spawnAcpTurn(input: {
     publishRunLive(runId, { type: 'log', stream, chunk, messageId: assistantMsgId })
   }
 
-  const recordUsage = createTurnUsageSink(db, runId, assistantMsgId)
-
   const persistEvents = (events: ParsedTurnEvent[]) => {
     const current = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
       | { status: string }
       | undefined
     if (current?.status === 'cancelled') return
     for (const ev of events) {
-      // A gauge, not a transcript row: fold it onto the message and move on.
-      if (ev.kind === 'usage') {
-        recordUsage(ev.payload.usage)
-        continue
-      }
       if (ev.kind === 'tool_start' && ev.payload.toolCallId) {
         toolCallsById.set(ev.payload.toolCallId, {
           name: ev.payload.name,

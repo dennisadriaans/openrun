@@ -14,7 +14,6 @@
  * segmentation and the TUI-only line types are new.
  */
 import { parseClaudeObject } from './agentEvents/claude.ts'
-import { parseCodexObject } from './agentEvents/codex.ts'
 import type { ParsedTurnEvent } from './agentEvents/types.ts'
 import { toolResultContent } from './agentEvents/types.ts'
 import { toolKindFromName } from './acp.ts'
@@ -24,7 +23,6 @@ import {
   userTextFromContent,
   type NativeSessionKind,
 } from './nativeSessions.ts'
-import { mergeTurnUsage, type TurnUsage } from './turnUsage.ts'
 
 /** CLIs whose saved chats we can render. The rest still resume, without history. */
 export const TRANSCRIPT_IMPORT_KINDS = ['claude', 'codex', 'grok', 'antigravity'] as const
@@ -38,8 +36,6 @@ export type TranscriptTurn = {
   prompt: string
   promptAt: number
   events: ParsedTurnEvent[]
-  /** Token counts the CLI reported, folded onto the assistant message. */
-  usage: TurnUsage | null
   endedAt: number
 }
 
@@ -66,7 +62,7 @@ export function parseClaudeTranscript(text: string): TranscriptTurn[] {
   let current: TranscriptTurn | null = null
 
   const open = (prompt: string, at: number): TranscriptTurn => {
-    const turn: TranscriptTurn = { prompt, promptAt: at, events: [], usage: null, endedAt: at }
+    const turn: TranscriptTurn = { prompt, promptAt: at, events: [], endedAt: at }
     turns.push(turn)
     return turn
   }
@@ -110,13 +106,7 @@ export function parseClaudeTranscript(text: string): TranscriptTurn[] {
     const events = parseClaudeObject(rec)
     if (events.length === 0) continue
     if (!current) current = open('', at)
-    for (const event of events) {
-      if (event.kind === 'usage') {
-        if (event.payload.usage) current.usage = mergeTurnUsage(current.usage, event.payload.usage)
-        continue
-      }
-      current.events.push(event)
-    }
+    for (const event of events) current.events.push(event)
     current.endedAt = at
   }
 
@@ -170,7 +160,7 @@ export function parseCodexTranscript(text: string): TranscriptTurn[] {
   let current: TranscriptTurn | null = null
 
   const open = (prompt: string, at: number): TranscriptTurn => {
-    const turn: TranscriptTurn = { prompt, promptAt: at, events: [], usage: null, endedAt: at }
+    const turn: TranscriptTurn = { prompt, promptAt: at, events: [], endedAt: at }
     turns.push(turn)
     return turn
   }
@@ -191,11 +181,6 @@ export function parseCodexTranscript(text: string): TranscriptTurn[] {
       parseIsoMs(typeof rec.timestamp === 'string' ? rec.timestamp : '') ?? current?.endedAt ?? 0
 
     if (rec.type === 'event_msg' && payload.type === 'token_count' && current) {
-      for (const event of parseCodexObject(payload)) {
-        if (event.kind === 'usage' && event.payload.usage) {
-          current.usage = mergeTurnUsage(current.usage, event.payload.usage)
-        }
-      }
       current.endedAt = at
       continue
     }
@@ -283,7 +268,7 @@ export function parseGrokTranscript(text: string): TranscriptTurn[] {
   const turns: TranscriptTurn[] = []
   let current: TranscriptTurn | null = null
   const open = (prompt: string): TranscriptTurn => {
-    const turn: TranscriptTurn = { prompt, promptAt: 0, events: [], usage: null, endedAt: 0 }
+    const turn: TranscriptTurn = { prompt, promptAt: 0, events: [], endedAt: 0 }
     turns.push(turn)
     return turn
   }
@@ -376,7 +361,6 @@ export function parseAntigravityTranscript(text: string): TranscriptTurn[] {
         prompt: rec.content.trim(),
         promptAt: at,
         events: [],
-        usage: null,
         endedAt: at,
       }
       turns.push(current)
