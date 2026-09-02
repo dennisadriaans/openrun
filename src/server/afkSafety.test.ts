@@ -310,6 +310,81 @@ describe('AFK safety core boundaries', () => {
     )
   })
 
+  it('commits what a scheduled run left behind so the next fire is not refused', async () => {
+    const db = getDb()
+    // A runtime that actually writes a file, the way a real agent would.
+    db.prepare("UPDATE runtimes SET argsTemplate = ? WHERE id = 'afk-runtime'").run(
+      JSON.stringify([
+        '-e',
+        "require('node:fs').writeFileSync('agent-output.txt', 'written by the agent\\n')",
+      ]),
+    )
+    const runtime = db
+      .prepare('SELECT * FROM runtimes WHERE id = ?')
+      .get('afk-runtime') as RuntimeRow
+
+    const task = core.upsertTask(taskInput({ name: 'Nightly output', cron: '* * * * *' }))
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Parameters<
+      typeof executor.runTask
+    >[0]
+
+    const firstId = executor.runTask(row, runtime, 'schedule')
+    assert.equal(await waitForTerminal(firstId), 'success')
+
+    // The agent's file is committed on the worktree branch, not left dirty.
+    const status = execFileSync('git', ['status', '--porcelain'], {
+      cwd: worktree,
+      encoding: 'utf8',
+    }).trim()
+    assert.equal(status, '', `expected a clean worktree, got:\n${status}`)
+    const subject = execFileSync('git', ['log', '-1', '--format=%s'], {
+      cwd: worktree,
+      encoding: 'utf8',
+    }).trim()
+    assert.match(subject, /Nightly output \(verified\)/)
+
+    // …which is what lets the *next* scheduled fire through. Before this, the
+    // dirty tree refused it with "the workspace has uncommitted changes".
+    assert.equal(unattendedRefusal(row, runtime), null)
+    const secondId = executor.runTask(row, runtime, 'schedule')
+    assert.equal(await waitForTerminal(secondId), 'success')
+  })
+
+  it("leaves the main checkout dirty rather than committing the user's own work", async () => {
+    // `upsertTask` refuses the primary checkout outright, so drive the
+    // unattended path directly: the guard has to hold for any scheduled run,
+    // not only the ones the task form can produce.
+    seed({ kind: 'main' })
+    const db = getDb()
+    db.prepare("UPDATE runtimes SET argsTemplate = ? WHERE id = 'afk-runtime'").run(
+      JSON.stringify([
+        '-e',
+        "require('node:fs').writeFileSync('main-output.txt', 'do not commit me\\n')",
+      ]),
+    )
+    const runtime = db
+      .prepare('SELECT * FROM runtimes WHERE id = ?')
+      .get('afk-runtime') as RuntimeRow
+
+    const runId = executor.startRun({
+      runtime,
+      taskId: null,
+      taskName: 'Main checkout schedule',
+      prompt: 'write a file',
+      cwd: repo,
+      workspaceId: 'afk-workspace',
+      trigger: 'schedule',
+    })
+    await waitForTerminal(runId)
+
+    const status = execFileSync('git', ['status', '--porcelain'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim()
+    assert.match(status, /main-output\.txt/)
+    execFileSync('git', ['clean', '-fd'], { cwd: repo })
+  })
+
   it('rejects the primary checkout as an agent workspace', () => {
     seed({ kind: 'main' })
     assert.throws(

@@ -25,23 +25,6 @@ describe('parseGrokObject', () => {
     ])
   })
 
-  it('turns a usage envelope into a context snapshot', () => {
-    assert.deepEqual(
-      parseGrokObject({
-        type: 'usage',
-        usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 6 },
-      }),
-      [
-        {
-          kind: 'usage',
-          payload: {
-            usage: { input: 10, output: 4, cacheRead: 6, cacheWrite: 0, contextTokens: 20 },
-          },
-        },
-      ],
-    )
-  })
-
   it('drops available_commands noise instead of raw JSON', () => {
     assert.deepEqual(
       parseGrokObject({

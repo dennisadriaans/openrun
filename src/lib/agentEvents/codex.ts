@@ -15,40 +15,11 @@ import type { PlanEntry, PlanEntryStatus } from '../acp.ts'
 import { toolCallRoleFields, toolCallRoleTitle } from '../toolCallRole.ts'
 import {
   locationsFromToolInput,
-  pickNumber,
   pickString,
-  recordAt,
   toolInputSummary,
   toolResultContent,
   type ParsedTurnEvent,
 } from './types.ts'
-import type { TurnUsage } from '../turnUsage.ts'
-
-/**
- * Codex token counts → a context snapshot.
- *
- * Codex is the only CLI here that states its own window
- * (`info.model_context_window`), and it separates the *last* request from the
- * turn total — `last_token_usage` is the one that describes what the model is
- * carrying right now.
- */
-function codexUsage(counts: Record<string, unknown> | undefined): Partial<TurnUsage> | undefined {
-  if (!counts) return undefined
-  const input = pickNumber(counts, 'input_tokens', 'inputTokens') ?? 0
-  const output = pickNumber(counts, 'output_tokens', 'outputTokens') ?? 0
-  const cacheRead = pickNumber(counts, 'cached_input_tokens', 'cachedInputTokens') ?? 0
-  const total = pickNumber(counts, 'total_tokens', 'totalTokens')
-  if (input + output + cacheRead <= 0 && !total) return undefined
-  // `input_tokens` already includes the cached part, so the sum in
-  // `mergeTurnUsage` would double-count it. State the context directly.
-  return {
-    input: Math.max(0, input - cacheRead),
-    output,
-    cacheRead,
-    cacheWrite: 0,
-    contextTokens: total ?? input + output,
-  }
-}
 
 /** Reasoning body: a string, or Codex/Responses `summary: [{ text }]`. */
 function reasoningText(item: Record<string, unknown>): string {
@@ -105,27 +76,7 @@ function locationsFromFileChange(item: Record<string, unknown>) {
 export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[] {
   const type = String(obj.type ?? '')
 
-  if (type === 'token_count') {
-    const info = recordAt(obj, 'info') ?? obj
-    const usage = codexUsage(
-      recordAt(info, 'last_token_usage') ?? recordAt(info, 'total_token_usage'),
-    )
-    if (!usage) return []
-    const window = pickNumber(info, 'model_context_window', 'modelContextWindow')
-    const model = pickString(info, 'model', 'model_slug')
-    return [
-      {
-        kind: 'usage',
-        payload: {
-          usage: {
-            ...usage,
-            ...(window ? { contextLimit: window } : {}),
-            ...(model ? { model } : {}),
-          },
-        },
-      },
-    ]
-  }
+  if (type === 'token_count') return []
 
   if (type === 'item.started' || type === 'item.updated' || type === 'item.completed') {
     const item = obj.item as Record<string, unknown> | undefined
@@ -330,11 +281,7 @@ export function parseCodexObject(obj: Record<string, unknown>): ParsedTurnEvent[
   }
 
   if (type === 'turn.completed') {
-    const usage = codexUsage(recordAt(obj, 'usage'))
-    return [
-      ...(usage ? [{ kind: 'usage' as const, payload: { usage } }] : []),
-      { kind: 'turn_done' as const, payload: { stopReason: 'end_turn' as const } },
-    ]
+    return [{ kind: 'turn_done' as const, payload: { stopReason: 'end_turn' as const } }]
   }
 
   if (type === 'turn.failed' || type === 'error') {
