@@ -3,10 +3,9 @@ import { describe, it } from 'node:test'
 import { applyPatch, pickerPrefForRuntime, type PickerPrefs } from './pickerPrefs.ts'
 
 describe('applyPatch', () => {
-  it('sets the last-used runtime and mode', () => {
-    const next = applyPatch({}, { runtimeId: 'claude', runtimeMode: 'full-access' })
+  it('sets the last-used runtime', () => {
+    const next = applyPatch({}, { runtimeId: 'claude' })
     assert.equal(next.runtimeId, 'claude')
-    assert.equal(next.runtimeMode, 'full-access')
   })
 
   it('scopes model/effort under forRuntimeId', () => {

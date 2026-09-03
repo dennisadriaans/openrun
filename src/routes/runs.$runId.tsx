@@ -41,7 +41,7 @@ import {
   useSendMessage,
 } from '../lib/queries'
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
-import type { RuntimeMode } from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
 import { runListTitle } from '../lib/runPreview'
 import {
@@ -293,7 +293,6 @@ function RunDetail() {
         runtimeId: data?.runtime?.id,
         model: data?.model || undefined,
         effort: data?.effort || undefined,
-        runtimeMode: data?.runtimeMode,
       },
     })
   }, [data, navigate])
@@ -395,7 +394,7 @@ function RunDetail() {
         prompt: firstPrompt,
         model: data?.model ?? run.model,
         effort: data?.effort ?? run.effort,
-        runtimeMode: data?.runtimeMode ?? run.runtimeMode,
+        runtimeMode: DEFAULT_RUNTIME_MODE,
       },
       {
         onSuccess: ({ runId: newRunId }) =>
@@ -444,7 +443,6 @@ function RunDetail() {
           runtimeId: data?.runtime?.id,
           model: data?.model || undefined,
           effort: data?.effort || undefined,
-          runtimeMode: data?.runtimeMode,
         },
       })
     } catch {
@@ -618,8 +616,6 @@ function RunDetail() {
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
-                runtimeBin={data?.runtime?.bin ?? fallbackRuntime?.bin}
-                runtimeTransport={data?.runtime?.transport ?? fallbackRuntime?.transport}
                 runtimes={runtimes ?? []}
                 canSwitchRuntime={data?.canSwitchRuntime ?? false}
                 runTrigger={run?.trigger}
@@ -637,7 +633,6 @@ function RunDetail() {
                 }
                 initialModel={seededModel}
                 initialEffort={seededEffort}
-                initialRuntimeMode={data?.runtimeMode}
                 changedFiles={files}
                 onSelectFile={onSelectFile}
                 onReviewFile={openReview}

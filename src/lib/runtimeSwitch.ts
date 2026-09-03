@@ -15,7 +15,7 @@ export const RUNTIME_SWITCH_NOTE_TITLE = 'Switching runtime starts a new session
 export const RUNTIME_SWITCH_NOTE_POINTS = [
   'The new agent gets a summary of this chat, not the original session — details outside the summary are lost.',
   'Files, branch, and diffs stay exactly as they are.',
-  'Model, reasoning, and access mode reset to the new runtime’s own options.',
+  'Model and reasoning reset to the new runtime’s own options.',
 ] as const
 
 export function isRuntimeSwitch(

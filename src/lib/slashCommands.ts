@@ -22,7 +22,7 @@ export type SlashCommandScope = 'project' | 'user'
 export type SlashCommandSource = 'app' | SlashCommandScope
 
 /** What an app command does locally instead of prompting the agent. */
-export type SlashAppAction = 'clear' | 'model' | 'effort' | 'mode' | 'mcp' | 'help'
+export type SlashAppAction = 'clear' | 'model' | 'effort' | 'mcp' | 'help'
 
 export type SlashCommand = {
   /** Without the slash. Sub-directories namespace it: `frontend:component`. */
@@ -64,13 +64,6 @@ export const APP_SLASH_COMMANDS: SlashCommand[] = [
     source: 'app',
     action: 'effort',
     argumentHint: '<low|medium|high>',
-  },
-  {
-    name: 'mode',
-    description: 'Switch access mode for the next turn',
-    source: 'app',
-    action: 'mode',
-    argumentHint: '<approval-required|auto-accept-edits|full-access>',
   },
   {
     name: 'mcp',

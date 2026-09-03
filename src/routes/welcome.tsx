@@ -53,7 +53,7 @@ function WelcomePage() {
 
   const onSkip = async () => {
     await skip.mutateAsync()
-    await navigate({ to: '/tasks' })
+    await navigate({ to: '/' })
   }
 
   return (

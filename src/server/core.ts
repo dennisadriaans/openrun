@@ -931,12 +931,18 @@ function nativeResumeRuntimes(): Array<{
 }
 
 export function listNativeSessions(input: {
-  workspaceId: string
+  workspaceId?: string
+  allWorkspaces?: boolean
   kind?: NativeSessionKind
   offset?: number
   limit?: number
 }): { groups: NativeSessionGroup[]; error?: string } {
-  const limit = input.limit && input.limit > 0 ? input.limit : NATIVE_SESSION_PAGE_SIZE
+  const limit =
+    input.limit && input.limit > 0
+      ? input.limit
+      : input.allWorkspaces
+        ? 3
+        : NATIVE_SESSION_PAGE_SIZE
   const offset = input.offset && input.offset > 0 ? input.offset : 0
   const requested =
     input.kind && isNativeResumeKind(input.kind)
@@ -944,12 +950,34 @@ export function listNativeSessions(input: {
       : nativeResumeRuntimes()
 
   try {
-    const workspaceId = assertWorkspaceId(input.workspaceId)
-    const workspace = getWorkspace(workspaceId)
-    assertWorkspaceReady(workspace?.status)
-    const cwd = resolveWorkspacePath(workspaceId)
     const groups: NativeSessionGroup[] = requested.map((row) => {
-      const page = paginateNativeSessions(listNativeSessionsForKind(cwd, row.kind), offset, limit)
+      const sessions = input.allWorkspaces
+        ? listWorkspaces()
+            .filter((workspace) => workspace.status === 'ready' && workspace.exists)
+            .flatMap((workspace) =>
+              listNativeSessionsForKind(workspace.path, row.kind).map((session) => ({
+                ...session,
+                workspaceId: workspace.id,
+                projectId: workspace.projectId,
+                projectName: workspace.projectName,
+              })),
+            )
+            .filter(
+              (session, index, all) =>
+                all.findIndex(
+                  (candidate) =>
+                    candidate.sessionId === session.sessionId &&
+                    candidate.workspaceId === session.workspaceId,
+                ) === index,
+            )
+            .sort((a, b) => b.modifiedAt - a.modifiedAt)
+        : (() => {
+            const workspaceId = assertWorkspaceId(input.workspaceId ?? '')
+            const workspace = getWorkspace(workspaceId)
+            assertWorkspaceReady(workspace?.status)
+            return listNativeSessionsForKind(resolveWorkspacePath(workspaceId), row.kind)
+          })()
+      const page = paginateNativeSessions(sessions, offset, limit)
       return {
         kind: row.kind,
         label: row.label,
@@ -2022,7 +2050,6 @@ export function getConversation(runId: string) {
           id: runtime.id,
           label: runtime.label,
           bin: runtime.bin,
-          // The composer needs it to know whether Supervised is offered.
           transport: parseTransport(runtime.transport),
         }
       : null,

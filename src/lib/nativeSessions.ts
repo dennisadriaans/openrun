@@ -23,6 +23,10 @@ export type NativeSession = {
   kind: NativeSessionKind
   /** Present on scan rows so the server can keep workspace-scoped lists. */
   cwd?: string
+  /** Present when the homepage lists chats across every registered workspace. */
+  workspaceId?: string
+  projectId?: string
+  projectName?: string
 }
 
 export type NativeSessionGroup = {

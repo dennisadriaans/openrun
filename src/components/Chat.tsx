@@ -37,15 +37,9 @@ import {
   useSlashCommands,
 } from '../lib/queries'
 import * as fns from '../fns'
-import {
-  DEFAULT_RUNTIME_MODE,
-  RUNTIME_MODES,
-  parseRuntimeMode,
-  type RuntimeMode,
-} from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
 import { usePickerPrefs } from '../lib/pickerPrefs'
 import { resolvedApprovalIds } from '../lib/pendingApprovals'
-import { isSupervised, supportsSupervised } from '../lib/supervisedPolicy'
 import { RuntimePicker, type RuntimeOption } from './ComposerControls'
 import { PullRequestChip } from './PullRequestChip'
 import type { RunPullRequest } from '../lib/pullRequest'
@@ -53,7 +47,6 @@ import {
   RUNTIME_SWITCH_NOTE_POINTS,
   RUNTIME_SWITCH_NOTE_TITLE,
   isRuntimeSwitch,
-  resolveSwitchMode,
   resolveSwitchModel,
   runtimeSwitchBlockedReason,
 } from '../lib/runtimeSwitch'
@@ -779,8 +772,6 @@ export function Chat({
   models,
   runId,
   runtimeId,
-  runtimeBin,
-  runtimeTransport,
   runtimes,
   canSwitchRuntime = false,
   runTrigger,
@@ -792,7 +783,6 @@ export function Chat({
   installWorkspaceLabel,
   initialModel,
   initialEffort,
-  initialRuntimeMode,
   changedFiles,
   onSelectFile,
   onReviewFile,
@@ -830,14 +820,10 @@ export function Chat({
   /** Verification results for the run; drives the post-turn status line. */
   checkResults?: CachedCheckResult[]
   models: ModelOption[]
-  /** Run id — required for supervised Allow/Deny. */
+  /** Run id — required for tool-approval Allow/Deny. */
   runId: string
   /** Runtime this run executed on; scopes the remembered model/effort. */
   runtimeId?: string
-  /** Binary name — used with the transport to gate Supervised mode. */
-  runtimeBin?: string
-  /** 'cli' or 'acp'; ACP runtimes can always be supervised. */
-  runtimeTransport?: string
   /** Runtimes this chat may be handed over to. Empty hides the picker. */
   runtimes?: RuntimeOption[]
   /** A handoff needs no resumable session — only an idle run. */
@@ -853,7 +839,6 @@ export function Chat({
   installWorkspaceLabel?: string | null
   initialModel: string
   initialEffort: string
-  initialRuntimeMode?: string
   changedFiles?: DiffFile[]
   onSelectFile: (path: string) => void
   onReviewFile?: (path: string) => void
@@ -911,9 +896,6 @@ export function Chat({
   const hasStripAboveQueue = hasStripAboveFiles || hasFilesStrip
   const [model, setModel] = useState(initialModel)
   const [effort, setEffort] = useState(initialEffort)
-  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
-    parseRuntimeMode(initialRuntimeMode ?? DEFAULT_RUNTIME_MODE),
-  )
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(runtimeId ?? '')
   const [pendingRuntimeId, setPendingRuntimeId] = useState<string | null>(null)
   const [dismissSwitchNote, setDismissSwitchNote] = useState(false)
@@ -927,11 +909,6 @@ export function Chat({
   const switching = isRuntimeSwitch(runtimeId, selectedRuntimeId)
   const selectedRuntime = runtimeCatalog.find((r) => r.id === selectedRuntimeId)
   const activeModels = switching && selectedRuntime ? modelsForRuntime(selectedRuntime) : models
-  const canSupervise = supportsSupervised(
-    switching
-      ? { bin: selectedRuntime?.bin, transport: selectedRuntime?.transport }
-      : { bin: runtimeBin, transport: runtimeTransport },
-  )
   const switchBlockedReason = switching
     ? runtimeSwitchBlockedReason({
         running,
@@ -1024,8 +1001,7 @@ export function Chat({
   useEffect(() => {
     setModel(initialModel)
     setEffort(initialEffort)
-    setRuntimeMode(parseRuntimeMode(initialRuntimeMode ?? DEFAULT_RUNTIME_MODE))
-  }, [initialModel, initialEffort, initialRuntimeMode])
+  }, [initialModel, initialEffort])
 
   useEffect(() => {
     setSelectedRuntimeId(runtimeId ?? '')
@@ -1092,8 +1068,8 @@ export function Chat({
   }
 
   /**
-   * Take the pickers to the new runtime. The old runtime's model slug and a
-   * Supervised mode it may not support cannot travel with the conversation.
+   * Take the pickers to the new runtime. The old runtime's model slug cannot
+   * travel with the conversation.
    */
   const applyRuntimeSwitch = (id: string) => {
     setSelectedRuntimeId(id)
@@ -1101,9 +1077,6 @@ export function Chat({
     const picked = resolveSwitchModel(next ? modelsForRuntime(next) : [], model)
     setModel(picked.model)
     setEffort(picked.effort)
-    setRuntimeMode((mode) =>
-      resolveSwitchMode(mode, { bin: next?.bin, transport: next?.transport }),
-    )
   }
   const handleRuntimePick = (id: string) => {
     if (id === selectedRuntimeId) return
@@ -1113,11 +1086,6 @@ export function Chat({
     }
     applyRuntimeSwitch(id)
   }
-  const handleRuntimeModeChange = (mode: RuntimeMode) => {
-    setRuntimeMode(mode)
-    remember({ runtimeMode: mode })
-  }
-
   const navigate = useNavigate()
   const { data: commandListing } = useSlashCommands(
     { runtimeId: runtimeId ?? '', ...(workspaceId ? { workspaceId } : {}), includeApp: true },
@@ -1169,18 +1137,6 @@ export function Chat({
     }
     if (command.action === 'mcp') {
       void navigate({ to: '/mcp' })
-      return
-    }
-    if (command.action === 'mode') {
-      const wanted = args.trim().toLowerCase()
-      const picked = RUNTIME_MODES.find((m) => m.value === wanted)
-      if (!picked) {
-        return `Unknown access mode. Try: ${RUNTIME_MODES.map((m) => m.value).join(', ')}`
-      }
-      if (isSupervised(picked.value) && !canSupervise) {
-        return 'This runtime cannot ask for approvals, so Supervised is unavailable.'
-      }
-      handleRuntimeModeChange(picked.value)
       return
     }
   }
@@ -1321,7 +1277,12 @@ export function Chat({
                 {...(canQueue && onSendNow
                   ? {
                       onSendNow: (text: string) =>
-                        onSendNow({ prompt: text, model, effort, runtimeMode }),
+                        onSendNow({
+                          prompt: text,
+                          model,
+                          effort,
+                          runtimeMode: DEFAULT_RUNTIME_MODE,
+                        }),
                     }
                   : {})}
                 {...(phase ? { runningLabel: `${phase.label}…` } : {})}
@@ -1343,18 +1304,15 @@ export function Chat({
                 models={activeModels}
                 model={model}
                 effort={effort}
-                runtimeMode={runtimeMode}
-                supportsSupervised={canSupervise}
                 onModelChange={handleModelChange}
                 onEffortChange={handleEffortChange}
-                onRuntimeModeChange={handleRuntimeModeChange}
                 onStop={onStop}
                 onSend={(text) =>
                   onSend({
                     prompt: text,
                     model,
                     effort,
-                    runtimeMode,
+                    runtimeMode: DEFAULT_RUNTIME_MODE,
                     ...(switching ? { runtimeId: selectedRuntimeId } : {}),
                   })
                 }

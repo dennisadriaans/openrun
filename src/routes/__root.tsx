@@ -76,8 +76,8 @@ function NotFound() {
 }
 
 const NAV = [
-  { to: '/tasks', label: 'Automations', icon: ListChecks },
-  { to: '/runs', label: 'Runs', icon: History },
+  { to: '/tasks', label: 'Automations', icon: ListChecks, exact: false },
+  { to: '/runs', label: 'Runs', icon: History, exact: false },
   // { to: '/planner', label: 'Planner', icon: Sparkles },
 ]
 
@@ -91,6 +91,10 @@ const USER_MENU = [
 
 export const Icon = ({ className = 'size-4 rounded-[3px]' }: { className?: string }) => {
   return <img src="/favicon.svg" alt="" className={className} />
+}
+
+export const Logo = ({ className = 'size-4 rounded-[3px]' }: { className?: string }) => {
+  return <img src="/logo.png" alt="" className={className} />
 }
 
 function UserMenu() {
@@ -194,20 +198,23 @@ function Sidebar() {
   return (
     <aside className="flex h-full w-52 shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar py-2">
       <div className="mb-2 flex items-center gap-1 px-3">
-        <Icon className="size-4 rounded-[3px]" />
-        <span className="ml-1.5 text-ui-sm font-medium tracking-tight text-foreground">
-          Open Run
-        </span>
-        <div className="ml-auto">
-          <SidebarToggle />
-        </div>
+        <Link
+          to="/"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md transition-colors hover:opacity-80"
+        >
+          <Logo className="size-3 rounded-[2px]" />
+          <span className="truncate text-ui-sm font-medium tracking-tight text-foreground">
+            Open Run
+          </span>
+        </Link>
+        <SidebarToggle />
       </div>
       <nav className="flex flex-col gap-px px-1.5">
         {NAV.map((item) => (
           <Link
             key={item.to}
             to={item.to}
-            activeOptions={{ exact: false }}
+            activeOptions={{ exact: item.exact }}
             className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm text-tier-secondary transition-colors hover:bg-hover hover:text-foreground data-[status=active]:bg-[var(--inactive-selection-background)] data-[status=active]:text-foreground"
           >
             <item.icon className="size-3.5 text-tier-quaternary group-data-[status=active]:text-tier-secondary" />

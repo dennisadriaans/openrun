@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AddProjectModal } from './AddProjectModal'
-import { EffortPicker, ModelPicker, RuntimeModePicker, RuntimePicker } from './ComposerControls'
+import { EffortPicker, ModelPicker, RuntimePicker } from './ComposerControls'
 import { Button, Card, EmptyState, Field, Modal, StatusBadge, inputClass } from './ui'
 import type { ProjectWithMeta, WorkspaceWithMeta } from '../fns'
 import {
@@ -21,9 +21,8 @@ import {
   modelsForRuntime,
   visibleModels,
 } from '../lib/models'
-import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE } from '../lib/runtimeMode'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
-import { supportsSupervised } from '../lib/supervisedPolicy'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import {
   fetchLatestRunForWorkspace,
@@ -371,9 +370,6 @@ function StartChatModal({
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
-  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
-    prefs.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-  )
 
   useEffect(() => {
     if (runtimeId || !runtimes?.length) return
@@ -416,10 +412,6 @@ function StartChatModal({
     setEffort(value)
     remember({ forRuntimeId: runtimeId, effort: value })
   }
-  const changeRuntimeMode = (mode: RuntimeMode) => {
-    setRuntimeMode(mode)
-    remember({ runtimeMode: mode })
-  }
 
   const submit = async () => {
     const { runId } = await start.mutateAsync({
@@ -428,7 +420,7 @@ function StartChatModal({
       prompt: prompt.trim(),
       model: model || undefined,
       effort: effort || undefined,
-      runtimeMode,
+      runtimeMode: DEFAULT_RUNTIME_MODE,
     })
     onClose()
     navigate({ to: '/runs/$runId', params: { runId } })
@@ -459,30 +451,9 @@ function StartChatModal({
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-[var(--bg-luminous-quaternary)] px-2 py-1.5">
               <ModelPicker models={models} model={model} onChange={changeModel} />
               <EffortPicker models={models} model={model} effort={effort} onChange={changeEffort} />
-              <RuntimeModePicker
-                mode={runtimeMode}
-                supportsSupervised={supportsSupervised({
-                  bin: selectedRuntime?.bin,
-                  transport: selectedRuntime?.transport,
-                })}
-                onChange={changeRuntimeMode}
-              />
             </div>
           </Field>
-        ) : (
-          <Field label="Access">
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-[var(--bg-luminous-quaternary)] px-2 py-1.5">
-              <RuntimeModePicker
-                mode={runtimeMode}
-                supportsSupervised={supportsSupervised({
-                  bin: selectedRuntime?.bin,
-                  transport: selectedRuntime?.transport,
-                })}
-                onChange={changeRuntimeMode}
-              />
-            </div>
-          </Field>
-        )}
+        ) : null}
 
         <Field label="First message">
           <textarea
