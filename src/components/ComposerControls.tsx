@@ -22,6 +22,7 @@ import {
   effortLabel,
   findModel,
   hiddenModelsIn,
+  materializeHiddenModels,
   modelKindForBin,
   toggleHiddenModel,
   visibleModels,
@@ -476,7 +477,12 @@ export function ModelPicker({
   const shown = visibleModels(models, prefs.hiddenModels, selected.slug)
   const hidden = hiddenModelsIn(models, prefs.hiddenModels, selected.slug)
   const toggleHidden = (slug: string) =>
-    remember({ hiddenModels: toggleHiddenModel(prefs.hiddenModels, slug) })
+    remember({
+      hiddenModels: toggleHiddenModel(
+        materializeHiddenModels(models, prefs.hiddenModels, selected.slug),
+        slug,
+      ),
+    })
 
   return (
     <FooterMenu

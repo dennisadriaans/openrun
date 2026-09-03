@@ -40,6 +40,17 @@ export type ModelOption = {
   efforts: EffortOption[]
   /** Provider brand for the model picker icon. */
   provider: RuntimeModelKind
+  /**
+   * This is the model the CLI runs when no `--model` is passed — Claude's
+   * `opus` alias, Codex's configured default. Discovery sets it; the static
+   * seeds below leave it unset and fall back to catalog order.
+   *
+   * It doubles as the only entitlement signal we have locally: the CLI would
+   * not default to a model the account cannot use, whereas the catalog it
+   * ships lists every model Anthropic has, including ones gated behind a plan
+   * or not yet released. See {@link recentModels}.
+   */
+  preferred?: boolean
 }
 
 const CLAUDE_EFFORTS_OPUS: EffortOption[] = [
@@ -304,6 +315,12 @@ export function modelsForRuntime(runtime: { bin: string; models?: ModelOption[] 
 }
 
 /**
+ * How many models a picker offers before the user touches the hidden list.
+ * Counted from the CLI's default model — see {@link recentModels}.
+ */
+export const RECENT_MODEL_COUNT = 3
+
+/**
  * Apply the user's hidden-model list to a catalog.
  *
  * Hiding is presentation only — it never blocks a model. Two things always
@@ -313,22 +330,61 @@ export function modelsForRuntime(runtime: { bin: string; models?: ModelOption[] 
  * - `keepSlug` (what is selected right now), so an already-running
  *   conversation on a hidden model still shows what it is using.
  * - the whole catalog, if hiding would empty it.
+ *
+ * `hidden` being **absent** means the user has never curated this list, and
+ * the recent-models default applies. An **empty array** is a curation — the
+ * user unhid everything — and shows the whole catalog. Keeping those two
+ * apart is what lets the default arrive for existing users without overriding
+ * anyone who already made the opposite choice.
  */
 export function visibleModels(
   models: ModelOption[],
   hidden: readonly string[] | undefined,
   keepSlug?: string | null,
 ): ModelOption[] {
-  if (!hidden || hidden.length === 0) return models
+  if (!hidden) return recentModels(models, keepSlug)
+  if (hidden.length === 0) return models
   const hide = new Set(hidden)
   const kept = models.filter((m) => !hide.has(m.slug) || m.slug === keepSlug)
   return kept.length > 0 ? kept : models
 }
 
 /**
+ * The catalog trimmed to the {@link RECENT_MODEL_COUNT} models starting at the
+ * CLI's own default, plus `keepSlug` wherever it sits — a run pinned to an
+ * older model still shows what it is using. Catalog order is preserved, so a
+ * survivor does not jump to the front of the menu.
+ *
+ * **Why it starts at the default rather than at the top.** A discovered
+ * catalog is every model the CLI knows about, not every model the account may
+ * run: Claude Code's bundle ships the whole registry, so families the user has
+ * no entitlement for — unreleased, or gated behind a different plan — sort
+ * *above* the ones that work and would otherwise be the entire default view.
+ * We cannot ask whether a model is entitled without an authenticated API call
+ * this app deliberately does not make. But the CLI would never default to a
+ * model the account cannot use, so the `preferred` entry is a model we know
+ * runs, and counting from there keeps the picker on working models without
+ * guessing. Anything above it stays reachable behind the "N hidden" toggle.
+ *
+ * With no `preferred` marker — the static seeds, and CLIs whose discovery does
+ * not report one — this falls back to the leading entries.
+ */
+export function recentModels(models: ModelOption[], keepSlug?: string | null): ModelOption[] {
+  if (models.length <= RECENT_MODEL_COUNT) return models
+  const anchor = Math.max(
+    0,
+    models.findIndex((m) => m.preferred),
+  )
+  const recent = new Set(models.slice(anchor, anchor + RECENT_MODEL_COUNT).map((m) => m.slug))
+  return models.filter((m) => recent.has(m.slug) || m.slug === keepSlug)
+}
+
+/**
  * The models a catalog is currently hiding, in catalog order — the complement
  * of {@link visibleModels}, so a hidden model that survived as `keepSlug` is
- * counted once, on the visible side.
+ * counted once, on the visible side. Being the complement, it also covers the
+ * older generations the recent-models default trims, which is what puts them
+ * behind the picker's "N hidden" reveal rather than out of reach.
  */
 export function hiddenModelsIn(
   models: ModelOption[],
@@ -339,10 +395,32 @@ export function hiddenModelsIn(
   return models.filter((m) => !shown.has(m.slug))
 }
 
-/** Flip one model between hidden and shown, returning the next hidden list. */
+/**
+ * Flip one model between hidden and shown, returning the next hidden list.
+ *
+ * `hidden` here must be the *explicit* list — pass
+ * {@link materializeHiddenModels} first when it may still be absent, or the
+ * first click on a model the recent-models default is already hiding would
+ * add it to the list instead of revealing it.
+ */
 export function toggleHiddenModel(hidden: readonly string[] | undefined, slug: string): string[] {
   const list = hidden ?? []
   return list.includes(slug) ? list.filter((s) => s !== slug) : [...list, slug]
+}
+
+/**
+ * Turn the implicit recent-models default into the explicit list it stands
+ * for, so the first hide/show click edits what the user can actually see.
+ * Once stored, that list is the user's own curation and the default no longer
+ * applies.
+ */
+export function materializeHiddenModels(
+  models: ModelOption[],
+  hidden: readonly string[] | undefined,
+  keepSlug?: string | null,
+): string[] {
+  if (hidden) return [...hidden]
+  return hiddenModelsIn(models, undefined, keepSlug).map((m) => m.slug)
 }
 
 export function findModel(
