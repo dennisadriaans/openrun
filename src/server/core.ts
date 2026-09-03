@@ -36,6 +36,15 @@ import {
 } from '../lib/startChatGate'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
 import {
+  buildShipPlanPrompt,
+  commitMessageText,
+  fallbackShipPlan,
+  parseShipPlan,
+  shipPlanProblem,
+  type ShipPlan,
+} from '../lib/shipPlan.ts'
+import { shipBlockedReason } from '../lib/gitActionGate.ts'
+import {
   defaultEffort,
   defaultModel,
   findModel,
@@ -2452,12 +2461,17 @@ function runCwd(runId: string): string {
   return run.cwd
 }
 
-export function getFileDiff(input: { runId: string; path: string }) {
+export function getFileDiff(input: { runId: string; path: string; whole?: boolean }) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
+  // `whole` widens the context until the file's hunks merge into one, so the
+  // viewer can show a change surrounded by the rest of the file. Hunk indices
+  // differ between the two, so per-hunk undo is only offered on the default.
+  const context = input.whole ? git.WHOLE_FILE_CONTEXT : undefined
   return {
     path: input.path,
-    diff: git.fileDiff(run.cwd, input.path, run.baseSnapshot || undefined),
+    whole: !!input.whole,
+    diff: git.fileDiff(run.cwd, input.path, run.baseSnapshot || undefined, context),
   }
 }
 
@@ -2601,6 +2615,202 @@ export async function openPullRequest(input: {
   })
   invalidateRunPullRequest(input.runId)
   return result
+}
+
+// ---------------------------------------------------------------------------
+// One-click ship — group the run's uncommitted work into conventional commits,
+// push the branch, and open the pull request.
+//
+// The grouping is done by the run's *own* runtime and model: the agent that
+// wrote the diff is the one that knows which files tell one story. It answers
+// from the diff alone (no tools, no edits), so the tree it describes is the
+// tree that gets committed. Every step after that is plain git/gh — the model
+// never runs a command.
+// ---------------------------------------------------------------------------
+
+/** How much diff context the planning turn is given before it is truncated. */
+const SHIP_DIFF_BUDGET = 60_000
+
+/** How long to wait for the grouping answer before falling back to one commit. */
+const SHIP_PLAN_TIMEOUT_MS = 180_000
+
+export type ShipStep = 'plan' | 'commit' | 'push' | 'pull-request'
+
+export type ShipRunResult = {
+  /** Commits actually created, in the order they landed. */
+  commits: { message: string; sha: string; paths: string[] }[]
+  branch: string
+  url: string
+  prTitle: string
+  /** Set when the agent's plan was unusable and the fallback ran instead. */
+  planFallbackReason?: string
+}
+
+/**
+ * Ask the run's runtime to group the diff. Returns `null` (never throws) when
+ * the CLI is unreachable or answers unusably — the caller falls back to a
+ * single commit rather than refusing to ship.
+ */
+async function requestShipPlan(input: {
+  run: RunRow
+  files: git.DiffFile[]
+  diff: string
+}): Promise<{ plan: ShipPlan | null; reason: string }> {
+  const runtime = getRuntime(input.run.runtimeId)
+  if (!runtime) return { plan: null, reason: 'The run has no runtime to plan with' }
+
+  const kind = runtimeKind(runtime.bin)
+  // The same single-shot plain-text shape the planner uses: one cheap answer,
+  // no session, no stream-json. A runtime normally driven over ACP takes the
+  // CLI path here for exactly that reason.
+  const args =
+    kind === 'codex'
+      ? ['exec', '--skip-git-repo-check', '-']
+      : kind === 'grok'
+        ? ['--prompt-file', '{promptFile}', '--output-format', 'plain', '--always-approve']
+        : kind === 'fx'
+          ? ['ask', '--yolo']
+          : ['-p', '--output-format', 'text', '--dangerously-skip-permissions']
+
+  const planRuntime: RuntimeRow = {
+    ...runtime,
+    // The planning turn must not open a PR of its own — this function does.
+    canOpenPrs: 0,
+    transport: 'cli',
+    promptViaStdin: kind === 'grok' ? 0 : 1,
+    argsTemplate: JSON.stringify(args),
+  }
+
+  const prompt = buildShipPlanPrompt({
+    files: input.files.map((f) => ({
+      path: f.path,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+    })),
+    diff: input.diff,
+    taskName: input.run.taskName ?? '',
+    baseBranch: input.run.baseBranch ?? '',
+  })
+
+  let planRunId: string
+  try {
+    planRunId = startRun({
+      runtime: planRuntime,
+      taskId: null,
+      taskName: `Ship: ${input.run.taskName || input.run.id}`,
+      prompt,
+      // Read-only planning: it inspects a diff it was handed, so it stays in
+      // the app cwd and never takes the run's workspace lock.
+      cwd: process.cwd(),
+      workspaceId: input.run.workspaceId || '',
+      lockWorkspace: false,
+      trigger: 'planner',
+      // The run's own picker settings — shipping speaks in the voice the user
+      // chose for the work.
+      model: input.run.model,
+      effort: input.run.effort,
+    })
+  } catch (err) {
+    return {
+      plan: null,
+      reason: err instanceof Error ? err.message : 'Could not start the planner',
+    }
+  }
+
+  const raw = await waitForRun(planRunId, SHIP_PLAN_TIMEOUT_MS)
+  const plan = parseShipPlan(raw)
+  if (!plan) return { plan: null, reason: 'The agent did not return a usable commit plan' }
+
+  const problem = shipPlanProblem(
+    plan,
+    input.files.map((f) => f.path),
+  )
+  if (problem) return { plan: null, reason: problem }
+  return { plan, reason: '' }
+}
+
+/**
+ * Commit → push → open PR in one call.
+ *
+ * Ordered so a failure leaves the least mess: the plan is validated against
+ * the real file list before the first `git commit`, and the PR is opened only
+ * once the branch is actually on origin.
+ */
+export async function shipRun(input: {
+  runId: string
+  /** Override the base branch; defaults the same way `openPullRequest` does. */
+  base?: string
+  /** Skip the agent and commit everything as one conventional commit. */
+  skipPlan?: boolean
+}): Promise<ShipRunResult> {
+  const run = getRun(input.runId)
+  if (!run) throw new Error('Run not found')
+
+  const gh = git.ghStatus()
+  const info = git.repoInfo(run.cwd)
+  const files = git.changedFiles(run.cwd, run.baseSnapshot || undefined)
+  // Only run-owned paths that are still dirty can be committed; anything the
+  // run already committed mid-flight is carried by `ahead` instead.
+  const committable = new Set(commitableRunPaths(run) ?? files.map((f) => f.path))
+  const pending = files.filter((f) => committable.has(f.path))
+
+  const blocked = shipBlockedReason({
+    hasRemote: Boolean(info.remote),
+    ghInstalled: gh.installed,
+    ghAuthenticated: gh.authenticated,
+    hasChanges: pending.length > 0,
+    ahead: info.ahead,
+  })
+  if (blocked) throw new Error(blocked)
+
+  let plan: ShipPlan | null = null
+  let planFallbackReason = ''
+  if (pending.length > 0) {
+    if (!input.skipPlan) {
+      const asked = await requestShipPlan({
+        run,
+        files: pending,
+        diff: git.changedDiff(run.cwd, run.baseSnapshot || undefined, SHIP_DIFF_BUDGET),
+      })
+      plan = asked.plan
+      planFallbackReason = asked.reason
+    }
+    if (!plan) {
+      plan = fallbackShipPlan({
+        taskName: run.taskName ?? '',
+        changed: pending.map((f) => f.path),
+      })
+    }
+  }
+
+  // Commit. Each group is staged by path, so a plan that groups by feature
+  // produces a history that reads by feature.
+  const commits: ShipRunResult['commits'] = []
+  for (const entry of plan?.commits ?? []) {
+    const result = git.commit(run.cwd, commitMessageText(entry), entry.paths)
+    commits.push({ message: entry.message, sha: result.sha, paths: entry.paths })
+  }
+
+  const pushed = await git.push(run.cwd)
+
+  // Title the PR from the plan when there is one; a ship that only pushes
+  // existing commits falls back to the run's own name.
+  const title =
+    plan?.prTitle || fallbackShipPlan({ taskName: run.taskName ?? '', changed: [] }).prTitle
+  const body =
+    plan?.prBody ||
+    `## Summary\n- ${run.taskName || 'Changes produced by an Open Run run.'}\n\n## Test plan\n- [ ] Review the diff and exercise the affected surface`
+
+  const pr = await openPullRequest({ runId: input.runId, title, body, base: input.base })
+
+  return {
+    commits,
+    branch: pushed.branch,
+    url: pr.url,
+    prTitle: title,
+    ...(planFallbackReason ? { planFallbackReason } : {}),
+  }
 }
 
 // ---------------------------------------------------------------------------

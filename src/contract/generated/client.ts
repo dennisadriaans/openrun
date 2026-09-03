@@ -43,6 +43,7 @@ export const ROUTES: Record<string, RouteInfo> = {
   'git.discardHunk': { method: 'POST', path: '/api/v1/git/discard-hunk' },
   'git.createBranch': { method: 'POST', path: '/api/v1/git/create-branch' },
   'git.openPullRequest': { method: 'POST', path: '/api/v1/git/open-pull-request' },
+  'git.shipRun': { method: 'POST', path: '/api/v1/git/ship-run' },
   'git.listProjectBranches': { method: 'GET', path: '/api/v1/git/list-project-branches' },
   'integrations.listProviders': { method: 'GET', path: '/api/v1/integrations/list-providers' },
   'integrations.list': { method: 'GET', path: '/api/v1/integrations/list' },
@@ -317,7 +318,7 @@ export class OpenRunClient {
     return this.call('files.saveAttachment', input)
   }
 
-  getFileDiff(input: { runId: string; path: string }): Promise<unknown> {
+  getFileDiff(input: { runId: string; path: string; whole?: boolean }): Promise<unknown> {
     return this.call('git.getFileDiff', input)
   }
 
@@ -352,6 +353,10 @@ export class OpenRunClient {
     base?: string
   }): Promise<unknown> {
     return this.call('git.openPullRequest', input)
+  }
+
+  shipRun(input: { runId: string; base?: string; skipPlan?: boolean }): Promise<unknown> {
+    return this.call('git.shipRun', input)
   }
 
   listProjectBranches(input: { projectId: string }): Promise<unknown> {
@@ -567,7 +572,8 @@ export class OpenRunClient {
   }
 
   listNativeSessions(input: {
-    workspaceId: string
+    workspaceId?: string
+    allWorkspaces?: boolean
     kind?: string
     offset?: number
     limit?: number

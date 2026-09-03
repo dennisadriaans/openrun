@@ -119,3 +119,32 @@ export function prBlockedReason(input: PrGateInput): string | null {
 export function canCreatePullRequest(input: PrGateInput): boolean {
   return prBlockedReason(input) === null
 }
+
+/** Hover copy when Ship is disabled because there is nothing to carry. */
+export function nothingToShipMessage(): string {
+  return 'Nothing to ship — no uncommitted changes and no unpushed commits.'
+}
+
+/**
+ * One-click ship: group the dirty tree into conventional commits, push, and
+ * open the PR. It needs everything Push and Create PR need, plus something to
+ * carry — either uncommitted changes or commits the remote has not seen.
+ */
+export type ShipGateState = ShipGateInput & {
+  hasChanges: boolean
+  /** Commits on the branch that origin does not have yet. */
+  ahead: number
+}
+
+/** Reason Ship would fail, or `null` when it may proceed. */
+export function shipBlockedReason(input: ShipGateState): string | null {
+  const pr = prBlockedReason(input)
+  if (pr) return pr
+  if (!input.hasChanges && input.ahead <= 0) return nothingToShipMessage()
+  return null
+}
+
+/** True when Ship may proceed (caller still gates on in-flight pending). */
+export function canShip(input: ShipGateState): boolean {
+  return shipBlockedReason(input) === null
+}

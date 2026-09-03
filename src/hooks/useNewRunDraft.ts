@@ -73,6 +73,10 @@ export function useNewRunDraft(
   // Optimistic first turn: the run only exists once the server answers, so the
   // transcript is faked here to cover the boot round-trip.
   const [sent, setSent] = useState<{ prompt: string; startedAt: number } | null>(null)
+  // A refused prompt, handed back to the composer. `sent` unmounts it while the
+  // send is in flight, so its own state cannot survive the round-trip and the
+  // text has to be parked somewhere that outlives the swap.
+  const [refusedPrompt, setRefusedPrompt] = useState('')
   const [addingProject, setAddingProject] = useState(false)
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
@@ -247,12 +251,19 @@ export function useNewRunDraft(
     remember({ forRuntimeId: runtimeId, effort: value })
   }
 
-  const send = (prompt: string) => {
+  /**
+   * Rejects when the run could not be started, which is what puts the prompt
+   * back in the composer — the refusals here (a workspace whose directory is
+   * gone, a branch already running) are all things the user fixes and then
+   * retries with the very same words.
+   */
+  const send = async (prompt: string) => {
     if (!workspace || !runtime || sent) return
     setError(null)
+    setRefusedPrompt('')
     setSent({ prompt, startedAt: Date.now() })
-    startChat.mutate(
-      {
+    try {
+      const { runId } = await startChat.mutateAsync({
         workspaceId: workspace.id,
         runtimeId: runtime.id,
         prompt,
@@ -261,15 +272,14 @@ export function useNewRunDraft(
         runtimeMode: DEFAULT_RUNTIME_MODE,
         resumeSessionId,
         resumeSessionLabel,
-      },
-      {
-        onSuccess: ({ runId }) => navigate({ to: '/runs/$runId', params: { runId } }),
-        onError: (err) => {
-          setSent(null)
-          setError(err instanceof Error ? err.message : String(err))
-        },
-      },
-    )
+      })
+      await navigate({ to: '/runs/$runId', params: { runId } })
+    } catch (err) {
+      setSent(null)
+      setError(err instanceof Error ? err.message : String(err))
+      setRefusedPrompt(prompt)
+      throw err
+    }
   }
 
   return {
@@ -296,6 +306,7 @@ export function useNewRunDraft(
     blockedReason,
     error,
     workspaceError,
+    refusedPrompt,
     sent,
     busy: startChat.isPending || openNativeChat.isPending,
     startChat,

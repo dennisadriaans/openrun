@@ -1,0 +1,2 @@
+- Antigravity (`agy`) runs no longer finish with an empty response and no visible tool calls — `agy` streams its own `init`/`step_update`/`result` envelopes rather than Claude Code's, so Open Run reads them with a dedicated adapter and the transcript shows the agent's prose, its tool calls and their failures.
+- An Antigravity answer no longer appears twice, or arrives split across blank lines — its streamed text chunks are joined into one reply instead of being repeated by the closing result.

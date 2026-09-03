@@ -229,7 +229,7 @@ export function demoRuns(now: number = Date.now()): DemoRun[] {
       status: 'success',
       chatTitle: 'Extract workspace picker from TaskForm',
       activitySummary: 'Edited WorkspacePicker.tsx',
-      runtimeLabel: 'Gemini CLI',
+      runtimeLabel: 'Antigravity CLI',
       trigger: 'chat',
       startedAt: now - 3 * 86400_000,
       finishedAt: now - 3 * 86400_000 + 12 * 60_000,
@@ -332,7 +332,7 @@ export function demoTasks(now: number = Date.now()): DemoTask[] {
     {
       id: 'demo-task-8',
       name: 'CI flake triage',
-      runtimeLabel: 'Gemini CLI',
+      runtimeLabel: 'fx',
       enabled: 1,
       cron: '*/15 * * * *',
       webhookIntegrationId: '',

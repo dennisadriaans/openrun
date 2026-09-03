@@ -4,7 +4,7 @@
 
 **Schedule coding agents on your machine.**
 
-Run Claude Code, Codex, Grok, Gemini, Antigravity and fx like cron jobs — no API keys,
+Run Claude Code, Codex, Grok, Antigravity and fx like cron jobs — no API keys,
 no hosted runner, no account. Your repositories never leave your disk.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
@@ -55,7 +55,7 @@ Open <http://localhost:3000>.
 
 - Node 22.6+ and pnpm 10+
 - git
-- At least one agent CLI logged in: `claude`, `codex`, `grok`, `agy`, `gemini` or `fx`
+- At least one agent CLI logged in: `claude`, `codex`, `grok`, `agy` or `fx`
 - macOS and Linux natively; Windows through WSL2
 - `gh` only if you want pull requests
 
@@ -85,7 +85,6 @@ Open <http://localhost:3000>.
 | Codex CLI | `codex` | CLI (`codex exec`) |
 | Grok CLI | `grok` | CLI (streaming-json) |
 | Antigravity CLI | `agy` | CLI (stream-json) |
-| Gemini CLI | `gemini` | CLI headless, or ACP |
 | fx | `fx` | ACP |
 
 Adding your own is a preset, not a fork — see

@@ -9,7 +9,9 @@
  * Everything here is pure and browser-safe so `node:test` can exercise the
  * whole parse path without a child process (`lib/` rule).
  */
+import type { RuntimeModelKind } from '../models.ts'
 import type { TurnEventPayload } from '../turnEvents.ts'
+import { parseAntigravityObject } from './antigravity.ts'
 import { parseClaudeObject } from './claude.ts'
 import { parseCodexObject } from './codex.ts'
 import { parseGrokStdoutLine } from './grok.ts'
@@ -21,6 +23,7 @@ export { parseAcpSessionUpdate } from './acp.ts'
 export { extractGrokAssistantText, grokToolOutput, parseGrokObject } from './grok.ts'
 export { ClaudeStdoutIngest, parseClaudeObject, parseClaudeStreamEvent } from './claude.ts'
 export { parseCodexObject } from './codex.ts'
+export { extractAntigravityAssistantText, parseAntigravityObject } from './antigravity.ts'
 
 /**
  * Do we have a stdout adapter for this runtime?
@@ -30,7 +33,7 @@ export { parseCodexObject } from './codex.ts'
  * — its answer is scraped from stdout instead.
  */
 export function hasEventAdapter(kind: EventRuntimeKind): boolean {
-  return kind === 'claude' || kind === 'codex' || kind === 'grok'
+  return kind === 'claude' || kind === 'antigravity' || kind === 'codex' || kind === 'grok'
 }
 
 /**
@@ -59,6 +62,7 @@ export function parseTurnEventLine(line: string, kind: EventRuntimeKind): Parsed
     return [{ kind: 'raw', payload: { text: trimmed } }]
   }
 
+  if (kind === 'antigravity') return parseAntigravityObject(obj)
   if (kind === 'claude') return parseClaudeObject(obj)
   if (kind === 'codex') return parseCodexObject(obj)
   return []
@@ -95,22 +99,31 @@ export function assistantTextFromEvents(events: Array<{ kind: string; payload: s
 }
 
 /**
- * Force machine-readable CLI output for Claude/Codex/Grok without rewriting the
- * saved Runtimes row. Users who already chose `json` / `stream-json` / `--json`
- * keep their choice; only the legacy `text` default (and missing flags) change.
+ * Force machine-readable CLI output for Claude/Antigravity/Codex/Grok without
+ * rewriting the saved Runtimes row. Users who already chose `json` /
+ * `stream-json` / `--json` keep their choice; only the legacy `text` default
+ * (and missing flags) change.
+ *
+ * This keys off the *runtime* kind, not the event kind. Antigravity reuses
+ * Claude's stdout adapter (`eventKindFor` maps it to `claude`), but its argv is
+ * its own: `agy` defines neither `--verbose` nor `--include-partial-messages`
+ * and exits with a usage dump when handed them.
  */
-export function ensureMachineReadableArgs(args: string[], kind: EventRuntimeKind): string[] {
-  if (kind === 'claude') {
+export function ensureMachineReadableArgs(args: string[], kind: RuntimeModelKind): string[] {
+  if (kind === 'claude' || kind === 'antigravity') {
     const next = [...args]
     const fmtIdx = next.indexOf('--output-format')
     if (fmtIdx >= 0) {
       const current = next[fmtIdx + 1]
       if (current === 'text') next[fmtIdx + 1] = 'stream-json'
     } else {
+      // agy's `-p` consumes the next argv token as the prompt, so the format
+      // pair goes before it; Claude's `-p` is a bare flag and tolerates either.
       const pIdx = next.indexOf('-p')
-      const insertAt = pIdx >= 0 ? pIdx + 1 : 0
+      const insertAt = pIdx >= 0 ? (kind === 'antigravity' ? pIdx : pIdx + 1) : 0
       next.splice(insertAt, 0, '--output-format', 'stream-json')
     }
+    if (kind === 'antigravity') return next
     if (!next.includes('--verbose')) next.push('--verbose')
     if (!next.includes('--include-partial-messages')) next.push('--include-partial-messages')
     return next

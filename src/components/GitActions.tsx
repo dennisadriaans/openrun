@@ -3,6 +3,12 @@
  *
  * Commit / push / open-PR / discard all operate on the run's cwd. Destructive
  * and outward-facing actions (discard, push, PR) confirm before running.
+ *
+ * "Create pull request" is one click: the run's own runtime and model group the
+ * uncommitted work into conventional commits, the branch is pushed, and the PR
+ * is opened — see `lib/shipPlan.ts` and `core.shipRun`. The old title/body
+ * dialog is still reachable as "Write the pull request myself" for anyone who
+ * would rather not spend a turn on it.
  */
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 import {
@@ -22,13 +28,22 @@ import {
   canCreatePullRequest,
   canDiscard,
   canPush,
+  canShip,
   commitBlockedReason,
   discardBlockedReason,
   prBlockedReason,
   pushBlockedReason,
+  shipBlockedReason,
   shipGateFrom,
 } from '../lib/gitActionGate'
-import { useCommit, useCreateBranch, useDiscard, useOpenPullRequest, usePush } from '../lib/queries'
+import {
+  useCommit,
+  useCreateBranch,
+  useDiscard,
+  useOpenPullRequest,
+  usePush,
+  useShipRun,
+} from '../lib/queries'
 import { Button, Field, Modal, inputClass } from './ui'
 import { DiffStat } from './FilesChanged'
 import { WorkspaceToolbarChip } from './workspace/PanelLayoutControls'
@@ -68,6 +83,26 @@ function errorText(err: unknown): string {
   return String(err ?? 'Something went wrong')
 }
 
+/** Hover copy for the one-click ship control, on both surfaces. */
+const SHIP_HINT =
+  'Commit the changes as conventional commits, push the branch, and open the pull request'
+
+type ShipResult = {
+  commits: { message: string; sha: string; paths: string[] }[]
+  branch: string
+  prTitle: string
+  planFallbackReason?: string
+}
+
+/** What the ship strip says once the PR exists. */
+function shipSuccessText(r: ShipResult): string {
+  const n = r.commits.length
+  const head =
+    n > 0 ? `${n} commit${n === 1 ? '' : 's'} pushed to ${r.branch}` : `Pushed ${r.branch}`
+  const tail = r.planFallbackReason ? ` — grouped as one commit: ${r.planFallbackReason}` : ''
+  return `${head}, pull request opened${tail}`
+}
+
 export type GitActionsProps = {
   runId: string
   repo: RepoInfo
@@ -94,12 +129,14 @@ export function GitActions({
   const [prBody, setPrBody] = useState('')
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [pushed, setPushed] = useState<string | null>(null)
+  const [shipped, setShipped] = useState<string | null>(null)
 
   const commit = useCommit(runId)
   const push = usePush(runId)
   const discard = useDiscard(runId)
   const createBranch = useCreateBranch(runId)
   const openPr = useOpenPullRequest(runId)
+  const ship = useShipRun(runId)
 
   if (!repo.isRepo) {
     return (
@@ -123,6 +160,8 @@ export function GitActions({
   const discardBlocked = discardBlockedReason(dirtyGate)
   const pushBlocked = pushBlockedReason(shipGate)
   const prBlocked = prBlockedReason(shipGate)
+  const shipState = { ...shipGate, hasChanges, ahead: repo.ahead }
+  const shipBlocked = shipBlockedReason(shipState)
   const openCommit = () => {
     setCommitMessage(taskName ? `${taskName}\n\nAutomated by Open Run.` : '')
     setDialog('commit')
@@ -131,6 +170,16 @@ export function GitActions({
     setPrTitle(taskName || 'Agent changes')
     setPrBody('Automated changes produced by an Open Run run.')
     setDialog('pr')
+  }
+  const shipNow = () => {
+    setShipped(null)
+    setPrUrl(null)
+    ship.mutate(undefined, {
+      onSuccess: (r) => {
+        setPrUrl(r.url)
+        setShipped(shipSuccessText(r))
+      },
+    })
   }
 
   return (
@@ -196,12 +245,26 @@ export function GitActions({
           Push branch
         </Button>
         <Button
+          variant="primary"
           className="w-full justify-start"
-          title={prBlocked ?? 'Create pull request'}
-          disabled={!canCreatePullRequest(shipGate)}
+          title={shipBlocked ?? SHIP_HINT}
+          disabled={ship.isPending || !canShip(shipState)}
+          onClick={shipNow}
+        >
+          {ship.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <GitPullRequest className="h-4 w-4" />
+          )}
+          {ship.isPending ? 'Creating pull request…' : 'Create pull request'}
+        </Button>
+        <Button
+          className="w-full justify-start"
+          title={prBlocked ?? 'Write the title and description yourself'}
+          disabled={ship.isPending || !canCreatePullRequest(shipGate)}
           onClick={openPrDialog}
         >
-          <GitPullRequest className="h-4 w-4" /> Create pull request
+          <GitPullRequest className="h-4 w-4" /> Write the pull request myself
         </Button>
         <Button
           variant="danger"
@@ -220,6 +283,12 @@ export function GitActions({
         </p>
       ) : null}
 
+      {ship.isPending ? (
+        <p className="px-1 text-[11px] leading-relaxed text-tier-quaternary">
+          Grouping the changes into commits with {taskName ? 'this run' : 'the run'}'s runtime…
+        </p>
+      ) : null}
+      <Result error={ship.isError ? errorText(ship.error) : null} success={shipped} />
       <Result error={push.isError ? errorText(push.error) : null} success={pushed} />
       {prUrl ? (
         <a
@@ -490,6 +559,7 @@ export function GitActionsMenu({
   const [prTitle, setPrTitle] = useState('')
   const [prBody, setPrBody] = useState('')
   const [prUrl, setPrUrl] = useState<string | null>(null)
+  const [shipError, setShipError] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const commit = useCommit(runId)
@@ -497,10 +567,13 @@ export function GitActionsMenu({
   const discard = useDiscard(runId)
   const createBranch = useCreateBranch(runId)
   const openPr = useOpenPullRequest(runId)
+  const ship = useShipRun(runId)
 
-  // Close on outside click / Escape.
+  // Close on outside click / Escape — but not while a ship is in flight: it
+  // runs the agent, so the spinner and the error it may produce are the only
+  // feedback the user has, and they live inside this menu.
   useEffect(() => {
-    if (!open) return
+    if (!open || ship.isPending) return
     const onPointerDown = (e: PointerEvent) => {
       if (!menuRef.current?.contains(e.target as Node)) setOpen(false)
     }
@@ -513,7 +586,7 @@ export function GitActionsMenu({
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open])
+  }, [open, ship.isPending])
 
   if (!repo.isRepo) return null
 
@@ -528,6 +601,8 @@ export function GitActionsMenu({
   const discardBlocked = discardBlockedReason(dirtyGate)
   const pushBlocked = pushBlockedReason(shipGate)
   const prBlocked = prBlockedReason(shipGate)
+  const shipState = { ...shipGate, hasChanges, ahead: repo.ahead }
+  const shipBlocked = shipBlockedReason(shipState)
   const TriggerIcon = trigger?.icon ?? GitBranch
   const triggerLabel = trigger?.label ?? (repo.branch || 'detached')
   const openDialog = (next: GitDialog) => {
@@ -639,11 +714,32 @@ export function GitActionsMenu({
           <button
             type="button"
             className={item}
-            title={prBlocked ?? 'Create pull request'}
-            disabled={!canCreatePullRequest(shipGate)}
+            title={shipBlocked ?? SHIP_HINT}
+            disabled={ship.isPending || !canShip(shipState)}
+            onClick={() => {
+              setShipError(null)
+              setPrUrl(null)
+              ship.mutate(undefined, {
+                onSuccess: (r) => setPrUrl(r.url),
+                onError: (err) => setShipError(errorText(err)),
+              })
+            }}
+          >
+            {ship.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <GitPullRequest className="h-3.5 w-3.5" />
+            )}
+            {ship.isPending ? 'Creating pull request…' : 'Create pull request'}
+          </button>
+          <button
+            type="button"
+            className={item}
+            title={prBlocked ?? 'Write the title and description yourself'}
+            disabled={ship.isPending || !canCreatePullRequest(shipGate)}
             onClick={() => openDialog('pr')}
           >
-            <GitPullRequest className="h-3.5 w-3.5" /> Create pull request
+            <GitPullRequest className="h-3.5 w-3.5" /> Write the pull request myself
           </button>
           <div className="my-1 h-px bg-border" />
           <button
@@ -656,6 +752,12 @@ export function GitActionsMenu({
             <Trash2 className="h-3.5 w-3.5" /> Discard all changes
           </button>
 
+          {shipError ? (
+            <div className="mt-1 flex items-start gap-1.5 px-2 py-1.5 text-[11.5px] leading-relaxed text-rose-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 break-words">{shipError}</span>
+            </div>
+          ) : null}
           {prUrl ? (
             <a
               href={prUrl}

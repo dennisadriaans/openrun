@@ -71,7 +71,7 @@ export function FilesChanged({
       className={
         attached
           ? `chat-composer-strip${stackTop ? ' chat-composer-strip-top' : ' chat-composer-strip-continued'}`
-          : 'overflow-hidden rounded-xl border border-border bg-elevated shadow-sm'
+          : 'overflow-hidden rounded-xl border border-border bg-[var(--diff-card)] shadow-sm'
       }
     >
       <div className="flex items-center gap-1 px-2 py-1.5">
@@ -113,46 +113,50 @@ export function FilesChanged({
       </div>
 
       {expanded ? (
-        <div
-          className={`scroll-thin space-y-px overflow-y-auto px-1.5 pb-1.5 ${
-            attached ? 'max-h-[min(32vh,16rem)]' : 'max-h-[min(40vh,20rem)]'
-          }`}
-        >
-          {files.map((file) => {
-            const name = file.path.split('/').pop() ?? file.path
-            const active = activePath === file.path
-            return (
-              <button
-                type="button"
-                key={file.path}
-                onClick={() => onSelect(file.path)}
-                title={file.path}
-                className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 ${
-                  active ? 'bg-secondary' : 'hover:bg-secondary/60'
-                }`}
-              >
-                <span className="flex size-5 shrink-0 items-center justify-center">
-                  <FileTypeIcon path={file.path} className="size-3.5" />
-                </span>
-                <span
-                  className={`min-w-0 flex-1 truncate ${
-                    statusTone[file.status] || (active ? 'text-foreground' : 'text-foreground/82')
-                  } ${active ? 'font-medium' : ''}`}
+        <div className="px-1.5 pb-1.5">
+          <div
+            className={`scroll-thin space-y-px overflow-y-auto ${
+              attached
+                ? 'max-h-[min(32vh,16rem)]'
+                : 'max-h-[min(40vh,20rem)] rounded-lg border border-[var(--border-quaternary)] bg-[var(--diff-code)] p-1'
+            }`}
+          >
+            {files.map((file) => {
+              const name = file.path.split('/').pop() ?? file.path
+              const active = activePath === file.path
+              return (
+                <button
+                  type="button"
+                  key={file.path}
+                  onClick={() => onSelect(file.path)}
+                  title={file.path}
+                  className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 ${
+                    active ? 'bg-secondary' : 'hover:bg-secondary/60'
+                  }`}
                 >
-                  {name}
-                </span>
-                {file.binary ? (
-                  <span className="pe-1 mono text-[11px] text-muted-foreground">bin</span>
-                ) : (
-                  <DiffStat
-                    additions={file.additions}
-                    deletions={file.deletions}
-                    className="pe-1"
-                  />
-                )}
-              </button>
-            )
-          })}
+                  <span className="flex size-5 shrink-0 items-center justify-center">
+                    <FileTypeIcon path={file.path} className="size-3.5" />
+                  </span>
+                  <span
+                    className={`min-w-0 flex-1 truncate ${
+                      statusTone[file.status] || (active ? 'text-foreground' : 'text-foreground/82')
+                    } ${active ? 'font-medium' : ''}`}
+                  >
+                    {name}
+                  </span>
+                  {file.binary ? (
+                    <span className="pe-1 mono text-[11px] text-muted-foreground">bin</span>
+                  ) : (
+                    <DiffStat
+                      additions={file.additions}
+                      deletions={file.deletions}
+                      className="pe-1"
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </div>
         </div>
       ) : null}
     </div>

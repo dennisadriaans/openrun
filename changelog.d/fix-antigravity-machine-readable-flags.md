@@ -1,0 +1,1 @@
+- Antigravity (`agy`) runs no longer die with a usage dump reading `flags provided but not defined: -verbose -include-partial-messages` — those flags are Claude Code's, and Open Run stopped adding them to a CLI that shares Claude's output format but not its flag set.

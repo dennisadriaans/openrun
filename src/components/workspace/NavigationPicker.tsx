@@ -1,27 +1,58 @@
-import { Check, ChevronDown, Copy, FolderGit2, GitBranch, Plus } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Check, ChevronDown, Copy, FolderGit2, GitBranch, Plus, Search } from 'lucide-react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import { truncateBranchLabel, truncateNavTitle } from '../../lib/truncateLabel.ts'
 
-type NavigationMenuProps = {
+export type NavigationMenuProps = {
   label: string
   title: string
   icon: ReactNode
   disabled?: boolean
   muted?: boolean
   trailing?: ReactNode
+  /** Widen the trigger past its content and cap it, for long free-text labels. */
+  triggerClassName?: string
+  /** Extra width for panels holding more than a short list. */
+  panelClassName?: string
+  /** Pinned above the scrolling list — a search field, typically. */
+  header?: ReactNode
+  /** Controlled open state, for menus with their own keyboard shortcut. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   children: (close: () => void) => ReactNode
 }
 
-function NavigationMenu({
+/**
+ * The one dropdown shell every breadcrumb picker renders through: same trigger
+ * chrome, same panel chrome, same dismissal rules. Content differs; the frame
+ * does not.
+ */
+export function NavigationMenu({
   label,
   title,
   icon,
   disabled,
   muted,
   trailing,
+  triggerClassName = '',
+  panelClassName = 'min-w-56',
+  header,
+  open: openProp,
+  onOpenChange,
   children,
 }: NavigationMenuProps) {
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const open = openProp ?? uncontrolledOpen
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setUncontrolledOpen(next)
+    onOpenChange?.(next)
+  }
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -48,10 +79,10 @@ function NavigationMenu({
         title={title}
         aria-expanded={open}
         aria-haspopup="menu"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setOpen(!open)}
         className={`flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] disabled:opacity-40 ${
           muted ? 'text-muted-foreground' : 'font-medium text-foreground'
-        }`}
+        } ${triggerClassName}`}
       >
         {icon}
         <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -61,8 +92,9 @@ function NavigationMenu({
       {open ? (
         <div
           role="menu"
-          className="absolute left-0 top-full z-50 mt-1.5 min-w-56 overflow-hidden rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
+          className={`absolute left-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40 ${panelClassName}`}
         >
+          {header}
           {children(() => setOpen(false))}
         </div>
       ) : null}
@@ -70,7 +102,16 @@ function NavigationMenu({
   )
 }
 
-function NavigationItem({
+/** Section label inside a navigation panel. */
+export function NavigationSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+      {children}
+    </div>
+  )
+}
+
+export function NavigationItem({
   label,
   hint,
   icon,
@@ -78,7 +119,9 @@ function NavigationItem({
   disabled,
   unread,
   reserveTrailing,
+  meta,
   onSelect,
+  onClick,
 }: {
   label: string
   hint?: string
@@ -86,8 +129,15 @@ function NavigationItem({
   active?: boolean
   disabled?: boolean
   unread?: boolean
+  /**
+   * Hand the trailing slot to the parent: it reserves the space and renders the
+   * check itself, so the tick and a hover action can share one fixed position.
+   */
   reserveTrailing?: boolean
+  /** Right-aligned secondary text, before the unread dot and the check. */
+  meta?: ReactNode
   onSelect: () => void
+  onClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void
 }) {
   return (
     <button
@@ -95,7 +145,7 @@ function NavigationItem({
       role="menuitem"
       disabled={disabled}
       title={hint ?? label}
-      onClick={onSelect}
+      onClick={onClick ?? onSelect}
       className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${reserveTrailing ? 'pr-8' : ''} ${
         active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
       }`}
@@ -109,6 +159,7 @@ function NavigationItem({
           </span>
         ) : null}
       </span>
+      {meta}
       {unread ? (
         <span
           role="img"
@@ -116,8 +167,48 @@ function NavigationItem({
           className="size-1.5 shrink-0 rounded-full bg-accent"
         />
       ) : null}
-      {active ? <Check className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+      {active && !reserveTrailing ? (
+        <Check className="size-3.5 shrink-0" aria-hidden="true" />
+      ) : null}
     </button>
+  )
+}
+
+/** Search field styled to sit at the top of a navigation panel. */
+export function NavigationSearch({
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+  shortcut,
+  inputRef,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  ariaLabel: string
+  shortcut?: string
+  inputRef?: RefObject<HTMLInputElement | null>
+}) {
+  return (
+    <div className="relative px-1 pb-1 pt-0.5">
+      <Search className="pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        className={`h-7 w-full rounded-lg bg-secondary/60 pl-8 text-[12.5px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:bg-secondary ${
+          shortcut ? 'pr-9' : 'pr-2.5'
+        }`}
+      />
+      {shortcut ? (
+        <kbd className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/60">
+          {shortcut}
+        </kbd>
+      ) : null}
+    </div>
   )
 }
 
@@ -249,11 +340,9 @@ export function NavigationWorkspacePicker({
     >
       {(close) => (
         <>
-          <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            Workspaces
-          </div>
+          <NavigationSectionLabel>Workspaces</NavigationSectionLabel>
           {visible.map((workspace) => (
-            <div key={workspace.id} className="group/workspace relative">
+            <div key={workspace.id} className="relative">
               <NavigationItem
                 label={workspace.branch}
                 hint={workspace.kind === 'main' ? 'main' : undefined}
@@ -267,27 +356,35 @@ export function NavigationWorkspacePicker({
                   close()
                 }}
               />
-              <button
-                type="button"
-                aria-label={
-                  copiedId === workspace.id
-                    ? `Copied branch ${workspace.branch}`
-                    : `Copy branch ${workspace.branch}`
-                }
-                title={copiedId === workspace.id ? 'Copied' : 'Copy branch name'}
-                onClick={() => void copyBranch(workspace)}
-                className={`absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded opacity-0 transition-opacity focus-visible:opacity-100 group-hover/workspace:opacity-100 ${
-                  copiedId === workspace.id
-                    ? 'text-success hover:text-success'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {copiedId === workspace.id ? (
-                  <Check className="size-3.5" aria-hidden="true" />
-                ) : (
-                  <Copy className="size-3.5" aria-hidden="true" />
-                )}
-              </button>
+              <span className="group/trailing absolute top-1/2 right-2 grid size-5 -translate-y-1/2 place-items-center">
+                {workspace.id === workspaceId ? (
+                  <Check
+                    aria-hidden="true"
+                    className="pointer-events-none col-start-1 row-start-1 size-3.5 transition-opacity group-hover/trailing:opacity-0"
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  aria-label={
+                    copiedId === workspace.id
+                      ? `Copied branch ${workspace.branch}`
+                      : `Copy branch ${workspace.branch}`
+                  }
+                  title={copiedId === workspace.id ? 'Copied' : 'Copy branch name'}
+                  onClick={() => void copyBranch(workspace)}
+                  className={`col-start-1 row-start-1 flex size-5 items-center justify-center rounded opacity-0 transition-opacity group-hover/trailing:opacity-100 focus-visible:opacity-100 ${
+                    copiedId === workspace.id
+                      ? 'text-success hover:text-success'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {copiedId === workspace.id ? (
+                    <Check className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <Copy className="size-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              </span>
             </div>
           ))}
           {workspaces.length > PAGE_SIZE ? (

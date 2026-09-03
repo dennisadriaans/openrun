@@ -1,0 +1,1 @@
+- Antigravity (`agy`) runs no longer fail immediately with `-p took "--output-format" as its prompt` — the CLI takes the prompt on argv, so Open Run now puts output-format and permission flags before `-p` and passes the prompt as its argument instead of on stdin.

@@ -508,13 +508,20 @@ export function useRunPullRequest(runId: string, opts?: { enabled?: boolean }) {
   })
 }
 
-export function useFileDiff(runId: string, path: string | null) {
+export function useFileDiff(runId: string, path: string | null, whole = false) {
   const demo = isDemoMode() && isDemoDetailRun(runId)
   return useQuery({
-    queryKey: ['fileDiff', runId, path],
+    // `whole` is part of the key: the two context widths are different diff
+    // text for the same file, and flipping the toggle must refetch, not reuse.
+    queryKey: ['fileDiff', runId, path, whole ? 'whole' : 'hunks'],
     queryFn: () =>
-      demo && path ? demoFileDiff(runId, path) : fns.getFileDiff({ data: { runId, path: path! } }),
+      demo && path
+        ? demoFileDiff(runId, path)
+        : fns.getFileDiff({ data: { runId, path: path!, whole } }),
     enabled: !!path,
+    // Keep the previous width on screen while the wider one loads, so toggling
+    // does not blank the file back to the "Loading diff…" placeholder.
+    placeholderData: (prev) => prev,
   })
 }
 
@@ -763,6 +770,17 @@ export function useOpenPullRequest(runId: string) {
   )
 }
 
+/**
+ * One-click ship: commit the run's work as conventional commits, push, open
+ * the PR. Runs the agent, so it is far slower than the other git mutations —
+ * callers show progress rather than a plain spinner.
+ */
+export function useShipRun(runId: string) {
+  return useGitMutation(runId, (vars: { base?: string; skipPlan?: boolean } | undefined) =>
+    fns.shipRun({ data: { runId, ...(vars ?? {}) } }),
+  )
+}
+
 export function useInvalidate() {
   const qc = useQueryClient()
   return (keys: string[]) => {
@@ -858,6 +876,13 @@ export function useRunNow() {
       if (runId) {
         await prefetchConversation(qc, runId)
       }
+    },
+    // A refused start is often the server discovering the branch is unusable —
+    // a worktree removed by hand demotes the row to `error`/`archived`. Without
+    // this the picker keeps offering the branch it just refused, and the next
+    // attempt fails the same way.
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
     },
   })
 }
@@ -1084,6 +1109,13 @@ export function useOpenNativeChat() {
         await prefetchConversation(qc, runId)
       }
     },
+    // A refused start is often the server discovering the branch is unusable —
+    // a worktree removed by hand demotes the row to `error`/`archived`. Without
+    // this the picker keeps offering the branch it just refused, and the next
+    // attempt fails the same way.
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+    },
   })
 }
 
@@ -1108,6 +1140,13 @@ export function useStartChat() {
       if (runId) {
         await prefetchConversation(qc, runId)
       }
+    },
+    // A refused start is often the server discovering the branch is unusable —
+    // a worktree removed by hand demotes the row to `error`/`archived`. Without
+    // this the picker keeps offering the branch it just refused, and the next
+    // attempt fails the same way.
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
     },
   })
 }

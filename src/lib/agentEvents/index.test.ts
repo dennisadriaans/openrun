@@ -63,6 +63,31 @@ describe('ensureMachineReadableArgs: Claude', () => {
   })
 })
 
+describe('ensureMachineReadableArgs: Antigravity', () => {
+  it('asks for stream-json without the Claude-only flags agy rejects', () => {
+    const args = ensureMachineReadableArgs(['-p', '{prompt}'], 'antigravity')
+    assert.deepEqual(args, ['--output-format', 'stream-json', '-p', '{prompt}'])
+    assert.ok(!args.includes('--verbose'))
+    assert.ok(!args.includes('--include-partial-messages'))
+  })
+
+  it('keeps the format pair ahead of -p, which consumes the prompt token', () => {
+    const args = ensureMachineReadableArgs(
+      ['--dangerously-skip-permissions', '-p', 'hi'],
+      'antigravity',
+    )
+    assert.ok(args.indexOf('--output-format') < args.indexOf('-p'))
+    assert.equal(args[args.length - 1], 'hi')
+  })
+
+  it('upgrades the legacy text default in place without appending flags', () => {
+    assert.deepEqual(
+      ensureMachineReadableArgs(['--output-format', 'text', '-p', 'hi'], 'antigravity'),
+      ['--output-format', 'stream-json', '-p', 'hi'],
+    )
+  })
+})
+
 describe('ensureMachineReadableArgs: Codex and Grok', () => {
   it('puts --json straight after codex exec', () => {
     assert.deepEqual(ensureMachineReadableArgs(['exec', '{prompt}'], 'codex'), [

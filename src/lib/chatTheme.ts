@@ -31,7 +31,7 @@ export function isChatThemeId(value: unknown): value is ChatThemeId {
 export type ChatThemeBehaviour = {
   /** Tool kinds whose body opens without a click. */
   expandToolKinds: readonly ToolKind[]
-  /** Draw a settled turn's work inline instead of behind "Worked for 15s". */
+  /** Show every tool row in a work group instead of the last few. */
   unfoldTurns: boolean
 }
 

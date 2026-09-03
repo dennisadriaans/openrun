@@ -10,7 +10,7 @@ import type { ToolCallLocation } from '../acp.ts'
 import type { TurnEventKind, TurnEventPayload } from '../turnEvents.ts'
 
 /** Runtimes we have a real adapter for; everything else is `generic`. */
-export type EventRuntimeKind = 'claude' | 'codex' | 'grok' | 'gemini' | 'generic'
+export type EventRuntimeKind = 'claude' | 'antigravity' | 'codex' | 'grok' | 'gemini' | 'generic'
 
 export type ParsedTurnEvent = {
   kind: TurnEventKind

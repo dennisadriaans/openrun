@@ -70,7 +70,6 @@ import {
   TurnFold,
   WorkGroup,
   WorkingIndicator,
-  useChatThemeBehaviour,
 } from './chat/index'
 import { attachmentPathsIn, promptWithoutAttachments } from '../lib/attachments'
 import { activitySteps, latestActivity } from '../lib/turnActivity'
@@ -584,11 +583,10 @@ const AssistantMessage = memo(function AssistantMessage({
   installProjectName?: string | null
   installWorkspaceLabel?: string | null
 }) {
-  // Null means "whatever the theme says" — a CLI theme replays the turn inline.
-  // Switching theme therefore restyles turns the reader has not touched yet.
+  // A settled turn always starts behind its "Worked for 15s" row, whatever the
+  // theme — the answer is what the reader came for, the work is on request.
   const [pickedStage, setFoldStage] = useState<TurnFoldStage | null>(null)
-  const { unfoldTurns } = useChatThemeBehaviour()
-  const foldStage: TurnFoldStage = pickedStage ?? (unfoldTurns ? 'all' : 'closed')
+  const foldStage: TurnFoldStage = pickedStage ?? 'closed'
   const running = message.status === 'running'
   const realStderr = meaningfulStderr(message.stderr)
   const hasEvents = message.events.length > 0
@@ -846,6 +844,10 @@ export function Chat({
   onUndoAllFiles?: () => void
   undoFilesDisabled?: boolean
   undoFilesReason?: string
+  /**
+   * Rejecting hands the draft back to the composer, so a refused follow-up
+   * does not cost the user what they typed.
+   */
   onSend: (input: {
     prompt: string
     model: string
@@ -853,15 +855,15 @@ export function Chat({
     runtimeMode: RuntimeMode
     /** Present only when this turn hands the chat to another runtime. */
     runtimeId?: string
-  }) => void
-  /** Same payload, but it interrupts the working agent instead of queueing. */
+  }) => unknown
+  /** Same payload and contract, but it interrupts the working agent instead of queueing. */
   onSendNow?: (input: {
     prompt: string
     model: string
     effort: string
     runtimeMode: RuntimeMode
     runtimeId?: string
-  }) => void
+  }) => unknown
   onStop?: () => void
   /** Follow-ups waiting on the current turn, oldest first. */
   queued?: QueuedMessage[]

@@ -143,7 +143,7 @@ export function ChecksPanel({
   const actionsDisabled = busy || running || sendMessage.isPending
 
   return (
-    <div className="rounded-2xl border border-border bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--bg-chrome))] p-2 pt-4 shadow-sm">
+    <div className="rounded-2xl border border-border bg-[var(--diff-card)] p-2 pt-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-2 px-2">
         <p className="flex items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
           {headline}

@@ -17,18 +17,21 @@ test('unknown runtimes rank after every builtin', () => {
 })
 
 test('preset order wins over createdAt for builtins', () => {
-  // The macOS repro: gemini was seeded long before the other builtins were
+  // The macOS repro: one builtin was seeded long before the others were
   // backfilled, so createdAt ordering floated it above Claude Code.
-  const rows = [row('gemini', 1), row('claude', 2), row('codex', 2), row('gemini-acp', 3)]
+  const rows = [row('fx', 1), row('claude', 2), row('codex', 2), row('my-custom-cli', 3)]
   const sorted = [...rows].sort(compareRuntimesForDisplay).map((r) => r.id)
-  assert.deepEqual(sorted, ['claude', 'codex', 'gemini', 'gemini-acp'])
+  assert.deepEqual(sorted, ['claude', 'codex', 'fx', 'my-custom-cli'])
 })
 
 test('a freshly seeded DB and a backfilled DB order identically', () => {
+  // Pin the oldest row to a real preset — an id that is not a builtin sorts
+  // after every builtin instead, which would not exercise preset order at all.
+  const oldest = RUNTIME_PRESETS[RUNTIME_PRESETS.length - 1]!.id
   const fresh = RUNTIME_PRESETS.map((p) => row(p.id, 100))
   const backfilled = [
-    row('gemini', 1),
-    ...RUNTIME_PRESETS.filter((p) => p.id !== 'gemini').map((p) => row(p.id, 500)),
+    row(oldest, 1),
+    ...RUNTIME_PRESETS.filter((p) => p.id !== oldest).map((p) => row(p.id, 500)),
   ]
   assert.deepEqual(
     [...fresh].sort(compareRuntimesForDisplay).map((r) => r.id),

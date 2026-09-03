@@ -214,7 +214,9 @@ export const saveAttachment = createServerFn({ method: 'POST' })
 // --- git ---------------------------------------------------------------------
 
 export const getFileDiff = createServerFn({ method: 'GET' })
-  .validator((d: { runId: string; path: string }) => shape(d, { runId: 'string', path: 'string' }))
+  .validator((d: { runId: string; path: string; whole?: boolean }) =>
+    shape(d, { runId: 'string', path: 'string', whole: 'boolean?' }),
+  )
   .handler(async ({ data }) => run('git.getFileDiff', data) as Promise<CoreResult<'getFileDiff'>>)
 
 export const commitChanges = createServerFn({ method: 'POST' })
@@ -254,6 +256,12 @@ export const openPullRequest = createServerFn({ method: 'POST' })
   .handler(
     async ({ data }) => run('git.openPullRequest', data) as Promise<CoreResult<'openPullRequest'>>,
   )
+
+export const shipRun = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string; base?: string; skipPlan?: boolean }) =>
+    shape(d, { runId: 'string', base: 'string?', skipPlan: 'boolean?' }),
+  )
+  .handler(async ({ data }) => run('git.shipRun', data) as Promise<CoreResult<'shipRun'>>)
 
 export const listProjectBranches = createServerFn({ method: 'GET' })
   .validator((d: { projectId: string }) => shape(d, { projectId: 'string' }))
