@@ -27,8 +27,20 @@ import {
 } from '../lib/unattendedGate.ts'
 import { workspaceHealthBlockedReason, type WorkspaceHealth } from '../lib/workspaceHealth.ts'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
+import {
+  emptyChatPromptMessage,
+  missingRuntimeMessage,
+  runtimeStartBlockedReason,
+  workspaceStartBlockedReason,
+} from '../lib/startChatGate'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
-import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
+import {
+  defaultEffort,
+  defaultModel,
+  findModel,
+  modelsForRuntime,
+  type ModelOption,
+} from '../lib/models'
 import { cachedModelsForBin, warmModelCatalogs } from './modelCatalog'
 import { parseRuntimeMode } from '../lib/runtimeMode'
 import { compareRuntimesForDisplay, RUNTIME_PRESETS } from '../lib/runtimePresets'
@@ -1554,6 +1566,96 @@ export function getLatestRunForProject(projectId: string): { id: string } | null
 }
 
 /** Start an ad-hoc chat run in a workspace — no task/automation required. */
+/**
+ * Everything a picker needs to open an empty conversation: the worktrees that
+ * could host it and the runtimes that could drive it, each carrying the reason
+ * it cannot — from `lib/startChatGate.ts`, so a greyed-out row explains itself
+ * with the sentence `startChat` would have thrown.
+ *
+ * Archived workspaces and disabled runtimes are dropped rather than listed as
+ * blocked: they are not choices a user is weighing, they are gone.
+ */
+export type StartRunWorkspaceOption = {
+  id: string
+  projectId: string
+  projectName: string
+  name: string
+  branch: string
+  kind: 'main' | 'worktree'
+  status: 'creating' | 'ready' | 'error' | 'archived'
+  /** Set while another run holds this worktree. */
+  activeRunId: string | null
+  blockedReason: string | null
+}
+
+export type StartRunRuntimeOption = {
+  id: string
+  label: string
+  bin: string
+  transport: string
+  installed: boolean
+  models: ModelOption[]
+  /** Slug the composer should preselect; empty when the catalog is empty. */
+  defaultModel: string
+  defaultEffort: string
+  blockedReason: string | null
+}
+
+export function startRunOptions(): {
+  workspaces: StartRunWorkspaceOption[]
+  runtimes: StartRunRuntimeOption[]
+} {
+  const workspaces = listWorkspaces()
+    .filter((workspace) => workspace.status !== 'archived')
+    .map((workspace) => {
+      // Read, never repair: `decorate` documents why drawing a list must not
+      // demote a row, and the same holds here.
+      const health = cachedWorkspaceHealth(workspace)
+      return {
+        id: workspace.id,
+        projectId: workspace.projectId,
+        projectName: workspace.projectName,
+        name: workspace.name,
+        branch: workspace.actualBranch || workspace.branch,
+        kind: workspace.kind,
+        status: workspace.status,
+        activeRunId: workspace.activeRunId,
+        blockedReason: workspaceStartBlockedReason({
+          workspaceValid: true,
+          workspaceReady: isWorkspaceReady(workspace.status),
+          workspaceStatus: workspace.status,
+          workspaceHealth: health,
+          activeRunId: workspace.activeRunId,
+        }),
+      }
+    })
+
+  const runtimes = listRuntimes()
+    .filter((runtime) => runtime.enabled === 1)
+    .map((runtime) => {
+      const installed = checkRuntimeInstalled(runtime.bin).installed
+      const models = modelsForRuntime(runtime)
+      const preselected = defaultModel(models)
+      return {
+        id: runtime.id,
+        label: runtime.label,
+        bin: runtime.bin,
+        transport: runtime.transport,
+        installed,
+        models,
+        defaultModel: preselected?.slug ?? '',
+        defaultEffort: defaultEffort(preselected),
+        blockedReason: runtimeStartBlockedReason({
+          runtimeValid: true,
+          runtimeInstalled: installed,
+          runtimeBin: runtime.bin,
+        }),
+      }
+    })
+
+  return { workspaces, runtimes }
+}
+
 export function startChat(input: {
   workspaceId: string
   runtimeId: string
@@ -1568,10 +1670,10 @@ export function startChat(input: {
   if (!workspace) throw new Error('Workspace not found')
   assertWorkspaceReady(workspace.status)
   const prompt = input.prompt.trim()
-  if (!prompt) throw new Error('A first message is required')
+  if (!prompt) throw new Error(emptyChatPromptMessage())
 
   const runtime = getRuntime(input.runtimeId)
-  if (!runtime) throw new Error('Runtime not found')
+  if (!runtime) throw new Error(missingRuntimeMessage())
 
   const runId = startRun({
     runtime,
