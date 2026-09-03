@@ -26,6 +26,7 @@ import {
   workspaceOwnerMessage,
 } from '../lib/unattendedGate.ts'
 import { workspaceHealthBlockedReason, type WorkspaceHealth } from '../lib/workspaceHealth.ts'
+import { taskActions, type TaskActions } from '../lib/actions.ts'
 import { assertWorkspaceReady, isWorkspaceReady } from '../lib/workspaceReady'
 import { parsePlanProposals, type PlanProposal } from '../lib/planProposals'
 import { defaultEffort, defaultModel, findModel, type ModelOption } from '../lib/models'
@@ -162,7 +163,7 @@ import { APP_SLASH_COMMANDS } from '../lib/slashCommands.ts'
 import { listNativeSessionsForKind, nativeSessionExists } from './nativeSessions'
 import { collectUsage } from './usage'
 import { parseUsageRange, rangeCutoff, type UsageReport } from '../lib/usage.ts'
-import { bootCloud } from './cloud'
+import { afterSignIn, bootCloud, completeCloudLogin } from './cloud'
 import { assertServerAccess } from './accessToken'
 import { assertSchedulableCron, isSchedulableCron } from './cronValidation.ts'
 import { latestScheduleFires } from './scheduleFires.ts'
@@ -263,6 +264,20 @@ export function listRuntimes(): RuntimeWithModels[] {
   return rows
     .sort(compareRuntimesForDisplay)
     .map((r) => ({ ...r, models: cachedModelsForBin(r.bin) }))
+}
+
+/**
+ * Runtimes with their PATH status folded in.
+ *
+ * The Runtimes page always needs both, and asking for them separately made the
+ * server function do the join itself. The contract dispatches straight to a
+ * `core.ts` export, so the join belongs here — the facade is the only place
+ * allowed to compose.
+ */
+export function listRuntimesWithStatus(): Array<
+  RuntimeWithModels & { installed: boolean; path: string }
+> {
+  return listRuntimes().map((r) => ({ ...r, ...checkRuntimeInstalled(r.bin) }))
 }
 
 export function getRuntime(runtimeId: string): RuntimeRow | undefined {
@@ -645,6 +660,14 @@ export function nextRun(cronExpr: string): number | null {
 }
 
 export type TaskWithMeta = TaskRow & {
+  /**
+   * What may be done to this automation right now, and why not.
+   *
+   * Computed here from the same gate modules the web UI calls, so a client
+   * that cannot run TypeScript — the macOS and iOS apps — gets the refusal
+   * wording without owning a copy of the rule. See `lib/actions.ts`.
+   */
+  actions: TaskActions
   runtimeLabel: string
   nextRunAt: number | null
   cronValid: boolean
@@ -812,7 +835,7 @@ function decorate(
     runtimeValid: Boolean(runtime),
   })
   const activeRunId = activeRuns?.[task.id] ?? null
-  return {
+  const meta = {
     ...task,
     workspaceKind: workspace?.kind ?? '',
     workspaceHealth: health,
@@ -849,6 +872,8 @@ function decorate(
     triggerBlockReason,
     readinessBlockers,
   }
+  // The gates run once, here, and their answers travel with the row.
+  return { ...meta, actions: taskActions(meta) }
 }
 
 export function listTasks(): TaskWithMeta[] {
@@ -2750,6 +2775,7 @@ import {
   createIntegrationAutomation as createIntegrationAutomationRow,
   type CreateIntegrationAutomationInput,
 } from './integrations'
+import { listDeliveriesForIntegration, listRecentDeliveries } from './integrations'
 
 /** The one place an integration turns into a task row. */
 function writeIntegrationAutomation(args: {
@@ -2806,6 +2832,19 @@ export { apnsConfigured } from './mobile/apns'
 export { mobileStatus } from './mobile/status'
 export type { DeviceRow, DevicePairingRow } from './db'
 
+/**
+ * Webhook deliveries, scoped to one integration or across all of them.
+ *
+ * The branch used to live in the server function. Moved here so every
+ * transport asks one question and gets one answer.
+ */
+export function listWebhookDeliveries(input: { integrationId?: string; limit?: number } = {}) {
+  if (input.integrationId) {
+    return listDeliveriesForIntegration(input.integrationId, input.limit ?? 30)
+  }
+  return listRecentDeliveries(input.limit ?? 50)
+}
+
 // ---------------------------------------------------------------------------
 // Cloud control plane (optional). Local features never consult this.
 // ---------------------------------------------------------------------------
@@ -2827,3 +2866,17 @@ export {
 } from './cloud'
 export type { CloudStatus } from '../lib/cloud/types.ts'
 export type { CloudProviderCatalog } from '../lib/cloud/providers.ts'
+
+/**
+ * Finish a control-plane sign-in: exchange the code, then run the one-time
+ * post-sign-in work before answering.
+ *
+ * `completeCloudLogin` alone leaves the account half-initialised — the server
+ * function used to call `afterSignIn` itself. A transport must not have to
+ * know that, so the two-step is one export.
+ */
+export async function completeCloudLoginAndFinish(input: { code: string; state: string }) {
+  const session = await completeCloudLogin(input)
+  await afterSignIn()
+  return { email: session.email, userId: session.userId, next: session.next }
+}
