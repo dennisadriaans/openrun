@@ -427,7 +427,7 @@ function TranscriptRows({ rows }: { rows: TranscriptRow[] }) {
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       {groups.map((group) =>
         group.kind === 'work' ? (
           <WorkGroup key={group.id} rows={group.rows} />
