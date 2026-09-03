@@ -1,21 +1,20 @@
 /**
- * Composer footer model, effort, access-mode, and runtime pickers.
+ * Composer footer model, effort, and runtime pickers.
  *
  * Layout adapted from the t3code chat composer footer (MIT, T3 Tools Inc.).
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { createPortal } from 'react-dom'
 import {
   Check,
   ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   FolderGit2,
   GitBranch,
-  Lock,
-  LockOpen,
-  PenLine,
+  MessageSquare,
   Plus,
 } from 'lucide-react'
 import {
@@ -23,12 +22,16 @@ import {
   effortLabel,
   findModel,
   hiddenModelsIn,
+  materializeHiddenModels,
   modelKindForBin,
   toggleHiddenModel,
   visibleModels,
   type ModelOption,
 } from '../lib/models'
 import { usePickerPrefs } from '../lib/pickerPrefs'
+import { relativeTime } from '../lib/format'
+import type { NativeSession, NativeSessionGroup } from '../lib/nativeSessions'
+import { useNativeSessionPaging } from '../hooks/useNativeSessionPaging'
 import { truncateBranchLabel, truncateNavTitle } from '../lib/truncateLabel'
 import {
   hiddenRuntimesIn,
@@ -36,12 +39,6 @@ import {
   toggleHiddenRuntime,
   visibleRuntimes,
 } from '../lib/pickRuntime'
-import {
-  DEFAULT_RUNTIME_MODE,
-  RUNTIME_MODES,
-  runtimeModeLabel,
-  type RuntimeMode,
-} from '../lib/runtimeMode'
 import { ProviderIcon } from './ProviderIcons'
 import { Tooltip } from './ui'
 
@@ -52,7 +49,6 @@ export type RuntimeOption = {
   description?: string
   /** False / missing means the binary is not on PATH. */
   installed?: boolean
-  /** 'cli' or 'acp' — decides whether Supervised is offered. */
   transport?: string
   /** Discovered catalog, when the caller has one; falls back to the seed. */
   models?: ModelOption[]
@@ -73,6 +69,7 @@ export function FooterMenu({
   onOpen,
   initiallyOpen = false,
   keepOpen = false,
+  outsideRefs,
   children,
 }: {
   label: string
@@ -91,6 +88,8 @@ export function FooterMenu({
   initiallyOpen?: boolean
   /** Keep a preview menu visible while interacting with the rest of the page. */
   keepOpen?: boolean
+  /** Portalled children (a submenu) that must not count as an outside click. */
+  outsideRefs?: Array<RefObject<HTMLElement | null>>
   children: (close: () => void) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -112,7 +111,7 @@ export function FooterMenu({
     if (!keepOpen) setOpen(false)
   }
 
-  useClickOutside(open, close, [triggerRef, menuRef])
+  useClickOutside(open, close, [triggerRef, menuRef, ...(outsideRefs ?? [])])
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) {
@@ -321,7 +320,10 @@ export function MenuListExpandToggle({
  *
  * Separate from {@link MenuItem} because the toggle has to be a real button
  * beside the row rather than inside it — nesting buttons is invalid, and the
- * two need different click targets so hiding an item never selects it.
+ * two need different click targets so hiding an item never selects it. The
+ * selected tick, hide toggle, and submenu chevron share one right-hand slot —
+ * only one is visible at a time, always centered in the same place. The hide
+ * toggle appears only when the pointer is over that trailing icon, not the row.
  */
 function HideableMenuItem({
   label,
@@ -331,6 +333,11 @@ function HideableMenuItem({
   hidden,
   hideTitle,
   showTitle,
+  rowRef,
+  submenuOpen,
+  hasSubmenu,
+  onPointerEnter,
+  onPointerLeave,
   onSelect,
   onToggleHidden,
 }: {
@@ -341,17 +348,29 @@ function HideableMenuItem({
   hidden: boolean
   hideTitle: string
   showTitle: string
+  rowRef?: (el: HTMLDivElement | null) => void
+  submenuOpen?: boolean
+  hasSubmenu?: boolean
+  onPointerEnter?: () => void
+  onPointerLeave?: () => void
   onSelect: () => void
   onToggleHidden: () => void
 }) {
   return (
-    <div className="group/model relative flex items-center">
+    <div
+      ref={rowRef}
+      className="group/model relative flex items-center"
+      onMouseEnter={onPointerEnter}
+      onMouseLeave={onPointerLeave}
+    >
       <button
         type="button"
         role="menuitem"
+        {...(hasSubmenu ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': submenuOpen } : {})}
+        onFocus={onPointerEnter}
         onClick={onSelect}
         className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2 pr-9 pl-2.5 text-left text-ui-base transition-colors ${
-          active
+          active || submenuOpen
             ? 'bg-hover text-foreground'
             : 'text-foreground/85 hover:bg-hover hover:text-foreground'
         } ${hidden ? 'opacity-50' : ''}`}
@@ -363,17 +382,50 @@ function HideableMenuItem({
             <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
           ) : null}
         </span>
-        {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
       </button>
-      <button
-        type="button"
-        title={hidden ? showTitle : hideTitle}
-        aria-label={hidden ? showTitle : hideTitle}
-        onClick={onToggleHidden}
-        className="absolute right-1 rounded-md p-1.5 text-tier-quaternary opacity-0 transition-colors group-hover/model:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
-      >
-        {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-      </button>
+      <span className="absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center">
+        {hasSubmenu ? (
+          <span className="group/arrow col-start-1 row-start-1 grid size-7 place-items-center">
+            <ChevronRight
+              aria-hidden="true"
+              className="pointer-events-none col-start-1 row-start-1 h-3.5 w-3.5 text-tier-quaternary transition-opacity group-hover/arrow:opacity-0"
+            />
+            {active ? (
+              <Check
+                aria-hidden="true"
+                className="pointer-events-none col-start-1 row-start-1 h-3.5 w-3.5 text-tier-secondary transition-opacity group-hover/arrow:opacity-0"
+              />
+            ) : null}
+            <button
+              type="button"
+              title={hidden ? showTitle : hideTitle}
+              aria-label={hidden ? showTitle : hideTitle}
+              onClick={onToggleHidden}
+              className="col-start-1 row-start-1 flex size-7 items-center justify-center rounded-md text-tier-quaternary opacity-0 transition-opacity group-hover/arrow:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
+            >
+              {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </button>
+          </span>
+        ) : (
+          <span className="group/trailing col-start-1 row-start-1 grid size-7 place-items-center">
+            {active ? (
+              <Check
+                aria-hidden="true"
+                className="pointer-events-none col-start-1 row-start-1 h-3.5 w-3.5 text-tier-secondary transition-opacity group-hover/trailing:opacity-0"
+              />
+            ) : null}
+            <button
+              type="button"
+              title={hidden ? showTitle : hideTitle}
+              aria-label={hidden ? showTitle : hideTitle}
+              onClick={onToggleHidden}
+              className="col-start-1 row-start-1 flex size-7 items-center justify-center rounded-md text-tier-quaternary opacity-0 transition-opacity group-hover/trailing:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
+            >
+              {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </button>
+          </span>
+        )}
+      </span>
     </div>
   )
 }
@@ -406,12 +458,6 @@ function ModelMenuItem({
   )
 }
 
-function modeIcon(mode: RuntimeMode) {
-  if (mode === 'approval-required') return <Lock className="h-3.5 w-3.5 shrink-0" />
-  if (mode === 'auto-accept-edits') return <PenLine className="h-3.5 w-3.5 shrink-0" />
-  return <LockOpen className="h-3.5 w-3.5 shrink-0" />
-}
-
 export function ModelPicker({
   models,
   model,
@@ -431,7 +477,12 @@ export function ModelPicker({
   const shown = visibleModels(models, prefs.hiddenModels, selected.slug)
   const hidden = hiddenModelsIn(models, prefs.hiddenModels, selected.slug)
   const toggleHidden = (slug: string) =>
-    remember({ hiddenModels: toggleHiddenModel(prefs.hiddenModels, slug) })
+    remember({
+      hiddenModels: toggleHiddenModel(
+        materializeHiddenModels(models, prefs.hiddenModels, selected.slug),
+        slug,
+      ),
+    })
 
   return (
     <FooterMenu
@@ -853,6 +904,112 @@ export function BranchPicker({
   )
 }
 
+/** Saved CLI chats for one runtime, opened from its row in the runtime picker. */
+function RuntimeSessionSubmenu({
+  group,
+  anchor,
+  submenuRef,
+  resumeSessionId,
+  loading,
+  hideNewConversation,
+  onHover,
+  onLeave,
+  onSelectNew,
+  onSelect,
+  onLoadMore,
+}: {
+  group: NativeSessionGroup
+  anchor: HTMLElement | null
+  submenuRef: RefObject<HTMLDivElement | null>
+  resumeSessionId: string
+  loading: boolean
+  hideNewConversation?: boolean
+  onHover: () => void
+  onLeave: () => void
+  onSelectNew: () => void
+  onSelect: (session: NativeSession) => void
+  onLoadMore: () => void
+}) {
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!anchor) {
+      setCoords(null)
+      return
+    }
+    const update = () => {
+      const rect = anchor.getBoundingClientRect()
+      const width = 320
+      const openLeft = window.innerWidth - rect.right < width + 8
+      setCoords({
+        top: Math.max(8, Math.min(rect.top, window.innerHeight - 240)),
+        left: openLeft ? rect.left - width - 4 : rect.right + 4,
+      })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [anchor, group.sessions.length, loading])
+
+  return createPortal(
+    <div
+      ref={submenuRef}
+      role="menu"
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+      style={{
+        position: 'fixed',
+        top: coords?.top ?? 0,
+        left: coords?.left ?? 0,
+        zIndex: 401,
+        visibility: coords ? 'visible' : 'hidden',
+      }}
+      className="max-h-80 w-80 overflow-auto rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
+    >
+      {!hideNewConversation ? (
+        <MenuItem
+          active={!resumeSessionId}
+          label="New conversation"
+          leading={<MessageSquare className="h-3.5 w-3.5 shrink-0" />}
+          onSelect={onSelectNew}
+        />
+      ) : null}
+      {group.sessions.length === 0 ? (
+        <p className="px-2.5 py-2 text-ui-sm text-tier-quaternary">No {group.label} chats yet.</p>
+      ) : (
+        group.sessions.map((session) => (
+          <MenuItem
+            key={`${session.workspaceId ?? ''}:${session.sessionId}`}
+            active={session.sessionId === resumeSessionId}
+            label={session.title}
+            hint={`${relativeTime(session.modifiedAt)}${
+              session.messageCount
+                ? ` · ${session.messageCount} message${session.messageCount === 1 ? '' : 's'}`
+                : ''
+            }${session.projectName ? ` · ${session.projectName}` : ''}`}
+            onSelect={() => onSelect(session)}
+          />
+        ))
+      )}
+      {group.hasMore ? (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loading}
+          className="flex w-full items-center justify-center rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground disabled:opacity-50"
+        >
+          {loading ? 'Loading…' : 'Load more'}
+        </button>
+      ) : null}
+    </div>,
+    document.body,
+  )
+}
+
 export function RuntimePicker({
   runtimes,
   runtimeId,
@@ -860,6 +1017,7 @@ export function RuntimePicker({
   align = 'end',
   initiallyOpen,
   keepOpen,
+  sessions,
   onChange,
 }: {
   runtimes: RuntimeOption[]
@@ -868,10 +1026,46 @@ export function RuntimePicker({
   align?: 'start' | 'end'
   initiallyOpen?: boolean
   keepOpen?: boolean
+  /** Adds a saved-chats submenu to every runtime that can resume one. */
+  sessions?: {
+    workspaceId: string
+    allWorkspaces?: boolean
+    groups: NativeSessionGroup[]
+    resumeSessionId: string
+    resumeSessionLabel: string
+    onOpen?: () => unknown
+    onSelectNew: () => void
+    onSelect: (session: NativeSession, group: NativeSessionGroup) => void
+  }
   onChange: (id: string) => void
 }) {
   const { prefs, remember } = usePickerPrefs()
   const [showHidden, setShowHidden] = useState(false)
+  const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null)
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const submenuRef = useRef<HTMLDivElement>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { mergedGroups, loadingKind, loadMore } = useNativeSessionPaging(
+    sessions?.workspaceId ?? '',
+    sessions?.groups ?? [],
+    sessions?.allWorkspaces,
+  )
+
+  const clearCloseTimer = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+  }
+  const openSubmenu = (id: string) => {
+    clearCloseTimer()
+    setOpenSubmenuId(id)
+  }
+  const deferCloseSubmenu = () => {
+    clearCloseTimer()
+    closeTimer.current = setTimeout(() => setOpenSubmenuId(null), 160)
+  }
+  useEffect(() => () => clearCloseTimer(), [])
 
   if (runtimes.length === 0) return null
   const selected = runtimes.find((r) => r.id === runtimeId) ?? runtimes[0]!
@@ -881,39 +1075,63 @@ export function RuntimePicker({
   const toggleHidden = (id: string) =>
     remember({ hiddenRuntimes: toggleHiddenRuntime(prefs.hiddenRuntimes, id) })
 
+  const groupFor = (id: string) => mergedGroups.find((g) => g.runtimeId === id)
+  const openGroup = openSubmenuId ? groupFor(openSubmenuId) : undefined
+  const resumeLabel =
+    sessions?.resumeSessionId &&
+    groupFor(selected.id)?.sessions.find((s) => s.sessionId === sessions.resumeSessionId)?.title
+
   return (
     <FooterMenu
-      label={selected.label}
-      title={selected.description || selected.label}
+      label={resumeLabel || selected.label}
+      title={
+        resumeLabel ? `${selected.label} · ${resumeLabel}` : selected.description || selected.label
+      }
       disabled={disabled}
       align={align}
       initiallyOpen={initiallyOpen}
       keepOpen={keepOpen}
+      outsideRefs={[submenuRef]}
+      onOpen={() => void sessions?.onOpen?.()}
       leading={
         <ProviderIcon kind={modelKindForBin(selected.bin)} className="h-3.5 w-3.5 shrink-0" />
       }
     >
       {(close) => (
         <>
-          {(showHidden ? present : shown).map((r) => (
-            <HideableMenuItem
-              key={r.id}
-              label={r.label}
-              hint={r.bin}
-              leading={
-                <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
-              }
-              active={r.id === selected.id}
-              hidden={hidden.some((h) => h.id === r.id)}
-              hideTitle={`Hide ${r.label} from this list`}
-              showTitle={`Show ${r.label} again`}
-              onSelect={() => {
-                onChange(r.id)
-                close()
-              }}
-              onToggleHidden={() => toggleHidden(r.id)}
-            />
-          ))}
+          {(showHidden ? present : shown).map((r) => {
+            const group = groupFor(r.id)
+            return (
+              <HideableMenuItem
+                key={r.id}
+                label={r.label}
+                hint={r.bin}
+                leading={
+                  <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
+                }
+                active={r.id === selected.id}
+                hidden={hidden.some((h) => h.id === r.id)}
+                hideTitle={`Hide ${r.label} from this list`}
+                showTitle={`Show ${r.label} again`}
+                rowRef={(el) => {
+                  rowRefs.current[r.id] = el
+                }}
+                {...(group
+                  ? {
+                      hasSubmenu: true,
+                      submenuOpen: openSubmenuId === r.id,
+                      onPointerEnter: () => openSubmenu(r.id),
+                      onPointerLeave: deferCloseSubmenu,
+                    }
+                  : { onPointerEnter: deferCloseSubmenu })}
+                onSelect={() => {
+                  onChange(r.id)
+                  close()
+                }}
+                onToggleHidden={() => toggleHidden(r.id)}
+              />
+            )
+          })}
           {hidden.length > 0 ? (
             <button
               type="button"
@@ -924,54 +1142,32 @@ export function RuntimePicker({
               {showHidden ? 'Hide hidden runtimes' : `${hidden.length} hidden`}
             </button>
           ) : null}
+          {sessions && openGroup ? (
+            <RuntimeSessionSubmenu
+              group={openGroup}
+              anchor={rowRefs.current[openGroup.runtimeId] ?? null}
+              submenuRef={submenuRef}
+              resumeSessionId={sessions.resumeSessionId}
+              loading={loadingKind === openGroup.kind}
+              hideNewConversation={sessions.allWorkspaces}
+              onHover={() => openSubmenu(openGroup.runtimeId)}
+              onLeave={deferCloseSubmenu}
+              onSelectNew={() => {
+                onChange(openGroup.runtimeId)
+                sessions.onSelectNew()
+                setOpenSubmenuId(null)
+                close()
+              }}
+              onSelect={(session) => {
+                sessions.onSelect(session, openGroup)
+                setOpenSubmenuId(null)
+                close()
+              }}
+              onLoadMore={() => void loadMore(openGroup.kind)}
+            />
+          ) : null}
         </>
       )}
-    </FooterMenu>
-  )
-}
-
-export function RuntimeModePicker({
-  mode,
-  disabled,
-  onChange,
-  supportsSupervised = false,
-}: {
-  mode: RuntimeMode
-  disabled?: boolean
-  onChange: (mode: RuntimeMode) => void
-  /** Supervised approvals only work for Claude today. */
-  supportsSupervised?: boolean
-}) {
-  const modes = supportsSupervised
-    ? RUNTIME_MODES
-    : RUNTIME_MODES.filter((m) => m.value !== 'approval-required')
-
-  // If a stale supervised mode is loaded for a non-Claude runtime, show full-access.
-  const effectiveMode =
-    !supportsSupervised && mode === 'approval-required' ? DEFAULT_RUNTIME_MODE : mode
-
-  return (
-    <FooterMenu
-      label={runtimeModeLabel(effectiveMode)}
-      title="Access"
-      disabled={disabled}
-      leading={modeIcon(effectiveMode)}
-    >
-      {(close) =>
-        modes.map((opt) => (
-          <MenuItem
-            key={opt.value}
-            active={opt.value === effectiveMode}
-            label={opt.label}
-            hint={opt.description}
-            leading={modeIcon(opt.value)}
-            onSelect={() => {
-              onChange(opt.value)
-              close()
-            }}
-          />
-        ))
-      }
     </FooterMenu>
   )
 }
@@ -980,22 +1176,16 @@ export function ComposerModelControls({
   models,
   model,
   effort,
-  runtimeMode,
   disabled,
-  supportsSupervised = false,
   onModelChange,
   onEffortChange,
-  onRuntimeModeChange,
 }: {
   models: ModelOption[]
   model: string
   effort: string
-  runtimeMode: RuntimeMode
   disabled?: boolean
-  supportsSupervised?: boolean
   onModelChange: (slug: string) => void
   onEffortChange: (effort: string) => void
-  onRuntimeModeChange: (mode: RuntimeMode) => void
 }) {
   return (
     <div className="-m-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -1011,12 +1201,6 @@ export function ComposerModelControls({
           />
         </>
       ) : null}
-      <RuntimeModePicker
-        mode={runtimeMode}
-        disabled={disabled}
-        supportsSupervised={supportsSupervised}
-        onChange={onRuntimeModeChange}
-      />
     </div>
   )
 }

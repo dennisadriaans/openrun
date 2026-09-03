@@ -606,11 +606,19 @@ export const removeProject = createServerFn({ method: 'POST' })
 export const listNativeSessions = createServerFn({ method: 'GET' })
   .validator(
     (d: {
-      workspaceId: string
+      workspaceId?: string
+      allWorkspaces?: boolean
       kind?: 'claude' | 'codex' | 'grok' | 'antigravity'
       offset?: number
       limit?: number
-    }) => shape(d, { workspaceId: 'string', kind: 'string?', offset: 'number?', limit: 'number?' }),
+    }) =>
+      shape(d, {
+        workspaceId: 'string?',
+        allWorkspaces: 'boolean?',
+        kind: 'string?',
+        offset: 'number?',
+        limit: 'number?',
+      }),
   )
   .handler(
     async ({ data }) =>

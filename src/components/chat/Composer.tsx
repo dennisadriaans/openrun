@@ -20,7 +20,6 @@ import {
   type AgentPlugin,
 } from '../../lib/plugins'
 import { promptWithAttachments } from '../../lib/attachments'
-import type { RuntimeMode } from '../../lib/runtimeMode'
 import type { ModelOption } from '../../lib/models'
 import {
   AttachmentButton,
@@ -43,11 +42,8 @@ export function Composer({
   models,
   model,
   effort,
-  runtimeMode,
-  supportsSupervised,
   onModelChange,
   onEffortChange,
-  onRuntimeModeChange,
   onSend,
   onStop,
   className,
@@ -78,11 +74,8 @@ export function Composer({
   models: ModelOption[]
   model: string
   effort: string
-  runtimeMode: RuntimeMode
-  supportsSupervised?: boolean
   onModelChange: (slug: string) => void
   onEffortChange: (effort: string) => void
-  onRuntimeModeChange: (mode: RuntimeMode) => void
   onSend: (text: string) => void
   onStop?: () => void
   className?: string
@@ -343,12 +336,9 @@ export function Composer({
               models={models}
               model={model}
               effort={effort}
-              runtimeMode={runtimeMode}
               disabled={pending || blocked}
-              supportsSupervised={supportsSupervised}
               onModelChange={onModelChange}
               onEffortChange={onEffortChange}
-              onRuntimeModeChange={onRuntimeModeChange}
             />
 
             <div className="flex shrink-0 items-center gap-1">

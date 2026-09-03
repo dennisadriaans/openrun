@@ -9,7 +9,6 @@
  * slug. Runtime and access mode are single global values.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { isRuntimeMode, type RuntimeMode } from './runtimeMode.ts'
 
 const KEY = 'agentops:picker'
 
@@ -20,7 +19,6 @@ export type RuntimeModelPref = {
 
 export type PickerPrefs = {
   runtimeId?: string
-  runtimeMode?: RuntimeMode
   /** Last model/effort keyed by runtime id. */
   byRuntime?: Record<string, RuntimeModelPref>
   /**
@@ -48,7 +46,6 @@ export type PickerPrefs = {
 /** Patch applied via {@link usePickerPrefs}'s `remember`. */
 export type PickerPrefsPatch = {
   runtimeId?: string
-  runtimeMode?: RuntimeMode
   /** When set alongside a model/effort, scopes them under this runtime. */
   forRuntimeId?: string
   model?: string
@@ -63,7 +60,6 @@ function sanitize(raw: unknown): PickerPrefs {
   const obj = raw as Record<string, unknown>
   const out: PickerPrefs = {}
   if (typeof obj.runtimeId === 'string') out.runtimeId = obj.runtimeId
-  if (isRuntimeMode(obj.runtimeMode as string)) out.runtimeMode = obj.runtimeMode as RuntimeMode
   if (obj.byRuntime && typeof obj.byRuntime === 'object') {
     const by: Record<string, RuntimeModelPref> = {}
     for (const [id, val] of Object.entries(obj.byRuntime as Record<string, unknown>)) {
@@ -109,7 +105,6 @@ function writePickerPrefs(prefs: PickerPrefs): void {
 export function applyPatch(prev: PickerPrefs, patch: PickerPrefsPatch): PickerPrefs {
   const next: PickerPrefs = { ...prev }
   if (patch.runtimeId !== undefined) next.runtimeId = patch.runtimeId
-  if (patch.runtimeMode !== undefined) next.runtimeMode = patch.runtimeMode
   if (patch.hiddenModels !== undefined) next.hiddenModels = patch.hiddenModels
   if (patch.hiddenRuntimes !== undefined) next.hiddenRuntimes = patch.hiddenRuntimes
   if (patch.runtimeSwitchNoteDismissed !== undefined) {

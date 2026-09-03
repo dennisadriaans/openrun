@@ -252,9 +252,12 @@ Neither hook may open an `EventSource` of its own.
 | Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `components/ui.tsx` |
 | Design tokens | `src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |
 | Chat transcript themes (Open Run / Terminal) | `lib/chatTheme.ts` (ids + what starts expanded) → `components/chat/ChatThemeProvider.tsx` (`data-chat-theme` on `<html>`) → the `--chat-*` tokens and the `[data-chat-theme='terminal']` block in `styles.css`; toggle in `components/chat/ChatDebugToggle.tsx` (Debug view in the run top-bar ⋯ menu). A theme is tokens — if a component hardcodes the look, tokenize it rather than branching on the theme in JSX |
+| Start page and `/runs/new`: the draft a run begins from | `hooks/useNewRunDraft.ts` (all the wiring), `components/NewRunSurface.tsx` (the pickers around it), `routes/index.tsx`, `routes/runs.new.tsx`; `components/chat/Composer.tsx` stays props-only |
+| Automation shortcuts on the start page | `lib/automationShortcuts.ts` (the templates) → `components/AutomationShortcuts.tsx`; seeded into the form by `routes/tasks.new.tsx` via `?shortcut=` |
 | Planner proposals → install automations | `lib/planProposals.ts`; UI in `components/PlanProposalCard.tsx`, `PlanProposalsInChat.tsx`, `routes/planner.tsx` |
 
-Routes: `index.tsx` redirects to Automations · `mcp.tsx` MCP servers · `tasks.index.tsx` /
+Routes: `index.tsx` is the start page (composer + resume dropdown + automation
+shortcuts) · `mcp.tsx` MCP servers · `tasks.index.tsx` /
 `tasks.$taskId.tsx` / `tasks.new.tsx` automations · `runs.index.tsx` /
 `runs.$runId.tsx` / `runs.new.tsx` · `integrations.tsx` /
 `integrations.index.tsx` / `integrations.$provider.tsx` · `notifications.tsx` ·

@@ -124,6 +124,7 @@ export function catalogFromDiscovered(
     shortName: short[i] as string,
     efforts: effortOptions(m, kind),
     provider: kind,
+    ...(m.preferred ? { preferred: true } : {}),
   }))
 }
 

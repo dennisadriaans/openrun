@@ -35,8 +35,8 @@ export function isSupervised(mode: RuntimeMode | string | null | undefined): boo
  * their own flags and never ask us — so offering Supervised for them would be a
  * button that silently does nothing.
  *
- * The composer's mode picker and the server's refuse path both call this, so a
- * mode the UI hides is also a mode the server rejects.
+ * The server's refuse path calls this so a run cannot ask a runtime for
+ * approvals it can never give.
  */
 export function supportsSupervised(input: {
   bin: string | null | undefined

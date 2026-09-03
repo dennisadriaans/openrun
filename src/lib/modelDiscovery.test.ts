@@ -55,6 +55,11 @@ test('claude catalog shaping adds our prompt-injected efforts', () => {
   // a bare `claude` invocation would have used.
   assert.equal(catalog[0]?.slug, 'claude-opus-5')
 
+  // The marker has to survive into the picker options: `recentModels()` reads
+  // it to anchor the default view on a model the account can actually run.
+  assert.equal(catalog[0]?.preferred, true)
+  assert.equal(catalog.filter((m) => m.preferred).length, 1)
+
   const haiku = catalog.find((m) => m.slug === 'claude-haiku-4-5')
   assert.deepEqual(
     haiku?.efforts.map((e) => e.value),

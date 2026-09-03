@@ -114,6 +114,7 @@ export function SidebarToggle({ className = '' }: { className?: string }) {
 type Crumb = { label: string; to?: string }
 
 function crumbsForPath(pathname: string): Crumb[] {
+  if (pathname === '/') return [{ label: 'Start' }]
   if (pathname === '/integrations' || pathname === '/integrations/') {
     return [{ label: 'Integrations' }]
   }
@@ -188,6 +189,7 @@ export function AppTopBar() {
   const { open } = useSidebar()
   const actions = useContext(TopBarActionsContext)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  // Run detail brings its own header (breadcrumb + resume menu).
   const isWorkspace = /^\/runs\/[^/]+$/.test(pathname)
   const crumbs = crumbsForPath(pathname)
   const showCrumbs = crumbs.length >= 2

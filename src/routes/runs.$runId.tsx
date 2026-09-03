@@ -41,7 +41,7 @@ import {
   useSendMessage,
 } from '../lib/queries'
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
-import type { RuntimeMode } from '../lib/runtimeMode'
+import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
 import { runListTitle } from '../lib/runPreview'
 import {
@@ -133,11 +133,13 @@ function RunDetail() {
   const navigate = useNavigate()
   const createWorkspace = useCreateWorkspace()
   const showRight = layout.rightPanelOpen || layout.maximized
-  // The undo dialog reads this run's commits, and it opens from the chat's
-  // diff overlay too — where the right panel may well be closed.
+  // Every changed-files surface reads this: the right panel, the strip above the
+  // composer, the diff overlay and the undo dialog. Only the panel is gated on
+  // being open, so this stays enabled — gating it on `showRight` left the
+  // composer strip and the review overlay with no files whenever the panel was
+  // closed, which is the default for every run that was not webhook-triggered.
   const { data: workspacePanel } = useRunWorkspace(runId, {
     streamHealthy,
-    enabled: showRight || confirmUndoAll,
   })
 
   const pullRequestQuery = useRunPullRequest(runId)
@@ -293,7 +295,6 @@ function RunDetail() {
         runtimeId: data?.runtime?.id,
         model: data?.model || undefined,
         effort: data?.effort || undefined,
-        runtimeMode: data?.runtimeMode,
       },
     })
   }, [data, navigate])
@@ -395,7 +396,7 @@ function RunDetail() {
         prompt: firstPrompt,
         model: data?.model ?? run.model,
         effort: data?.effort ?? run.effort,
-        runtimeMode: data?.runtimeMode ?? run.runtimeMode,
+        runtimeMode: DEFAULT_RUNTIME_MODE,
       },
       {
         onSuccess: ({ runId: newRunId }) =>
@@ -444,7 +445,6 @@ function RunDetail() {
           runtimeId: data?.runtime?.id,
           model: data?.model || undefined,
           effort: data?.effort || undefined,
-          runtimeMode: data?.runtimeMode,
         },
       })
     } catch {
@@ -618,8 +618,6 @@ function RunDetail() {
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
-                runtimeBin={data?.runtime?.bin ?? fallbackRuntime?.bin}
-                runtimeTransport={data?.runtime?.transport ?? fallbackRuntime?.transport}
                 runtimes={runtimes ?? []}
                 canSwitchRuntime={data?.canSwitchRuntime ?? false}
                 runTrigger={run?.trigger}
@@ -637,7 +635,6 @@ function RunDetail() {
                 }
                 initialModel={seededModel}
                 initialEffort={seededEffort}
-                initialRuntimeMode={data?.runtimeMode}
                 changedFiles={files}
                 onSelectFile={onSelectFile}
                 onReviewFile={openReview}
