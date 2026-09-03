@@ -212,6 +212,8 @@ Neither hook may open an `EventSource` of its own.
 | Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
 | Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
 | Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` / `lib/integrations/setupGate.ts` |
+| Starting an empty conversation (desktop composer **and** phone) | `lib/startChatGate.ts` (the rules) → `core.startChat` / `core.startRunOptions` |
+| What a paired phone may do, and the routes that enforce it | `lib/mobileScope.ts` (the one allowlist; tags are frozen, widening adds a tag) → `server/mobile/auth.ts` → `server/mobile/handlers.ts`; routes in `routes/api/mobile/**`; the app in the private tree's `ios/` |
 | What "Send test event" sends | `lib/integrations/testEvent.ts` shapes it from the connection's own bindings; `cloud/hosted.ts` `ingestTestEvent` delivers it |
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
 | Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |

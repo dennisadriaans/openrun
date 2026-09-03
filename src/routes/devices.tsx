@@ -13,6 +13,7 @@ import QRCode from 'qrcode'
 
 import { Button, Card, EmptyState, Modal, PageHeader } from '../components/ui'
 import { relativeTime } from '../lib/format'
+import { mobileScopeOutdatedHint } from '../lib/mobileScope'
 import { encodePairingQr, formatPairingCode } from '../lib/pairing'
 import {
   useCancelPairing,
@@ -227,6 +228,9 @@ function ReachabilityCard({
 }
 
 function DeviceRow({ device, onRevoke }: { device: DeviceLike; onRevoke: () => void }) {
+  // A phone paired by an older build keeps the powers it was paired with. Say
+  // so here rather than letting the missing button read as a bug.
+  const outdated = mobileScopeOutdatedHint(device.scope)
   return (
     <li className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
       <Smartphone className="size-4 shrink-0 text-tier-tertiary" />
@@ -237,6 +241,7 @@ function DeviceRow({ device, onRevoke }: { device: DeviceLike; onRevoke: () => v
           {device.lastSeenAt ? ` · last seen ${relativeTime(device.lastSeenAt)}` : ''}
           {device.pushToken ? ' · push on' : ' · push off'}
         </div>
+        {outdated ? <div className="mt-1 text-ui-sm text-tier-tertiary">{outdated}</div> : null}
       </div>
       <Button variant="danger" onClick={onRevoke}>
         Revoke

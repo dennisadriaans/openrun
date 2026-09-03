@@ -14,13 +14,20 @@
  * Browser-safe: no `node:` imports.
  */
 
-/** Capability tier granted at pairing time. */
-export type MobileScope = 'control'
+/**
+ * Capability tier granted at pairing time.
+ *
+ * Tags are frozen once shipped. Widening what phones may do adds a *new* tag
+ * rather than editing an old one, so a device paired months ago keeps exactly
+ * the powers its owner saw on the pairing screen until they pair it again.
+ */
+export type MobileScope = 'control' | 'control-v2'
 
 /** Every operation a mobile route can ask for. */
 export type MobileOp =
   // Read
   | 'dashboard'
+  | 'runs.startOptions'
   | 'runs.list'
   | 'runs.read'
   | 'runs.stream'
@@ -29,6 +36,7 @@ export type MobileOp =
   | 'activity.stream'
   | 'tasks.list'
   // Act on a run
+  | 'runs.create'
   | 'runs.cancel'
   | 'runs.message'
   | 'approvals.answer'
@@ -40,6 +48,31 @@ export type MobileOp =
   | 'device.push'
 
 export const MOBILE_OPS: readonly MobileOp[] = [
+  'dashboard',
+  'runs.startOptions',
+  'runs.list',
+  'runs.read',
+  'runs.stream',
+  'runs.diff',
+  'runs.files',
+  'activity.stream',
+  'tasks.list',
+  'runs.create',
+  'runs.cancel',
+  'runs.message',
+  'approvals.answer',
+  'tasks.toggle',
+  'tasks.runNow',
+  'device.unpair',
+  'device.push',
+]
+
+/**
+ * Ops the original `control` tag shipped with. Written out rather than derived
+ * by subtraction: a frozen tag must not quietly change shape the next time an
+ * op is added to `MOBILE_OPS`.
+ */
+const CONTROL_OPS: readonly MobileOp[] = [
   'dashboard',
   'runs.list',
   'runs.read',
@@ -60,10 +93,17 @@ export const MOBILE_OPS: readonly MobileOp[] = [
 /**
  * Ops granted by each scope tag.
  *
- * `control` is monitor + review + approve + automation on/off + Run now. It
- * deliberately excludes everything that edits configuration or writes to a
- * repo: a phone token travels over the LAN in cleartext, so its blast radius is
- * capped at things that are visible and reversible from the desktop.
+ * `control` is monitor + review + approve + automation on/off + Run now.
+ * `control-v2` adds starting a new chat in an existing workspace — the same
+ * class of power `tasks.runNow` and `runs.message` already carry (spawn an
+ * agent, hand it a prompt), not a new one, but a widening all the same, so it
+ * rides on its own tag and a phone paired before it stays on `control` until
+ * it is paired again.
+ *
+ * Both tiers deliberately exclude everything that edits configuration or
+ * writes to a repo: a phone token travels over the LAN in cleartext, so its
+ * blast radius is capped at things that are visible and reversible from the
+ * desktop.
  *
  * `runs.diff` / `runs.files` are read-only by construction — they reach
  * `core.getFileDiff` / `core.listWorkspaceFiles` / `core.readWorkspaceFile` and
@@ -71,14 +111,41 @@ export const MOBILE_OPS: readonly MobileOp[] = [
  * an untrusted network wants the https tunnel, not the LAN address.
  */
 const SCOPE_OPS: Record<MobileScope, readonly MobileOp[]> = {
-  control: MOBILE_OPS,
+  control: CONTROL_OPS,
+  'control-v2': MOBILE_OPS,
 }
 
-export const DEFAULT_MOBILE_SCOPE: MobileScope = 'control'
+export const DEFAULT_MOBILE_SCOPE: MobileScope = 'control-v2'
 
 /** True when `scope` is a tag this build understands. */
 export function isMobileScope(value: string): value is MobileScope {
   return Object.hasOwn(SCOPE_OPS, value)
+}
+
+/**
+ * The op ids a scope tag grants, for a client that needs to *feature-detect*
+ * rather than read prose. The phone hides a control it may not use instead of
+ * offering a button that comes back 403.
+ *
+ * An unrecognised tag grants nothing, same as `mobileScopeAllows`.
+ */
+export function mobileScopeOps(scope: string): MobileOp[] {
+  if (!isMobileScope(scope)) return []
+  return [...SCOPE_OPS[scope]]
+}
+
+/**
+ * What a paired device is missing because it holds an older tag, or `null`
+ * when it is current. Shown on the desktop Devices page so "why can't my phone
+ * do that" has an answer that is not "read the source".
+ */
+export function mobileScopeOutdatedHint(scope: string): string | null {
+  if (!isMobileScope(scope) || scope === DEFAULT_MOBILE_SCOPE) return null
+  const missing = MOBILE_OPS.filter((op) => !SCOPE_OPS[scope].includes(op))
+  if (missing.length === 0) return null
+  return `Paired before this build. Pair it again to add: ${missing
+    .map((op) => OP_LABELS[op].toLowerCase())
+    .join(', ')}.`
 }
 
 /**
@@ -95,6 +162,7 @@ export function mobileScopeAllows(scope: string, op: MobileOp): boolean {
 /** User-facing label per op, for the "what your phone can do" panel. */
 const OP_LABELS: Record<MobileOp, string> = {
   dashboard: 'See the dashboard',
+  'runs.startOptions': 'See which workspaces and runtimes can take a run',
   'runs.list': 'Browse run history',
   'runs.read': 'Read a run transcript',
   'runs.stream': 'Watch run output live',
@@ -102,6 +170,7 @@ const OP_LABELS: Record<MobileOp, string> = {
   'runs.files': 'Read workspace files (read-only)',
   'activity.stream': 'Get live run activity',
   'tasks.list': 'Browse automations',
+  'runs.create': 'Start a new run in an existing workspace',
   'runs.cancel': 'Cancel a running run',
   'runs.message': 'Send a chat follow-up',
   'approvals.answer': 'Allow or deny tool approvals',

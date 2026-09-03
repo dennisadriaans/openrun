@@ -10,11 +10,17 @@
  *    `readWorkspaceFile`). There is no code path from a phone to a commit, a
  *    push, or a file write, whatever a token claims.
  *
+ * Starting a run is the one write that reaches an agent. It is the same power
+ * `tasks.runNow` and `runs.message` already carry — spawn a CLI in a worktree
+ * the desktop already created, hand it a prompt — and it still cannot create a
+ * workspace, a project, or an automation to point at.
+ *
  * Core throws on bad input; the boundary converts that into a status.
  */
 import { pendingApprovals } from '../../lib/pendingApprovals'
-import { mobileScopeSummary } from '../../lib/mobileScope'
+import { mobileScopeOps, mobileScopeSummary } from '../../lib/mobileScope'
 import { runNowBlockedReason } from '../../lib/runNowGate'
+import { startChatBlockedReason } from '../../lib/startChatGate'
 import type { DeviceRow } from '../db'
 import { clearPairAttempts, pairAttemptBlocked, recordPairFailure, RATE_LIMITED } from './auth'
 import { redeemPairingCode, registerPushToken, revokeDevice } from './devices'
@@ -105,12 +111,20 @@ export async function handlePair(input: {
   return ok({
     token: result.token,
     device: publicDevice(result.device),
-    scope: mobileScopeSummary(result.device.scope),
+    scope: {
+      ...mobileScopeSummary(result.device.scope),
+      // Op ids, not prose: a client hides a control it may not use, and
+      // matching on a human label would break the first time one is reworded.
+      ops: mobileScopeOps(result.device.scope),
+    },
   })
 }
 
 export async function handleMe(device: DeviceRow): Promise<MobileResult> {
-  return ok({ device: publicDevice(device), scope: mobileScopeSummary(device.scope) })
+  return ok({
+    device: publicDevice(device),
+    scope: { ...mobileScopeSummary(device.scope), ops: mobileScopeOps(device.scope) },
+  })
 }
 
 export async function handleRegisterPush(input: {
@@ -259,6 +273,15 @@ export async function handleRunFileContent(input: {
   }
 }
 
+/**
+ * What a new run could be started against. Prompts are never sent here — the
+ * phone composes its own — and archived workspaces / disabled runtimes are
+ * already dropped by `core.startRunOptions`.
+ */
+export async function handleStartOptions(): Promise<MobileResult> {
+  return ok({ ...(await core()).startRunOptions() })
+}
+
 export async function handleListTasks(): Promise<MobileResult> {
   // Strip the prompt: it can be long, and the phone cannot edit it anyway.
   const tasks = (await core()).listTasks().map((task) => ({
@@ -286,6 +309,59 @@ export async function handleListTasks(): Promise<MobileResult> {
 // ---------------------------------------------------------------------------
 // Writes — the narrow set a phone may perform
 // ---------------------------------------------------------------------------
+
+/**
+ * Open an empty conversation in an existing workspace.
+ *
+ * Deliberately narrower than the desktop composer: no workspace is created, no
+ * native CLI chat is adopted, and supervised mode is not selectable — a phone
+ * cannot create the thing it would be starting a run against, and a supervised
+ * run started from a phone that then backgrounds is a five-minute auto-deny
+ * waiting to happen.
+ */
+export async function handleStartChat(body: Record<string, unknown> | null): Promise<MobileResult> {
+  const workspaceId = str(body, 'workspaceId')
+  const runtimeId = str(body, 'runtimeId')
+  const prompt = str(body, 'prompt')
+  if (!workspaceId) {
+    return { ok: false, status: 400, body: { error: 'A workspaceId is required.' } }
+  }
+  if (!runtimeId) {
+    return { ok: false, status: 400, body: { error: 'A runtimeId is required.' } }
+  }
+
+  // Refuse with the gate's words before touching the executor, so a stale
+  // picker gets the same sentence the phone would have rendered on the row.
+  const options = (await core()).startRunOptions()
+  const workspace = options.workspaces.find((candidate) => candidate.id === workspaceId)
+  const runtime = options.runtimes.find((candidate) => candidate.id === runtimeId)
+  const blocked = startChatBlockedReason({
+    workspaceValid: Boolean(workspace),
+    workspaceReady: workspace?.status === 'ready',
+    workspaceStatus: workspace?.status ?? null,
+    activeRunId: workspace?.activeRunId ?? null,
+    runtimeValid: Boolean(runtime),
+    runtimeInstalled: runtime?.installed ?? false,
+    runtimeBin: runtime?.bin,
+    promptValid: prompt.trim().length > 0,
+  })
+  if (blocked) return { ok: false, status: 409, body: { error: blocked } }
+
+  try {
+    const started = (await core()).startChat({
+      workspaceId,
+      runtimeId,
+      prompt,
+      model: str(body, 'model') || undefined,
+      effort: str(body, 'effort') || undefined,
+    })
+    return ok({ ...started })
+  } catch (err) {
+    // Anything left is a race the gate could not see — the worktree was taken
+    // between the check and the start, or the CLI left PATH.
+    return failed(err, 409)
+  }
+}
 
 export async function handleCancelRun(runId: string): Promise<MobileResult> {
   if (!(await core()).getRun(runId)) return NOT_FOUND

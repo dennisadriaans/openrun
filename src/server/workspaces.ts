@@ -45,6 +45,7 @@ import {
 } from '../lib/checks'
 import { assertFolderName } from '../lib/folderName'
 import { assertWorkspaceReady } from '../lib/workspaceReady'
+import { workspaceBusyMessage } from '../lib/startChatGate.ts'
 import { missingWorkspaceDirMessage } from '../lib/workspaceHealth.ts'
 import {
   openrunHome,
@@ -863,12 +864,12 @@ export function resolveWorkspacePath(workspaceId: string): string {
  */
 export function assertWorkspaceFree(workspaceId: string): void {
   if (isWorkspaceCancellationPending(workspaceId)) {
-    throw new Error('This workspace already has a run in progress')
+    throw new Error(workspaceBusyMessage())
   }
   const active = getDb()
     .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
     .get(workspaceId) as { id: string } | undefined
   if (active) {
-    throw new Error('This workspace already has a run in progress')
+    throw new Error(workspaceBusyMessage())
   }
 }
