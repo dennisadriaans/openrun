@@ -133,11 +133,13 @@ function RunDetail() {
   const navigate = useNavigate()
   const createWorkspace = useCreateWorkspace()
   const showRight = layout.rightPanelOpen || layout.maximized
-  // The undo dialog reads this run's commits, and it opens from the chat's
-  // diff overlay too — where the right panel may well be closed.
+  // Every changed-files surface reads this: the right panel, the strip above the
+  // composer, the diff overlay and the undo dialog. Only the panel is gated on
+  // being open, so this stays enabled — gating it on `showRight` left the
+  // composer strip and the review overlay with no files whenever the panel was
+  // closed, which is the default for every run that was not webhook-triggered.
   const { data: workspacePanel } = useRunWorkspace(runId, {
     streamHealthy,
-    enabled: showRight || confirmUndoAll,
   })
 
   const pullRequestQuery = useRunPullRequest(runId)
