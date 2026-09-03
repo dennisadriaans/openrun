@@ -36,6 +36,8 @@
     "token:print": "node --experimental-strip-types scripts/token.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "contract:generate": "node --experimental-strip-types scripts/contract/generate.ts",
+    "contract:check": "node --experimental-strip-types scripts/contract/generate.ts && git diff --exit-code -- src/fns/index.ts src/contract/generated clients/apple",
     "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "lint": "biome check src scripts",
     "lint:fix": "biome check --write src scripts",

@@ -29,6 +29,8 @@ pnpm start           # serve the build via scripts/start.ts (refuses an unsafe b
 pnpm token:print     # print / create the access token (`pnpm token` is pnpm's own npm command)
 pnpm preview         # vite preview
 pnpm typecheck       # tsc --noEmit
+pnpm contract:generate # rebuild every transport from src/contract/operations.ts
+pnpm contract:check    # regenerate, then fail if anything drifted (CI gate)
 pnpm test            # unit tests
 pnpm generate-routes # tsr generate  (see the routeTree gotcha — prefer `pnpm build`)
 pnpm ship "feat(x): y" # branch off main, commit, push, open the PR
@@ -44,13 +46,22 @@ trusting a hard-coded number here.
 ## Architecture
 
 ```
-routes/*.tsx  →  lib/queries.ts (React Query)  →  fns/index.ts (createServerFn RPC)
+routes/*.tsx  →  lib/queries.ts (React Query)  →  fns/index.ts (GENERATED server fns)
+                                                        ↓
+routes/api/v1/$.ts (REST + SSE, every client)  →  server/contract/dispatch.ts
                                                         ↓ lazy import()
                                               server/core.ts (facade, boots scheduler)
                                                 ↓            ↓                ↓
                                           server/db.ts  server/executor.ts  server/scheduler.ts
                                           (better-sqlite3)  (spawn CLI)      (node-cron)
 ```
+
+**`src/contract/operations.ts` is the source of truth for the whole API surface.**
+118 operations, described once as data. `pnpm contract:generate` emits from it:
+`src/fns/index.ts`, `src/contract/generated/client.ts` (framework-free fetch client),
+`src/contract/generated/openapi.json`, and the Swift `OpenRunKit` package under
+`clients/apple/`. Never hand-edit those four; `pnpm contract:check` fails CI if you do.
+Adding a capability is: export it from `core.ts`, add a descriptor, regenerate.
 
 The **live path** is separate and easy to miss:
 
@@ -131,10 +142,22 @@ Neither hook may open an `EventSource` of its own.
   optional: a row written before a field existed simply lacks it, and readers must tolerate
   `undefined` rather than assuming a backfill happened.
 - **`server/core.ts` is the only facade.** New server capability ⇒ export from `core.ts`,
-  wrap in `fns/index.ts`, hook in `lib/queries.ts`. Don't let a route reach past it.
+  add a descriptor to `src/contract/operations.ts`, run `pnpm contract:generate`, hook in
+  `lib/queries.ts`. Don't let a route reach past it. A descriptor naming a `core` export
+  that does not exist fails `server/contract/dispatch.test.ts`.
   - A server module that needs to reach *back* into `core.ts` must do so with a lazy
     `await import('../core')` — core boots the scheduler, so a static import there is
     a cycle.
+- **`src/contract/**` is browser-safe and dependency-free**, same rule as `src/lib/**` —
+  the descriptors ship to the browser inside the generated client.
+  `contract/contract.test.ts` walks the directory and fails the build on a `node:` import,
+  a reach into `server/`, or a third-party dependency.
+- **Ship gate *decisions*, not gate *logic*, to clients that are not TypeScript.**
+  The gate modules stay the single implementation; `lib/actions.ts` runs them on the
+  server's read path and attaches the answers to the resource
+  (`task.actions.runNow = { enabled, reason }`). A TypeScript client may still call the
+  gates locally for an optimistic disable — same function, so they cannot disagree.
+  Swift clients own no copy. Never re-derive a refuse condition in another language.
 - **Value imports in test-covered `lib/` modules carry an explicit `.ts` extension**
   (`from './cron.ts'`) — `--experimental-strip-types` has no bundler resolution. Type-only
   imports and untested modules may omit it. Match the file you're editing.
@@ -164,6 +187,10 @@ Neither hook may open an `EventSource` of its own.
 
 | Area | Files |
 | --- | --- |
+| The API surface: adding, renaming or scoping an operation | `src/contract/operations.ts` (the list) → `src/contract/types.ts` (the vocabulary); regenerate with `pnpm contract:generate` |
+| How a request reaches the facade, and how a refusal becomes a status | `server/contract/dispatch.ts`; the one REST route is `routes/api/v1/$.ts` |
+| "Why is this button disabled", sent to a non-TypeScript client | `lib/actions.ts`; attached in `core.decorate` |
+| An Apple client (iOS, macOS) | `clients/apple/OpenRunKit/` — `Generated.swift` is generated, everything else is hand-written |
 | Run/turn lifecycle, spawning a CLI, streaming stdout | `server/executor.ts` |
 | Per-CLI differences: headless invocation, session id, resume, model/effort flags | `server/resume.ts`, `lib/models.ts` |
 | Adopting a chat started in the CLI itself | `lib/nativeSessions.ts` + `server/nativeSessions.ts` (find them), `lib/nativeTranscript.ts` + `server/nativeTranscript.ts` (read one in full), `server/nativeImport.ts` (write it into a run), `executor.adoptNativeChat` (adopt without prompting); picker in `components/NativeSessionMenu.tsx` |
@@ -212,6 +239,8 @@ Neither hook may open an `EventSource` of its own.
 | Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
 | Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
 | Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` / `lib/integrations/setupGate.ts` |
+| Starting an empty conversation (desktop composer **and** phone) | `lib/startChatGate.ts` (the rules) → `core.startChat` / `core.startRunOptions` |
+| What a paired phone may do, and the routes that enforce it | `lib/mobileScope.ts` (the one allowlist; tags are frozen, widening adds a tag) → `server/mobile/auth.ts` → `server/mobile/handlers.ts`; routes in `routes/api/mobile/**`; the app in the private tree's `ios/` |
 | What "Send test event" sends | `lib/integrations/testEvent.ts` shapes it from the connection's own bindings; `cloud/hosted.ts` `ingestTestEvent` delivers it |
 | Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
 | Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
@@ -355,6 +384,11 @@ one-paragraph import, never a restatement.
 
 ## Gotchas
 
+- Four more files are **generated** from `src/contract/operations.ts`: `src/fns/index.ts`,
+  `src/contract/generated/client.ts`, `src/contract/generated/openapi.json`, and
+  `clients/apple/OpenRunKit/Sources/OpenRunKit/Generated.swift`. Never hand-edit them —
+  run `pnpm contract:generate`. The generator formats its own output with Biome, so
+  `pnpm lint:fix` and the generator cannot disagree.
 - `src/routeTree.gen.ts` is **generated**. Never hand-edit it, and don't resolve conflicts in
   it by hand — regenerate. Regenerate with **`pnpm build`** (or `pnpm dev`), not
   `pnpm generate-routes`: the standalone router-cli currently emits a different `Register`
