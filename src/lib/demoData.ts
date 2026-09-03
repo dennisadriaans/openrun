@@ -3,6 +3,7 @@
  * OPENRUN_DEMO=1; lists overlay this on top of the real DB (nothing is written).
  */
 import type { TaskWithMeta } from '../fns'
+import { taskActions } from './actions.ts'
 
 export function isDemoMode(): boolean {
   const raw = (process.env.OPENRUN_DEMO ?? process.env.AGENTOPS_DEMO ?? '').trim().toLowerCase()
@@ -37,7 +38,9 @@ export function demoTaskDetail(taskId: string, now: number = Date.now()): TaskWi
   if (!isDemoDetailTask(taskId)) return null
 
   const cwd = '/Users/demo/Developer/open-run-nightly-deps'
-  return {
+  // Annotated so the literal keeps its contextual types — `workspaceHealth.code`
+  // widens to `string` without it.
+  const task: Omit<TaskWithMeta, 'actions'> = {
     id: taskId,
     name: 'Nightly dependency bump',
     description: 'Keep dependencies current and leave a reviewed pull request ready each morning.',
@@ -101,6 +104,9 @@ Apply safe patch and minor updates, update the lockfile, and run the existing ch
     triggerBlockReason: null,
     readinessBlockers: [],
   }
+  // Demo rows go through the same gates as real ones, so the sample screens
+  // show the controls in the state the rules actually produce.
+  return { ...task, actions: taskActions(task) }
 }
 
 export type DemoTask = {
