@@ -218,12 +218,14 @@ export function NavigationProjectPicker({
   projects,
   projectId,
   disabled,
+  muted,
   onChange,
   onAddProject,
 }: {
   projects: NavigationProject[]
   projectId: string
   disabled?: boolean
+  muted?: boolean
   onChange: (id: string) => void
   onAddProject?: () => void
 }) {
@@ -234,6 +236,7 @@ export function NavigationProjectPicker({
       title={selected?.path ?? selected?.name ?? 'Select repository'}
       icon={<FolderGit2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />}
       disabled={disabled}
+      muted={muted}
     >
       {(close) => (
         <>
