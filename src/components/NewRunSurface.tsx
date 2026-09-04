@@ -13,9 +13,17 @@ import { NewWorkspaceModal } from './NewWorkspaceModal'
 import { WorkspaceBreadcrumb } from './workspace/WorkspaceBreadcrumb'
 import type { NewRunDraft } from '../hooks/useNewRunDraft'
 
-export function NewRunBreadcrumb({ draft }: { draft: NewRunDraft }) {
+export function NewRunBreadcrumb({
+  draft,
+  compact = false,
+}: {
+  draft: NewRunDraft
+  compact?: boolean
+}) {
   return (
     <WorkspaceBreadcrumb
+      className={compact ? 'text-[10px]' : undefined}
+      muted={compact}
       projectId={draft.projectId}
       projectName={draft.project?.name}
       workspace={draft.workspace}

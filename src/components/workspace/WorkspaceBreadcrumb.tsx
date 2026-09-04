@@ -115,6 +115,7 @@ function BranchSwitcher({
 }
 
 export function WorkspaceBreadcrumb({
+  className = '',
   projectId,
   projectName,
   branch,
@@ -124,11 +125,13 @@ export function WorkspaceBreadcrumb({
   workspace,
   workspaces,
   branchDisabled,
+  muted = false,
   onRequestNewBranch,
   onAddProject,
   onSelectProject,
   onSelectWorkspace,
 }: {
+  className?: string
   projectId?: string
   projectName?: string
   branch?: string
@@ -138,6 +141,7 @@ export function WorkspaceBreadcrumb({
   workspace?: WorkspaceWithMeta | null
   workspaces?: WorkspaceWithMeta[]
   branchDisabled?: boolean
+  muted?: boolean
   onRequestNewBranch?: () => void
   onAddProject?: () => void
   onSelectProject?: (projectId: string) => void
@@ -172,13 +176,17 @@ export function WorkspaceBreadcrumb({
   }
 
   return (
-    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
+    <nav
+      aria-label="Breadcrumb"
+      className={`flex min-w-0 flex-1 items-center gap-1.5 ${className || 'text-[13px]'}`}
+    >
       {currentProjectId && (projects.length > 0 || projectName) ? (
         <>
           <NavigationProjectPicker
             projects={pickerProjects}
             projectId={currentProjectId}
             disabled={branchDisabled}
+            muted={muted}
             onChange={(id) => void switchProject(id)}
             onAddProject={onAddProject}
           />
@@ -202,7 +210,7 @@ export function WorkspaceBreadcrumb({
             current={workspace}
             workspaces={workspaces ?? []}
             disabled={branchDisabled}
-            muted={Boolean(runTitle)}
+            muted={muted || Boolean(runTitle)}
             onRequestNewBranch={onRequestNewBranch}
             unreadWorkspaceIds={unreadWorkspaceIds}
             latestRunIdByWorkspace={latestRunIdByWorkspace}

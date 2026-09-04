@@ -10,7 +10,12 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Logo } from './__root'
 import { AutomationShortcuts } from '../components/AutomationShortcuts'
-import { NewRunComposer, NewRunModals, NewRunPendingTurn } from '../components/NewRunSurface'
+import {
+  NewRunBreadcrumb,
+  NewRunComposer,
+  NewRunModals,
+  NewRunPendingTurn,
+} from '../components/NewRunSurface'
 import { Button } from '../components/ui'
 import { useNewRunDraft, type NewRunSeed } from '../hooks/useNewRunDraft'
 
@@ -41,11 +46,16 @@ function StartPage() {
               <h1 className="mt-4 text-ui-xl text-foreground">Let's continue some work</h1>
             </div>
 
-            <NewRunComposer
-              draft={draft}
-              placeholder="Ask anything…"
-              className="relative w-full min-w-0"
-            />
+            <div className="space-y-1.5">
+              <NewRunComposer
+                draft={draft}
+                placeholder="Ask anything…"
+                className="relative w-full min-w-0"
+              />
+              <div className="flex min-w-0 px-1">
+                <NewRunBreadcrumb draft={draft} compact />
+              </div>
+            </div>
 
             {noProjects ? (
               <div className="rounded-xl border border-border bg-elevated/40 px-4 py-3.5">
