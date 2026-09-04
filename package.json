@@ -2,7 +2,7 @@
   "name": "openrun",
   "private": true,
   "version": "0.1.0",
-  "description": "Schedule Claude Code, Codex, Grok and Gemini like cron jobs — on your machine, with no API keys.",
+  "description": "Schedule Claude Code, Codex, Grok and fx like cron jobs — on your machine, with no API keys.",
   "homepage": "https://openrun.sh",
   "repository": {
     "type": "git",

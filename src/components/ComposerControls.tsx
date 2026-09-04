@@ -10,6 +10,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Eye,
   EyeOff,
   FolderGit2,
@@ -678,47 +679,89 @@ function UnreadDot({ label }: { label: string }) {
   )
 }
 
+/**
+ * A branch row whose trailing slot holds the selected tick and the copy action
+ * in one fixed position — the tick shows while the row is idle, and hovering
+ * that slot swaps in copy rather than pushing the tick aside. Same stacked-grid
+ * arrangement the runtime and model rows use for their hide toggle.
+ */
 function CompactBranchItem({
   option,
   active,
   disabled,
   unread,
+  copied,
   onSelect,
+  onCopyBranch,
 }: {
   option: BranchOption
   active: boolean
   disabled?: boolean
   unread?: boolean
+  copied?: boolean
   onSelect: () => void
+  onCopyBranch?: () => void
 }) {
   const sublabel = option.blockedReason ?? (option.kind === 'main' ? 'main' : undefined)
+  const showTrailing = Boolean(onCopyBranch) && option.action !== 'create-workspace'
   return (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      title={option.blockedReason ?? option.branch}
-      onClick={onSelect}
-      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
-      }`}
-    >
-      {option.action === 'create-workspace' ? (
-        <Plus className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
-      ) : (
-        <GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
-      )}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate mono text-[12.5px] leading-tight">{option.branch}</span>
-        {sublabel ? (
-          <span className="block truncate text-[10px] leading-tight text-muted-foreground">
-            {sublabel}
-          </span>
+    <div className="relative flex items-center">
+      <button
+        type="button"
+        role="menuitem"
+        disabled={disabled}
+        title={option.blockedReason ?? option.branch}
+        onClick={onSelect}
+        className={`flex w-full min-w-0 items-center gap-2 rounded-lg py-1.5 pl-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          showTrailing ? 'pr-8' : 'pr-2.5'
+        } ${active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'}`}
+      >
+        {option.action === 'create-workspace' ? (
+          <Plus className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+        ) : (
+          <GitBranch className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate mono text-[12.5px] leading-tight">{option.branch}</span>
+          {sublabel ? (
+            <span className="block truncate text-[10px] leading-tight text-muted-foreground">
+              {sublabel}
+            </span>
+          ) : null}
+        </span>
+        {unread ? <UnreadDot label="New activity" /> : null}
+        {active && !showTrailing ? (
+          <Check className="size-3.5 shrink-0" aria-hidden="true" />
         ) : null}
-      </span>
-      {unread ? <UnreadDot label="New activity" /> : null}
-      {active ? <Check className="size-3.5 shrink-0" aria-hidden="true" /> : null}
-    </button>
+      </button>
+      {showTrailing ? (
+        <span className="group/trailing absolute top-1/2 right-2 grid size-5 -translate-y-1/2 place-items-center">
+          {active ? (
+            <Check
+              aria-hidden="true"
+              className="pointer-events-none col-start-1 row-start-1 size-3.5 transition-opacity group-hover/trailing:opacity-0"
+            />
+          ) : null}
+          <button
+            type="button"
+            aria-label={copied ? `Copied branch ${option.branch}` : `Copy branch ${option.branch}`}
+            title={copied ? 'Copied' : 'Copy branch name'}
+            onClick={onCopyBranch}
+            className={`col-start-1 row-start-1 flex size-5 items-center justify-center rounded opacity-0 transition-opacity group-hover/trailing:opacity-100 focus-visible:opacity-100 ${
+              copied
+                ? 'text-success hover:text-success'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {copied ? (
+              <Check className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Copy className="size-3.5" aria-hidden="true" />
+            )}
+          </button>
+        </span>
+      ) : null}
+    </div>
   )
 }
 
@@ -758,6 +801,26 @@ export function BranchPicker({
   const selected = workspaces.find((w) => w.id === workspaceId)
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(BRANCH_PAGE_SIZE)
   const [visibleBranchCount, setVisibleBranchCount] = useState(BRANCH_PAGE_SIZE)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    },
+    [],
+  )
+
+  const copyBranch = async (option: BranchOption) => {
+    try {
+      await navigator.clipboard.writeText(option.branch)
+      setCopiedId(option.id)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopiedId(null), 1000)
+    } catch {
+      // Clipboard access may be unavailable in an insecure browser context.
+    }
+  }
   const compact = appearance === 'nav'
   const existing = workspaces.filter((w) => w.action !== 'create-workspace')
   const unopened = compact ? [] : workspaces.filter((w) => w.action === 'create-workspace')
@@ -821,10 +884,12 @@ export function BranchPicker({
                 active={w.id === workspaceId}
                 disabled={Boolean(w.blockedReason) || busyId === w.id}
                 unread={unreadIds?.has(w.id)}
+                copied={copiedId === w.id}
                 onSelect={() => {
                   onChange(w.id)
                   close()
                 }}
+                onCopyBranch={() => void copyBranch(w)}
               />
             ) : (
               <MenuItem

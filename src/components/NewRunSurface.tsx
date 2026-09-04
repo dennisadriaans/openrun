@@ -85,6 +85,7 @@ export function NewRunComposer({
       onModelChange={draft.changeModel}
       onEffortChange={draft.changeEffort}
       onSend={draft.send}
+      {...(draft.refusedPrompt ? { restoredDraft: draft.refusedPrompt } : {})}
       {...(draft.uploadAttachment ? { uploadAttachment: draft.uploadAttachment } : {})}
       commands={draft.commands?.commands ?? []}
       {...(draft.commands?.note ? { commandNote: draft.commands.note } : {})}

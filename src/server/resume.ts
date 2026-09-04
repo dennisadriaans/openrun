@@ -19,6 +19,7 @@ import { parseArgsTemplate } from '../lib/argsTemplate.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode.ts'
 import { isSupervised } from '../lib/supervisedPolicy.ts'
 import { buildStreamJsonUserMessage } from '../lib/claudeControl.ts'
+import { extractAntigravityAssistantText } from '../lib/agentEvents/antigravity.ts'
 import { extractGrokAssistantText } from '../lib/agentEvents/grok.ts'
 import { isAcpTransport } from '../lib/acpTransport.ts'
 import type { EventRuntimeKind } from '../lib/agentEvents/types.ts'
@@ -63,13 +64,22 @@ export function runtimeKind(bin: string): RuntimeKind {
 }
 
 /**
- * Antigravity mirrors Claude Code's headless surface (`-p`, `--output-format
- * stream-json`, `--dangerously-skip-permissions`, `--model`, `--effort`), so it
- * reuses Claude's stdout adapter rather than getting a near-identical copy.
+ * Antigravity mirrors Claude Code's headless *flags* (`--output-format
+ * stream-json`, `--dangerously-skip-permissions`, `--model`, `--effort`), but
+ * not its stdout: `agy` emits `{event:'init'|'step_update'|'result'}` envelopes
+ * with no `type` field, so it needs its own adapter — routing it to Claude's
+ * parses every line as nothing and the run reads as an empty response.
  */
 export function eventKindFor(kind: RuntimeKind): EventRuntimeKind {
-  if (kind === 'antigravity') return 'claude'
-  if (kind === 'claude' || kind === 'codex' || kind === 'grok' || kind === 'gemini') return kind
+  if (
+    kind === 'claude' ||
+    kind === 'antigravity' ||
+    kind === 'codex' ||
+    kind === 'grok' ||
+    kind === 'gemini'
+  ) {
+    return kind
+  }
   return 'generic'
 }
 
@@ -426,7 +436,7 @@ export function buildTurnCommand(input: {
     args = appendModelEffortArgs(args, kind, model, effort)
     args = applyRuntimeModeFlags(args, kind, runtimeMode)
     if (machineReadable) {
-      args = ensureMachineReadableArgs(args, eventKindFor(kind))
+      args = ensureMachineReadableArgs(args, kind)
       if (kind === 'fx') args = ensureFxAskArgs(args)
     }
 
@@ -500,15 +510,16 @@ export function buildTurnCommand(input: {
   if (kind === 'antigravity') {
     // `--conversation <id>` is the by-id resume; `--continue` picks the most
     // recent one for the cwd, which is right when the id never surfaced.
+    // agy's `-p` consumes the next argv token as the prompt — flags first.
     let args = sessionId
-      ? ['-p', '--output-format', 'stream-json', '--conversation', sessionId]
-      : ['-p', '--output-format', 'stream-json', '--continue']
+      ? ['--output-format', 'stream-json', '--conversation', sessionId, '-p', prompt]
+      : ['--output-format', 'stream-json', '--continue', '-p', prompt]
     args = mergePreservedArgs(args, preserved)
     args = appendModelEffortArgs(args, kind, model, effort)
     args = applyRuntimeModeFlags(args, kind, runtimeMode)
     return {
       args,
-      stdin: prompt,
+      stdin: null,
       promptFileContents: null,
       display: display(runtime.bin, args),
       canResume: true,
@@ -550,7 +561,7 @@ export function buildTurnCommand(input: {
     args = mergePreservedArgs(args, preserved)
     args = appendModelEffortArgs(args, kind, model, effort)
     args = applyRuntimeModeFlags(args, kind, runtimeMode)
-    args = ensureMachineReadableArgs(args, eventKindFor(kind))
+    args = ensureMachineReadableArgs(args, kind)
     return {
       args,
       stdin: null,
@@ -675,6 +686,11 @@ export function parseAssistantText(stdout: string): string {
 
   const grok = extractGrokAssistantText(trimmed)
   if (grok !== null) return grok
+
+  // `agy` envelopes carry no `type`, so the generic JSONL scan below finds
+  // nothing in them and would return an empty answer.
+  const antigravity = extractAntigravityAssistantText(trimmed)
+  if (antigravity !== null) return antigravity
 
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {

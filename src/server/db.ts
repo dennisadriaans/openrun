@@ -742,6 +742,88 @@ function addColumn(db: Database.Database, table: string, column: string, ddl: st
  * Additive column migrations for databases created before a column existed.
  */
 function migrate(db: Database.Database) {
+  // Schema creation runs first: the data migrations below write into these
+  // tables (deleted_runtime_ids among them), and on a fresh database they do
+  // not exist yet unless they are created up front.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS deleted_project_paths (
+      path TEXT PRIMARY KEY,
+      deletedAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS deleted_runtime_ids (
+      id TEXT PRIMARY KEY,
+      deletedAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS turn_events (
+      id TEXT PRIMARY KEY,
+      messageId TEXT NOT NULL,
+      runId TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      createdAt INTEGER NOT NULL,
+      FOREIGN KEY (messageId) REFERENCES messages(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_turn_events_message
+      ON turn_events(messageId, seq ASC);
+    CREATE INDEX IF NOT EXISTS idx_turn_events_run
+      ON turn_events(runId, createdAt ASC, seq ASC);
+    -- Models the installed CLIs actually offer, discovered in the background so
+    -- the composer never pays for it. The fingerprint identifies the binary the
+    -- rows came from; a mismatch is what schedules the next refresh. Pure
+    -- cache: safe to delete, rebuilt on the next boot.
+    CREATE TABLE IF NOT EXISTS model_catalog (
+      kind TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      models TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    -- One row per CLI history file we have already totalled up, so the Usage
+    -- page re-reads only what changed since the last scan. version bumps
+    -- when the parser or the price table changes. Pure cache: safe to delete.
+    -- OAuth for a hosted MCP server, run by Open Run instead of by each CLI.
+    -- The vendors publish RFC 9728/8414 metadata and accept dynamic client
+    -- registration, so there is no vendor secret here: 'clientId' is one we
+    -- registered ourselves. Access, refresh, clientSecret and pendingVerifier
+    -- are AES-GCM sealed with ~/.openrun/data-key, which is not in this file.
+    -- The access token is copied into every CLI config as an Authorization
+    -- header, which is also why refreshing it rewrites those files.
+    -- 'pendingState'/'pendingVerifier' hold one PKCE flow in progress and are
+    -- cleared the moment it lands.
+    CREATE TABLE IF NOT EXISTS mcp_oauth (
+      name TEXT PRIMARY KEY,
+      resource TEXT NOT NULL,
+      issuer TEXT NOT NULL,
+      authorizationEndpoint TEXT NOT NULL,
+      tokenEndpoint TEXT NOT NULL,
+      registrationEndpoint TEXT NOT NULL DEFAULT '',
+      revocationEndpoint TEXT NOT NULL DEFAULT '',
+      clientId TEXT NOT NULL DEFAULT '',
+      clientSecret TEXT NOT NULL DEFAULT '',
+      redirectUri TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT '',
+      accessToken TEXT NOT NULL DEFAULT '',
+      refreshToken TEXT NOT NULL DEFAULT '',
+      expiresAt INTEGER NOT NULL DEFAULT 0,
+      pendingState TEXT NOT NULL DEFAULT '',
+      pendingVerifier TEXT NOT NULL DEFAULT '',
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS usage_file_cache (
+      path TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      mtimeMs INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      stats TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+  `)
+
   addColumn(db, 'runs', 'sessionId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'baseBranch', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'runs', 'headBranch', "TEXT NOT NULL DEFAULT ''")
@@ -1002,92 +1084,41 @@ function migrate(db: Database.Database) {
     })
   }
 
+  // Antigravity: agy's `-p` takes the prompt on argv; flags must precede it.
+  const antigravity = db
+    .prepare(`SELECT argsTemplate FROM runtimes WHERE id = 'antigravity'`)
+    .get() as { argsTemplate: string } | undefined
+  const antigravityLegacy = new Set([
+    JSON.stringify(['-p', '--output-format', 'stream-json', '--dangerously-skip-permissions']),
+  ])
+  if (antigravity && antigravityLegacy.has(antigravity.argsTemplate)) {
+    db.prepare(
+      `UPDATE runtimes
+       SET argsTemplate = @argsTemplate,
+           promptViaStdin = 0
+       WHERE id = 'antigravity'`,
+    ).run({
+      argsTemplate: JSON.stringify([
+        '--output-format',
+        'stream-json',
+        '--dangerously-skip-permissions',
+        '-p',
+        '{prompt}',
+      ]),
+    })
+  }
+
   // Drop runtime rows that are no longer part of the builtin seed set. Tasks
   // that still pointed at them move to Claude so Enable / Run now keep a valid
   // runtimeId.
-  for (const id of ['ai' + 'der', 'shell' + '-echo'] as const) {
+  for (const id of ['ai' + 'der', 'shell' + '-echo', 'gemini', 'gemini-acp'] as const) {
     db.prepare(`UPDATE tasks SET runtimeId = 'claude' WHERE runtimeId = ?`).run(id)
     db.prepare(`DELETE FROM runtimes WHERE id = ?`).run(id)
+    db.prepare(`INSERT OR REPLACE INTO deleted_runtime_ids (id, deletedAt) VALUES (?, ?)`).run(
+      id,
+      Date.now(),
+    )
   }
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS app_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS deleted_project_paths (
-      path TEXT PRIMARY KEY,
-      deletedAt INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS deleted_runtime_ids (
-      id TEXT PRIMARY KEY,
-      deletedAt INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS turn_events (
-      id TEXT PRIMARY KEY,
-      messageId TEXT NOT NULL,
-      runId TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      kind TEXT NOT NULL,
-      payload TEXT NOT NULL DEFAULT '{}',
-      createdAt INTEGER NOT NULL,
-      FOREIGN KEY (messageId) REFERENCES messages(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_turn_events_message
-      ON turn_events(messageId, seq ASC);
-    CREATE INDEX IF NOT EXISTS idx_turn_events_run
-      ON turn_events(runId, createdAt ASC, seq ASC);
-    -- Models the installed CLIs actually offer, discovered in the background so
-    -- the composer never pays for it. The fingerprint identifies the binary the
-    -- rows came from; a mismatch is what schedules the next refresh. Pure
-    -- cache: safe to delete, rebuilt on the next boot.
-    CREATE TABLE IF NOT EXISTS model_catalog (
-      kind TEXT PRIMARY KEY,
-      fingerprint TEXT NOT NULL,
-      models TEXT NOT NULL,
-      updatedAt INTEGER NOT NULL
-    );
-    -- One row per CLI history file we have already totalled up, so the Usage
-    -- page re-reads only what changed since the last scan. version bumps
-    -- when the parser or the price table changes. Pure cache: safe to delete.
-    -- OAuth for a hosted MCP server, run by Open Run instead of by each CLI.
-    -- The vendors publish RFC 9728/8414 metadata and accept dynamic client
-    -- registration, so there is no vendor secret here: 'clientId' is one we
-    -- registered ourselves. Access, refresh, clientSecret and pendingVerifier
-    -- are AES-GCM sealed with ~/.openrun/data-key, which is not in this file.
-    -- The access token is copied into every CLI config as an Authorization
-    -- header, which is also why refreshing it rewrites those files.
-    -- 'pendingState'/'pendingVerifier' hold one PKCE flow in progress and are
-    -- cleared the moment it lands.
-    CREATE TABLE IF NOT EXISTS mcp_oauth (
-      name TEXT PRIMARY KEY,
-      resource TEXT NOT NULL,
-      issuer TEXT NOT NULL,
-      authorizationEndpoint TEXT NOT NULL,
-      tokenEndpoint TEXT NOT NULL,
-      registrationEndpoint TEXT NOT NULL DEFAULT '',
-      revocationEndpoint TEXT NOT NULL DEFAULT '',
-      clientId TEXT NOT NULL DEFAULT '',
-      clientSecret TEXT NOT NULL DEFAULT '',
-      redirectUri TEXT NOT NULL DEFAULT '',
-      scope TEXT NOT NULL DEFAULT '',
-      accessToken TEXT NOT NULL DEFAULT '',
-      refreshToken TEXT NOT NULL DEFAULT '',
-      expiresAt INTEGER NOT NULL DEFAULT 0,
-      pendingState TEXT NOT NULL DEFAULT '',
-      pendingVerifier TEXT NOT NULL DEFAULT '',
-      updatedAt INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS usage_file_cache (
-      path TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      mtimeMs INTEGER NOT NULL,
-      version INTEGER NOT NULL,
-      stats TEXT NOT NULL,
-      updatedAt INTEGER NOT NULL
-    );
-  `)
 }
 
 function backfillId(prefix: string) {

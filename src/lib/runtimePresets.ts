@@ -53,31 +53,17 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     id: 'antigravity',
     label: 'Antigravity CLI',
     bin: 'agy',
-    argsTemplate: ['-p', '--output-format', 'stream-json', '--dangerously-skip-permissions'],
-    promptViaStdin: true,
+    // agy's `-p` takes the prompt as its argument (not stdin); flags must come first.
+    argsTemplate: [
+      '--output-format',
+      'stream-json',
+      '--dangerously-skip-permissions',
+      '-p',
+      '{prompt}',
+    ],
+    promptViaStdin: false,
     description:
       'Google Antigravity CLI (`agy`) headless. Claude-Code-shaped flags and stream-json, so tool calls and follow-up turns work; models come from `agy models`.',
-  },
-  {
-    id: 'gemini',
-    label: 'Gemini CLI',
-    bin: 'gemini',
-    // `-p` enables headless; YOLO auto-approves tools. Prefer short prompts —
-    // this CLI has no prompt-file flag, so large `{prompt}` values hit ARG_MAX.
-    argsTemplate: ['-p', '{prompt}', '-y', '-o', 'text'],
-    promptViaStdin: false,
-    description:
-      'Google Gemini CLI headless (`-p` + YOLO). Single-shot — no resume over this transport. Keep prompts short: no prompt-file support.',
-  },
-  {
-    id: 'gemini-acp',
-    label: 'Gemini CLI (ACP)',
-    bin: 'gemini',
-    argsTemplate: ['--experimental-acp'],
-    promptViaStdin: false,
-    transport: 'acp',
-    description:
-      'Gemini CLI over the Agent Client Protocol: real tool statuses, plans, file locations, follow-up turns and Supervised approvals.',
   },
   {
     id: 'fx',

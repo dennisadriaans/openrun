@@ -42,6 +42,7 @@ public enum Operation: String, CaseIterable, Sendable {
     case gitDiscardHunk = "git.discardHunk"
     case gitCreateBranch = "git.createBranch"
     case gitOpenPullRequest = "git.openPullRequest"
+    case gitShipRun = "git.shipRun"
     case gitListProjectBranches = "git.listProjectBranches"
     case integrationsListProviders = "integrations.listProviders"
     case integrationsList = "integrations.list"
@@ -173,6 +174,7 @@ public enum Operation: String, CaseIterable, Sendable {
         case .gitDiscardHunk: return Route(method: "POST", path: "/api/v1/git/discard-hunk", capability: "git.discardHunk", clients: ["web", "desktop"])
         case .gitCreateBranch: return Route(method: "POST", path: "/api/v1/git/create-branch", capability: "git.createBranch", clients: ["web", "desktop"])
         case .gitOpenPullRequest: return Route(method: "POST", path: "/api/v1/git/open-pull-request", capability: "git.openPullRequest", clients: ["web", "desktop"])
+        case .gitShipRun: return Route(method: "POST", path: "/api/v1/git/ship-run", capability: "git.shipRun", clients: ["web", "desktop"])
         case .gitListProjectBranches: return Route(method: "GET", path: "/api/v1/git/list-project-branches", capability: "git.listProjectBranches", clients: ["web", "desktop"])
         case .integrationsListProviders: return Route(method: "GET", path: "/api/v1/integrations/list-providers", capability: "integrations.listProviders", clients: ["web", "desktop"])
         case .integrationsList: return Route(method: "GET", path: "/api/v1/integrations/list", capability: "integrations.list", clients: ["web", "desktop"])
@@ -424,10 +426,12 @@ public struct FilesSaveAttachmentRequest: Encodable, Sendable {
 public struct GitGetFileDiffRequest: Encodable, Sendable {
     public var runId: String
     public var path: String
+    public var whole: Bool?
 
-    public init(runId: String, path: String) {
+    public init(runId: String, path: String, whole: Bool? = nil) {
         self.runId = runId
         self.path = path
+        self.whole = whole
     }
 }
 
@@ -496,6 +500,18 @@ public struct GitOpenPullRequestRequest: Encodable, Sendable {
         self.title = title
         self.body = body
         self.base = base
+    }
+}
+
+public struct GitShipRunRequest: Encodable, Sendable {
+    public var runId: String
+    public var base: String?
+    public var skipPlan: Bool?
+
+    public init(runId: String, base: String? = nil, skipPlan: Bool? = nil) {
+        self.runId = runId
+        self.base = base
+        self.skipPlan = skipPlan
     }
 }
 
@@ -832,13 +848,15 @@ public struct ProjectsRemoveRequest: Encodable, Sendable {
 }
 
 public struct RunsListNativeSessionsRequest: Encodable, Sendable {
-    public var workspaceId: String
+    public var workspaceId: String?
+    public var allWorkspaces: Bool?
     public var kind: String?
     public var offset: Double?
     public var limit: Double?
 
-    public init(workspaceId: String, kind: String? = nil, offset: Double? = nil, limit: Double? = nil) {
+    public init(workspaceId: String? = nil, allWorkspaces: Bool? = nil, kind: String? = nil, offset: Double? = nil, limit: Double? = nil) {
         self.workspaceId = workspaceId
+        self.allWorkspaces = allWorkspaces
         self.kind = kind
         self.offset = offset
         self.limit = limit

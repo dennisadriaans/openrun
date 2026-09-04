@@ -287,6 +287,99 @@ function blobAt(cwd: string, ref: string, path: string): string {
   return res.ok ? res.stdout.trim() : ''
 }
 
+/**
+ * Submodule paths that changed between `ref` and the working tree.
+ *
+ * A superproject records a submodule as a single gitlink entry (mode 160000),
+ * so `git diff --name-status` reports the whole submodule as one modified path
+ * with `0\t0` line counts — the edits inside it are invisible. Every
+ * changed-files surface reads that, which is why a run whose work landed in a
+ * submodule had nothing to review. We list the gitlinks here and recurse into
+ * each one, prefixing its paths so the UI sees `app/src/foo.ts`.
+ *
+ * Only submodules that are actually checked out are returned; a gitlink with no
+ * working tree on disk has nothing to diff.
+ */
+function submodulePaths(cwd: string): string[] {
+  const res = git(cwd, ['ls-files', '--stage', '-z'])
+  if (!res.ok) return []
+  return gitlinkPaths(res.stdout, (p) => existsSync(join(cwd, p, '.git')))
+}
+
+async function submodulePathsAsync(cwd: string): Promise<string[]> {
+  const res = await gitAsync(cwd, ['ls-files', '--stage', '-z'])
+  if (!res.ok) return []
+  return gitlinkPaths(res.stdout, (p) => existsSync(join(cwd, p, '.git')))
+}
+
+/** Parse `ls-files --stage -z` output, keeping mode-160000 (gitlink) entries. */
+function gitlinkPaths(stdout: string, checkedOut: (path: string) => boolean): string[] {
+  const out: string[] = []
+  for (const entry of stdout.split('\0')) {
+    if (!entry) continue
+    // "<mode> <sha> <stage>\t<path>"
+    const tab = entry.indexOf('\t')
+    if (tab < 0) continue
+    if (!entry.startsWith('160000 ')) continue
+    const path = entry.slice(tab + 1)
+    if (path && checkedOut(path)) out.push(path)
+  }
+  return out
+}
+
+/**
+ * The commit a submodule was pinned to in `ref`, or '' when the superproject
+ * base predates the submodule. Used as the base for the nested diff so a run's
+ * submodule changes are measured from the same snapshot as everything else.
+ */
+function submoduleBase(cwd: string, ref: string, path: string): string {
+  const res = git(cwd, ['rev-parse', `${ref}:${path}`])
+  return res.ok ? res.stdout.trim() : ''
+}
+
+async function submoduleBaseAsync(cwd: string, ref: string, path: string): Promise<string> {
+  const res = await gitAsync(cwd, ['rev-parse', `${ref}:${path}`])
+  return res.ok ? res.stdout.trim() : ''
+}
+
+/**
+ * Undoing inside a submodule is not supported yet.
+ *
+ * The read path recurses so a run's submodule work is reviewable, but the write
+ * paths (`discard`, `discardHunk`) still operate on the superproject only —
+ * running `git checkout`/`clean` there against a nested path silently does the
+ * wrong thing. Refuse explicitly instead of appearing to succeed.
+ */
+function assertNotSubmodulePath(cwd: string, path: string): void {
+  const nested = splitSubmodulePath(cwd, path)
+  if (nested) {
+    throw new Error(
+      `Undo is not supported inside the ${nested.sub} submodule yet — discard it from that repository instead`,
+    )
+  }
+}
+
+/** Re-root a submodule's DiffFile under its path in the superproject. */
+function prefixDiffFile(prefix: string, file: DiffFile): DiffFile {
+  return {
+    ...file,
+    path: `${prefix}/${file.path}`,
+    oldPath: file.oldPath ? `${prefix}/${file.oldPath}` : null,
+  }
+}
+
+/**
+ * Split a superproject-relative path into the submodule that owns it, if any.
+ * `app/src/a.ts` with an `app` submodule yields `{ sub: 'app', rel: 'src/a.ts' }`.
+ */
+function splitSubmodulePath(cwd: string, path: string): { sub: string; rel: string } | null {
+  for (const sub of submodulePaths(cwd)) {
+    if (path === sub) return { sub, rel: '' }
+    if (path.startsWith(`${sub}/`)) return { sub, rel: path.slice(sub.length + 1) }
+  }
+  return null
+}
+
 function untrackedLineStats(
   cwd: string,
   path: string,
@@ -591,6 +684,18 @@ export function changedFiles(cwd: string, since?: string): DiffFile[] {
     })
   }
 
+  // Recurse into submodules: replace each gitlink placeholder with the files
+  // that actually changed inside it. See `submodulePaths`.
+  for (const sub of submodulePaths(cwd)) {
+    files.delete(sub)
+    const subBase = submoduleBase(cwd, base, sub)
+    const nested = changedFiles(join(cwd, sub), subBase || undefined)
+    for (const file of nested) {
+      const prefixed = prefixDiffFile(sub, file)
+      files.set(prefixed.path, prefixed)
+    }
+  }
+
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
@@ -734,6 +839,25 @@ export async function changedFilesAsync(cwd: string, since?: string): Promise<Di
     }),
   )
 
+  // Same submodule recursion as the sync path above.
+  const subs = await submodulePathsAsync(cwd)
+  const nestedLists = await Promise.all(
+    subs.map(async (sub) => {
+      const subBase = await submoduleBaseAsync(cwd, base, sub)
+      return {
+        sub,
+        nested: await changedFilesAsync(join(cwd, sub), subBase || undefined),
+      }
+    }),
+  )
+  for (const { sub, nested } of nestedLists) {
+    files.delete(sub)
+    for (const file of nested) {
+      const prefixed = prefixDiffFile(sub, file)
+      files.set(prefixed.path, prefixed)
+    }
+  }
+
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
@@ -743,26 +867,93 @@ export function isDirtySince(cwd: string, since?: string): boolean {
 }
 
 /**
+ * Lines of unchanged context git puts around each change. `full` asks for a
+ * number large enough that every hunk in a file merges into one, so the diff
+ * text carries the whole file with the changes marked in place — that is how
+ * the viewer shows a change inside its surrounding code without fetching the
+ * file separately and re-stitching it against the hunks.
+ */
+export const DEFAULT_DIFF_CONTEXT = 3
+const FULL_FILE_DIFF_CONTEXT = 1_000_000
+
+function contextArg(context?: number): string {
+  const lines = context && context > 0 ? Math.floor(context) : DEFAULT_DIFF_CONTEXT
+  return `-U${Math.min(lines, FULL_FILE_DIFF_CONTEXT)}`
+}
+
+/**
  * Unified diff text for a single file relative to `since` (or HEAD).
  * Untracked files new since the baseline are diffed against /dev/null.
+ *
+ * `context` overrides how many unchanged lines surround each change; pass
+ * `FULL_FILE_DIFF_CONTEXT` (or anything larger than the file) to get the whole
+ * file as a single hunk.
  */
-export function fileDiff(cwd: string, path: string, since?: string): string {
+export function fileDiff(cwd: string, path: string, since?: string, context?: number): string {
   if (!isRepo(cwd)) return ''
 
   // `--no-index` compares filesystem paths, so confine before any git call.
   const rel = workspaceRelPath(cwd, path)
+
+  // A path inside a submodule has to be diffed by that submodule's own repo —
+  // the superproject only knows the gitlink. Confinement already happened
+  // above, so `rel` is known to sit inside the workspace.
+  const nested = splitSubmodulePath(cwd, rel)
+  if (nested?.rel) {
+    const base = since && since.length > 0 ? since : 'HEAD'
+    const subBase = submoduleBase(cwd, base, nested.sub)
+    return fileDiff(join(cwd, nested.sub), nested.rel, subBase || undefined, context)
+  }
   const base = since && since.length > 0 ? since : 'HEAD'
+  const unified = contextArg(context)
   const tracked = git(cwd, ['ls-files', '--error-unmatch', '--', rel]).ok
 
   if (!tracked) {
     if (since && since.length > 0 && pathInTree(cwd, base, rel)) {
       // Was in the snapshot (untracked at start); show delta from that blob.
-      return git(cwd, ['diff', base, '--', rel]).stdout
+      return git(cwd, ['diff', unified, base, '--', rel]).stdout
     }
     // --no-index exits 1 when files differ, which is the normal case here.
-    return git(cwd, ['diff', '--no-index', '--', '/dev/null', rel]).stdout
+    return git(cwd, ['diff', unified, '--no-index', '--', '/dev/null', rel]).stdout
   }
-  return git(cwd, ['diff', base, '-M', '--', rel]).stdout
+  return git(cwd, ['diff', unified, base, '-M', '--', rel]).stdout
+}
+
+/** The context value that collapses a file's hunks into one whole-file hunk. */
+export const WHOLE_FILE_CONTEXT = FULL_FILE_DIFF_CONTEXT
+
+/**
+ * One unified diff for the whole delta, truncated to `budget` characters.
+ *
+ * Used to give an agent enough of the change to reason about it without
+ * handing a 200k-character diff to a CLI that will refuse it. Truncation is
+ * announced in the text itself so the reader knows the tail is missing.
+ */
+export function changedDiff(cwd: string, since?: string, budget = 60_000): string {
+  if (!isRepo(cwd)) return ''
+  const base = since && since.length > 0 ? since : 'HEAD'
+  // Tracked changes in one pass; untracked files are appended individually
+  // because `git diff <base>` cannot see a path git has never recorded.
+  const tracked = git(cwd, ['diff', base, '-M']).stdout
+  const parts = tracked ? [tracked] : []
+
+  let used = tracked.length
+  if (used < budget) {
+    const untracked = git(cwd, ['ls-files', '--others', '--exclude-standard'])
+      .stdout.split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+    for (const rel of untracked) {
+      if (used >= budget) break
+      const one = git(cwd, ['diff', '--no-index', '--', '/dev/null', rel]).stdout
+      parts.push(one)
+      used += one.length
+    }
+  }
+
+  const all = parts.join('\n')
+  if (all.length <= budget) return all
+  return `${all.slice(0, budget)}\n… diff truncated at ${budget} characters …`
 }
 
 // ---------------------------------------------------------------------------
@@ -865,6 +1056,8 @@ export function discard(
 
   const base = since && since.length > 0 ? since : undefined
 
+  for (const path of paths ?? []) assertNotSubmodulePath(cwd, path)
+
   if (base) {
     const targets =
       paths && paths.length > 0
@@ -926,6 +1119,7 @@ export function discardHunk(
   if (!Number.isInteger(hunkIndex) || hunkIndex < 0) {
     throw new Error('That change is no longer in the diff')
   }
+  assertNotSubmodulePath(cwd, path)
 
   const diff = fileDiff(cwd, path, since)
   const parsed = parseUnifiedDiff(diff)

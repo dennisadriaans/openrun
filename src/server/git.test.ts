@@ -19,6 +19,7 @@ import {
   push,
   resetWorktree,
   resolveCommit,
+  WHOLE_FILE_CONTEXT,
 } from './git.ts'
 import { missingOriginRemoteMessage } from '../lib/gitActionGate.ts'
 
@@ -218,6 +219,51 @@ describe('fileDiff since snapshot', () => {
   })
 })
 
+describe('fileDiff whole-file context', () => {
+  /** Two edits far apart, so the default 3 lines of context cannot bridge them. */
+  function repoWithDistantEdits() {
+    const cwd = makeRepo()
+    const lines = Array.from({ length: 40 }, (_, i) => `line${i + 1}`)
+    writeFileSync(join(cwd, 'wide.txt'), `${lines.join('\n')}\n`)
+    git(cwd, ['add', 'wide.txt'])
+    git(cwd, ['commit', '-m', 'wide'])
+    const snap = captureBaseSnapshot(cwd)
+    lines[0] = 'FIRST'
+    lines[39] = 'LAST'
+    writeFileSync(join(cwd, 'wide.txt'), `${lines.join('\n')}\n`)
+    return { cwd, snap }
+  }
+
+  it('merges every hunk into one carrying the whole file', () => {
+    const { cwd, snap } = repoWithDistantEdits()
+
+    assert.equal(parseHunkCount(fileDiff(cwd, 'wide.txt', snap)), 2)
+
+    const whole = fileDiff(cwd, 'wide.txt', snap, WHOLE_FILE_CONTEXT)
+    assert.equal(parseHunkCount(whole), 1)
+    // The untouched middle of the file rides along as context.
+    assert.match(whole, /^ line20$/m)
+    assert.match(whole, /^\+FIRST$/m)
+    assert.match(whole, /^\+LAST$/m)
+  })
+
+  it('leaves the default context unchanged when no width is asked for', () => {
+    const { cwd, snap } = repoWithDistantEdits()
+    const diff = fileDiff(cwd, 'wide.txt', snap)
+    assert.doesNotMatch(diff, /^ line20$/m)
+  })
+
+  it('shows an untracked file whole', () => {
+    const cwd = makeRepo()
+    const snap = captureBaseSnapshot(cwd)
+    writeFileSync(join(cwd, 'agent.txt'), 'one\ntwo\nthree\n')
+
+    const whole = fileDiff(cwd, 'agent.txt', snap, WHOLE_FILE_CONTEXT)
+    assert.equal(parseHunkCount(whole), 1)
+    assert.match(whole, /^\+two$/m)
+  })
+})
+
 describe('discardHunk', () => {
   it('reverts one hunk and leaves the other', () => {
     const cwd = makeRepo()
@@ -395,5 +441,90 @@ describe('fileDiff path confinement', () => {
   it('refuses an absolute path outside the workspace', () => {
     const cwd = makeRepo()
     assert.throws(() => fileDiff(cwd, '/etc/passwd'), /escapes/)
+  })
+})
+
+describe('changed files inside a submodule', () => {
+  /** Superproject with a checked-out `app` submodule, both committed. */
+  function makeSuperproject(): { cwd: string; sub: string } {
+    const subOrigin = makeRepo()
+    // A submodule needs a URL git can clone from; a local path is enough.
+    const cwd = makeRepo()
+    git(cwd, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--', subOrigin, 'app'])
+    git(cwd, ['commit', '-m', 'add submodule'])
+    return { cwd, sub: join(cwd, 'app') }
+  }
+
+  it('lists files changed inside the submodule, not the gitlink', () => {
+    const { cwd, sub } = makeSuperproject()
+    const base = captureBaseSnapshot(cwd)
+
+    writeFileSync(join(sub, 'tracked.txt'), 'edited in submodule\n')
+    writeFileSync(join(sub, 'fresh.txt'), 'new\n')
+
+    const files = changedFiles(cwd, base)
+    const paths = files.map((f) => f.path)
+
+    assert.deepEqual(paths, ['app/fresh.txt', 'app/tracked.txt'])
+    // The bare gitlink row is what used to be reported instead.
+    assert.ok(!paths.includes('app'))
+
+    const tracked = files.find((f) => f.path === 'app/tracked.txt')!
+    assert.equal(tracked.status, 'modified')
+    assert.equal(tracked.additions, 1)
+    assert.equal(tracked.deletions, 1)
+
+    assert.equal(files.find((f) => f.path === 'app/fresh.txt')!.status, 'untracked')
+  })
+
+  it('reports the same files asynchronously', async () => {
+    const { cwd, sub } = makeSuperproject()
+    const base = captureBaseSnapshot(cwd)
+    writeFileSync(join(sub, 'tracked.txt'), 'edited in submodule\n')
+
+    const files = await changedFilesAsync(cwd, base)
+    assert.deepEqual(
+      files.map((f) => f.path),
+      ['app/tracked.txt'],
+    )
+  })
+
+  it('still reports superproject changes alongside submodule ones', () => {
+    const { cwd, sub } = makeSuperproject()
+    const base = captureBaseSnapshot(cwd)
+
+    writeFileSync(join(cwd, 'tracked.txt'), 'edited in super\n')
+    writeFileSync(join(sub, 'tracked.txt'), 'edited in submodule\n')
+
+    assert.deepEqual(
+      changedFiles(cwd, base).map((f) => f.path),
+      ['app/tracked.txt', 'tracked.txt'],
+    )
+  })
+
+  it('diffs a file through the submodule that owns it', () => {
+    const { cwd, sub } = makeSuperproject()
+    const base = captureBaseSnapshot(cwd)
+    writeFileSync(join(sub, 'tracked.txt'), 'edited in submodule\n')
+
+    const diff = fileDiff(cwd, 'app/tracked.txt', base)
+    assert.match(diff, /edited in submodule/)
+  })
+
+  it('refuses to undo a path inside a submodule', () => {
+    const { cwd, sub } = makeSuperproject()
+    const base = captureBaseSnapshot(cwd)
+    writeFileSync(join(sub, 'tracked.txt'), 'edited in submodule\n')
+
+    assert.throws(() => discard(cwd, ['app/tracked.txt'], base), /submodule/)
+    assert.throws(() => discardHunk(cwd, 'app/tracked.txt', 0, base), /submodule/)
+    // The refusal must not have touched the file.
+    assert.equal(readFileSync(join(sub, 'tracked.txt'), 'utf8'), 'edited in submodule\n')
+  })
+
+  it('reports nothing when the submodule is untouched', () => {
+    const { cwd } = makeSuperproject()
+    const base = captureBaseSnapshot(cwd)
+    assert.deepEqual(changedFiles(cwd, base), [])
   })
 })

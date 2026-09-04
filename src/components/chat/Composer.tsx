@@ -20,6 +20,7 @@ import {
   type AgentPlugin,
 } from '../../lib/plugins'
 import { promptWithAttachments } from '../../lib/attachments'
+import { draftAfterRefusal } from '../../lib/composerDraft'
 import type { ModelOption } from '../../lib/models'
 import {
   AttachmentButton,
@@ -53,6 +54,7 @@ export function Composer({
   pluginNote,
   onAppCommand,
   uploadAttachment,
+  restoredDraft,
 }: {
   disabled: boolean
   disabledReason?: string
@@ -67,8 +69,11 @@ export function Composer({
    * instead of being refused, the way every CLI we drive behaves.
    */
   canQueue?: boolean
-  /** Interrupt the working agent and deliver this message now (⌘/Ctrl + ↵). */
-  onSendNow?: (text: string) => void
+  /**
+   * Interrupt the working agent and deliver this message now (⌘/Ctrl + ↵).
+   * Same contract as `onSend`: reject and the draft comes back.
+   */
+  onSendNow?: (text: string) => unknown
   /** Overrides the busy placeholder — e.g. which check is running. */
   runningLabel?: string
   models: ModelOption[]
@@ -76,7 +81,13 @@ export function Composer({
   effort: string
   onModelChange: (slug: string) => void
   onEffortChange: (effort: string) => void
-  onSend: (text: string) => void
+  /**
+   * Hand the prompt off. Returning a promise that rejects puts the text and
+   * its attachments back in the box — a refused send must never eat what the
+   * user typed, because the refusal (a missing workspace, a busy branch) is
+   * usually something they fix and then retry with the same words.
+   */
+  onSend: (text: string) => unknown
   onStop?: () => void
   className?: string
   /** Slash commands to offer, app commands included. */
@@ -97,8 +108,15 @@ export function Composer({
    * where no workspace is settled yet, which hides the attachment affordances.
    */
   uploadAttachment?: AttachmentUploader
+  /**
+   * A prompt handed back by a refused send, for the surfaces that unmount this
+   * composer while the send is in flight (the start page swaps it for the
+   * optimistic turn). Local state cannot survive that, so the owner holds the
+   * refused text and seeds it here; a fresh value refills an empty box.
+   */
+  restoredDraft?: string
 }) {
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState(restoredDraft ?? '')
   const [activeIndex, setActiveIndex] = useState(0)
   const [menuDismissed, setMenuDismissed] = useState(false)
   const [commandError, setCommandError] = useState('')
@@ -116,6 +134,14 @@ export function Composer({
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [value])
+
+  // Refill after a remount. Guarded on emptiness for the same reason the
+  // in-place restore is: whatever the user has typed since outranks it.
+  useEffect(() => {
+    if (!restoredDraft) return
+    setValue((current) => draftAfterRefusal(restoredDraft, current))
+    ref.current?.focus()
+  }, [restoredDraft])
 
   const query = slashMenuQuery(value)
   const matches = useMemo(
@@ -178,10 +204,21 @@ export function Composer({
 
     if (pending || (running && !canQueue) || files.uploading) return
     const prompt = promptWithAttachments(text, files.paths)
-    if (now && onSendNow) onSendNow(prompt)
-    else onSend(prompt)
+    const pendingAttachments = files.detach()
     setValue('')
-    files.clear()
+    setCommandError('')
+    const sent = now && onSendNow ? onSendNow(prompt) : onSend(prompt)
+    // The box empties optimistically so the send feels immediate, and fills
+    // itself back in if the handler refuses. The route renders the reason; all
+    // this has to do is not throw away what the user typed.
+    void Promise.resolve(sent).then(
+      () => pendingAttachments.commit(),
+      () => {
+        setValue((current) => draftAfterRefusal(value, current))
+        pendingAttachments.restore()
+        ref.current?.focus()
+      },
+    )
   }
 
   const canSend =

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   canCommit,
+  canShip,
   canCreatePullRequest,
   canDiscard,
   canPush,
@@ -11,7 +12,9 @@ import {
   ghNotInstalledMessage,
   missingOriginRemoteMessage,
   prBlockedReason,
+  nothingToShipMessage,
   pushBlockedReason,
+  shipBlockedReason,
   workingTreeCleanMessage,
 } from './gitActionGate.ts'
 
@@ -107,6 +110,45 @@ describe('prBlockedReason', () => {
         ghAuthenticated: false,
       }),
       false,
+    )
+  })
+})
+
+describe('shipBlockedReason', () => {
+  const shippable = {
+    hasRemote: true,
+    ghInstalled: true,
+    ghAuthenticated: true,
+    hasChanges: true,
+    ahead: 0,
+  }
+
+  it('allows a ship with uncommitted changes', () => {
+    assert.equal(shipBlockedReason(shippable), null)
+    assert.equal(canShip(shippable), true)
+  })
+
+  it('allows a ship whose work is already committed but unpushed', () => {
+    assert.equal(shipBlockedReason({ ...shippable, hasChanges: false, ahead: 2 }), null)
+  })
+
+  it('refuses when there is nothing to carry', () => {
+    assert.equal(
+      shipBlockedReason({ ...shippable, hasChanges: false, ahead: 0 }),
+      nothingToShipMessage(),
+    )
+    assert.equal(canShip({ ...shippable, hasChanges: false, ahead: 0 }), false)
+  })
+
+  it('reports the PR blockers first, in the same order as Create PR', () => {
+    assert.equal(
+      shipBlockedReason({ ...shippable, hasRemote: false }),
+      missingOriginRemoteMessage(),
+    )
+    assert.equal(shipBlockedReason({ ...shippable, ghInstalled: false }), ghNotInstalledMessage())
+    assert.equal(
+      shipBlockedReason({ ...shippable, ghAuthenticated: false }),
+      ghNotAuthenticatedMessage(),
     )
   })
 })

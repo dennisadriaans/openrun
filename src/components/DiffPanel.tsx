@@ -8,7 +8,18 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, Columns2, Copy, List, Maximize2, Minimize2, Rows2, X } from 'lucide-react'
+import {
+  ChevronRight,
+  Columns2,
+  Copy,
+  FoldVertical,
+  List,
+  Maximize2,
+  Minimize2,
+  Rows2,
+  UnfoldVertical,
+  X,
+} from 'lucide-react'
 import type { DiffFile } from '../server/git'
 import { parseUnifiedDiff, toSplitRows, type DiffHunk } from '../lib/diff'
 import { highlightHunk } from '../lib/highlight'
@@ -84,12 +95,14 @@ function DiffFileCard({
   file,
   expanded,
   mode,
+  whole,
   canUndo,
   undoReason,
   undoBusy,
   pendingHunk,
   hunkError,
   onToggle,
+  onToggleWhole,
   onUndoFile,
   onUndoHunk,
 }: {
@@ -97,18 +110,24 @@ function DiffFileCard({
   file: DiffFile
   expanded: boolean
   mode: ViewMode
+  /** Show the whole file around the changes instead of just the hunks. */
+  whole: boolean
   canUndo: boolean
   undoReason?: string
   undoBusy: boolean
   pendingHunk: number | null
   hunkError: { index: number; message: string } | null
   onToggle: () => void
+  onToggleWhole: () => void
   onUndoFile: () => void
   onUndoHunk: (index: number) => void
 }) {
-  const { data, isLoading } = useFileDiff(runId, expanded ? file.path : null)
+  const { data, isLoading } = useFileDiff(runId, expanded ? file.path : null, whole)
   const parsed = useMemo(() => parseUnifiedDiff(data?.diff ?? ''), [data?.diff])
   const isNew = file.status === 'added' || file.status === 'untracked'
+  // Whole-file mode is one merged hunk, so its indices do not line up with the
+  // hunk-scoped patches `discardHunk` applies. Undo stays file-level there.
+  const canUndoHunk = canUndo && !whole
 
   const copyName = async () => {
     try {
@@ -176,6 +195,29 @@ function DiffFileCard({
                         New
                       </span>
                     ) : null}
+                    {expanded && !file.binary ? (
+                      <button
+                        type="button"
+                        onClick={onToggleWhole}
+                        aria-pressed={whole}
+                        title={
+                          whole
+                            ? 'Show only the changed hunks'
+                            : 'Show the whole file around the changes'
+                        }
+                        className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground ${
+                          whole
+                            ? 'bg-[var(--bg-luminous-tertiary)] text-foreground'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        {whole ? (
+                          <FoldVertical className="h-3.5 w-3.5" aria-hidden />
+                        ) : (
+                          <UnfoldVertical className="h-3.5 w-3.5" aria-hidden />
+                        )}
+                      </button>
+                    ) : null}
                     {canUndo ? (
                       <UndoButton
                         label="Undo file"
@@ -193,9 +235,9 @@ function DiffFileCard({
         </div>
 
         {expanded ? (
-          <div className="m-[1px] mt-0 min-h-0 overflow-hidden rounded-b-lg border border-t-0 border-border">
+          <div className="m-[1px] mt-0 min-h-0 overflow-hidde bg-background rounded-b-lg border border-t-0 border-border">
             <div className="w-full overflow-auto" style={{ scrollbarGutter: 'stable both-edges' }}>
-              <div className="flex w-full flex-col bg-elevated">
+              <div className="flex w-full flex-col bg-background">
                 {isLoading ? (
                   <div className="px-3 py-4 text-[12px] text-muted-foreground">Loading diff…</div>
                 ) : parsed.binary || file.binary ? (
@@ -209,14 +251,20 @@ function DiffFileCard({
                 ) : (
                   parsed.hunks.map((hunk, i) => (
                     <div key={i} className="border-b border-border last:border-b-0">
-                      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-[var(--bg-luminous-quaternary)] px-3 py-1">
+                      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-background px-3 py-1">
                         <span className="min-w-0 truncate mono text-[10px] text-muted-foreground">
-                          @@ −{hunk.oldStart} +{hunk.newStart} @@ {hunk.header}
+                          {whole ? (
+                            `Whole file — ${hunk.lines.length} lines`
+                          ) : (
+                            <>
+                              @@ −{hunk.oldStart} +{hunk.newStart} @@ {hunk.header}
+                            </>
+                          )}
                         </span>
-                        {canUndo ? (
+                        {canUndoHunk ? (
                           <UndoButton
                             label="Undo"
-                            disabled={!canUndo}
+                            disabled={!canUndoHunk}
                             pending={undoBusy && pendingHunk === i}
                             title={undoReason ?? 'Undo this hunk'}
                             onClick={() => onUndoHunk(i)}
@@ -270,6 +318,10 @@ export function DiffPanel({
   const [mode, setMode] = useState<ViewMode>('unified')
   const [fullscreen, setFullscreen] = useState(overlay)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([path]))
+  // Whole-file context is a panel-wide default with a per-file override, so
+  // "show me everything" is one click but a single file can still differ.
+  const [wholeAll, setWholeAll] = useState(false)
+  const [wholeOverrides, setWholeOverrides] = useState<Set<string>>(() => new Set())
   const [fileListOpen, setFileListOpen] = useState(false)
   const [hunkError, setHunkError] = useState<{
     path: string
@@ -341,6 +393,24 @@ export function DiffPanel({
       return next
     })
     onSelect(filePath)
+  }
+
+  const isWhole = (filePath: string) => (wholeOverrides.has(filePath) ? !wholeAll : wholeAll)
+
+  const toggleWhole = (filePath: string) => {
+    setWholeOverrides((prev) => {
+      const next = new Set(prev)
+      if (next.has(filePath)) next.delete(filePath)
+      else next.add(filePath)
+      return next
+    })
+  }
+
+  // Flipping the panel-wide default clears the per-file overrides — otherwise
+  // an override silently inverts and a file goes the opposite way to the click.
+  const toggleWholeAll = () => {
+    setWholeOverrides(new Set())
+    setWholeAll((v) => !v)
   }
 
   const jumpTo = (filePath: string) => {
@@ -429,6 +499,26 @@ export function DiffPanel({
             <div className="flex flex-shrink-0 items-center gap-1.5">
               <button
                 type="button"
+                onClick={toggleWholeAll}
+                aria-label={
+                  wholeAll ? 'Show only changed hunks' : 'Show whole files around the changes'
+                }
+                aria-pressed={wholeAll}
+                title={wholeAll ? 'Collapse to changed hunks' : 'Expand to whole files'}
+                className={`relative flex h-[26px] w-[26px] items-center justify-center rounded-md border border-transparent outline-none transition-colors hover:bg-[var(--bg-luminous-tertiary)] hover:text-foreground ${
+                  wholeAll
+                    ? 'bg-[var(--bg-luminous-tertiary)] text-foreground'
+                    : 'bg-transparent text-muted-foreground'
+                }`}
+              >
+                {wholeAll ? (
+                  <FoldVertical className="h-3.5 w-3.5" aria-hidden />
+                ) : (
+                  <UnfoldVertical className="h-3.5 w-3.5" aria-hidden />
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => setMode(mode === 'split' ? 'unified' : 'split')}
                 aria-label={
                   mode === 'split' ? 'Switch to unified diff view' : 'Switch to split diff view'
@@ -515,6 +605,7 @@ export function DiffPanel({
                     file={file}
                     expanded={expanded.has(file.path)}
                     mode={mode}
+                    whole={isWhole(file.path)}
                     canUndo={canUndo}
                     undoReason={undoReason}
                     undoBusy={
@@ -529,6 +620,7 @@ export function DiffPanel({
                         : null
                     }
                     onToggle={() => toggle(file.path)}
+                    onToggleWhole={() => toggleWhole(file.path)}
                     onUndoFile={() => undoFile(file.path)}
                     onUndoHunk={(index) => undoHunk(file.path, index)}
                   />

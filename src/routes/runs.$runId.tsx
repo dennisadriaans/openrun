@@ -250,7 +250,9 @@ function RunDetail() {
     [patchLayout],
   )
   const onUndoAllFiles = useCallback(() => setConfirmUndoAll(true), [])
-  const sendFollowUp = sendMessage.mutate
+  // `mutateAsync`, not `mutate`: the composer restores the draft when this
+  // rejects, so a refused follow-up leaves the words in the box.
+  const sendFollowUp = sendMessage.mutateAsync
   const runWorking = (data?.run?.status ?? listRow?.status) === 'running'
   const queuedMessages = data?.queued ?? []
   const onSend = useCallback(
@@ -263,7 +265,7 @@ function RunDetail() {
     }) => {
       // Busy agent, or a queue left over from a stopped turn: the message waits
       // its turn rather than being refused.
-      sendFollowUp({ ...input, queue: runWorking || queuedMessages.length > 0 })
+      return sendFollowUp({ ...input, queue: runWorking || queuedMessages.length > 0 })
     },
     [sendFollowUp, runWorking, queuedMessages.length],
   )
@@ -275,7 +277,7 @@ function RunDetail() {
       runtimeMode: RuntimeMode
       runtimeId?: string
     }) => {
-      sendFollowUp({ ...input, queue: true, force: true })
+      return sendFollowUp({ ...input, queue: true, force: true })
     },
     [sendFollowUp],
   )

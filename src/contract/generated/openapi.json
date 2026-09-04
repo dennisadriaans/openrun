@@ -1363,6 +1363,64 @@
         }
       }
     },
+    "/api/v1/git/ship-run": {
+      "post": {
+        "operationId": "git.shipRun",
+        "summary": "git.shipRun",
+        "tags": [
+          "git"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "x-openrun-clients": [
+          "web",
+          "desktop"
+        ],
+        "x-openrun-capability": "git.shipRun",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string"
+                  },
+                  "base": {
+                    "type": "string"
+                  },
+                  "skipPlan": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/git/list-project-branches": {
       "get": {
         "operationId": "git.listProjectBranches",

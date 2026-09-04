@@ -979,9 +979,12 @@ function spawnTurn(input: {
   // Plain / text output (planner Grok) is not JSONL — skip line→event parsing so
   // chat gets one assistant answer from stdout instead of a raw pill per line.
   const structuredEvents = hasEventAdapter(kind) && !isPlainCliOutput(spawnArgs)
-  // Grok streams token-sized `text` deltas; coalesce so chat gets prose, not
-  // one event per word. Claude/Codex already emit whole messages.
-  const grokCoalescer = structuredEvents && kind === 'grok' ? new AssistantDeltaCoalescer() : null
+  // Grok and Antigravity stream token-sized text deltas; coalesce so chat gets
+  // prose, not one event per chunk. Claude/Codex already emit whole messages.
+  const deltaCoalescer =
+    structuredEvents && (kind === 'grok' || kind === 'antigravity')
+      ? new AssistantDeltaCoalescer()
+      : null
   const claudeIngest = structuredEvents && kind === 'claude' ? new ClaudeStdoutIngest() : null
   let eventSeq = 0
   const insertEvent = db.prepare(
@@ -1210,7 +1213,7 @@ function spawnTurn(input: {
     for (const line of lineBuffer.push(text)) {
       parsed.push(...(claudeIngest ? claudeIngest.pushLine(line) : parseTurnEventLine(line, kind)))
     }
-    persistEvents(grokCoalescer ? grokCoalescer.push(parsed) : parsed)
+    persistEvents(deltaCoalescer ? deltaCoalescer.push(parsed) : parsed)
   }
 
   child.stdout?.on('data', (d: Buffer) => {
@@ -1271,9 +1274,9 @@ function spawnTurn(input: {
           ...(claudeIngest ? claudeIngest.pushLine(rest) : parseTurnEventLine(rest, kind)),
         )
       }
-      if (grokCoalescer) {
-        persistEvents(grokCoalescer.push(parsed))
-        persistEvents(grokCoalescer.flush())
+      if (deltaCoalescer) {
+        persistEvents(deltaCoalescer.push(parsed))
+        persistEvents(deltaCoalescer.flush())
       } else if (claudeIngest) {
         persistEvents(parsed)
         persistEvents(claudeIngest.flush())

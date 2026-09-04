@@ -112,12 +112,39 @@ export function usePendingAttachments(upload: AttachmentUploader | undefined) {
     setRefusal('')
   }, [forget])
 
+  /**
+   * Empty the strip for a send that may still be refused, and hand back the
+   * undo. The object URLs stay alive until the returned callback is either
+   * discarded (`commit`) or used to put the rows back, because revoking them
+   * on an optimistic clear would restore thumbnails that no longer load.
+   */
+  const detach = useCallback(() => {
+    const detached = list.current
+    list.current = []
+    setAttachments(list.current)
+    setRefusal('')
+    let settled = false
+    const settle = (restore: boolean) => {
+      if (settled) return
+      settled = true
+      if (!restore) {
+        for (const row of detached) forget(row.previewUrl)
+        return
+      }
+      // A drop landing during the round-trip keeps its place at the end.
+      list.current = [...detached, ...list.current]
+      setAttachments(list.current)
+    }
+    return { restore: () => settle(true), commit: () => settle(false) }
+  }, [forget])
+
   return {
     attachments,
     refusal,
     addFiles,
     remove,
     clear,
+    detach,
     full: attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE,
     uploading: attachments.some((row) => !row.path && !row.error),
     failed: attachments.some((row) => row.error),
