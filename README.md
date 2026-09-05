@@ -9,7 +9,7 @@ no hosted runner, no account. Your repositories never leave your disk.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![CI](https://github.com/dennisadriaans/openrun/actions/workflows/ci.yml/badge.svg)](https://github.com/dennisadriaans/openrun/actions/workflows/ci.yml)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.6-informational)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.12-informational)](https://nodejs.org)
 
 <img src="./public/screenshots/setup-automation.png" alt="Open Run automation setup: project, agent instructions, runtime and triggers." width="900">
 
@@ -53,7 +53,7 @@ Open <http://localhost:3000>.
 
 ### Requirements
 
-- Node 22.6+ and pnpm 10+
+- Node 22.12+ and pnpm 10+
 - git
 - At least one agent CLI logged in: `claude`, `codex`, `grok`, `agy` or `fx`
 - macOS and Linux natively; Windows through WSL2

@@ -6,7 +6,8 @@ import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const argv = process.argv.slice(2)
+const forwarded = process.argv.slice(2)
+const argv = forwarded[0] === '--' ? forwarded.slice(1) : forwarded
 const demo = argv.includes('--demo')
 const viteArgs = argv.filter((arg) => arg !== '--demo')
 if (demo) process.env.OPENRUN_DEMO = '1'
