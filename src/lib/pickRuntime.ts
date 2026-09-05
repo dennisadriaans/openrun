@@ -11,6 +11,11 @@ export type RuntimePickCandidate = {
   installed?: boolean
 }
 
+/** Codex stays selectable even when a stale local preference says otherwise. */
+export function isAlwaysVisibleRuntime(id: string): boolean {
+  return id === 'codex'
+}
+
 /**
  * Apply the user's hidden-runtime list to a catalog.
  *
@@ -26,7 +31,10 @@ export function visibleRuntimes<T extends { id: string }>(
 ): T[] {
   if (!hidden || hidden.length === 0) return [...runtimes]
   const hide = new Set(hidden)
-  const kept = runtimes.filter((r) => !hide.has(r.id) || r.id === keepId)
+  if (runtimes.every((r) => hide.has(r.id) && r.id !== keepId)) return [...runtimes]
+  const kept = runtimes.filter(
+    (r) => isAlwaysVisibleRuntime(r.id) || !hide.has(r.id) || r.id === keepId,
+  )
   return kept.length > 0 ? kept : [...runtimes]
 }
 
@@ -46,6 +54,7 @@ export function hiddenRuntimesIn<T extends { id: string }>(
 /** Flip one runtime between hidden and shown, returning the next hidden list. */
 export function toggleHiddenRuntime(hidden: readonly string[] | undefined, id: string): string[] {
   const list = hidden ?? []
+  if (isAlwaysVisibleRuntime(id)) return list.filter((s) => s !== id)
   return list.includes(id) ? list.filter((s) => s !== id) : [...list, id]
 }
 

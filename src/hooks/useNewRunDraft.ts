@@ -7,7 +7,7 @@
  * that read it stay presentational.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useLocation, useNavigate } from '@tanstack/react-router'
 import {
   defaultEffort,
   defaultModel,
@@ -48,11 +48,9 @@ export type NewRunSeed = {
 
 export type NewRunDraft = ReturnType<typeof useNewRunDraft>
 
-export function useNewRunDraft(
-  seed: NewRunSeed = {},
-  options: { allNativeSessions?: boolean } = {},
-) {
+export function useNewRunDraft(seed: NewRunSeed = {}) {
   const navigate = useNavigate()
+  const openedFromHome = useLocation({ select: (location) => location.pathname === '/' })
   const { prefs, remember } = usePickerPrefs()
   const { data: projects } = useProjects()
   const { data: runtimes } = useRuntimes()
@@ -162,6 +160,18 @@ export function useNewRunDraft(
   const selectProject = (id: string) => {
     setProjectId(id)
     setWorkspaceId('')
+    const search = { projectId: id, runtimeId, model, effort }
+    void (openedFromHome
+      ? navigate({ to: '/', search, replace: true })
+      : navigate({ to: '/runs/new', search, replace: true }))
+  }
+
+  const selectBranch = (id: string) => {
+    setWorkspaceId(id)
+    const search = { projectId, workspaceId: id, runtimeId, model, effort }
+    void (openedFromHome
+      ? navigate({ to: '/', search, replace: true })
+      : navigate({ to: '/runs/new', search, replace: true }))
   }
 
   const clearResume = () => {
@@ -208,7 +218,12 @@ export function useNewRunDraft(
         runtimeMode: DEFAULT_RUNTIME_MODE,
       },
       {
-        onSuccess: ({ runId }) => navigate({ to: '/runs/$runId', params: { runId } }),
+        onSuccess: ({ runId }) =>
+          navigate({
+            to: '/runs/$runId',
+            params: { runId },
+            search: openedFromHome ? { from: 'home' } : {},
+          }),
         onError: (err) => setError(err instanceof Error ? err.message : String(err)),
       },
     )
@@ -248,7 +263,11 @@ export function useNewRunDraft(
         resumeSessionId,
         resumeSessionLabel,
       })
-      await navigate({ to: '/runs/$runId', params: { runId } })
+      await navigate({
+        to: '/runs/$runId',
+        params: { runId },
+        search: openedFromHome ? { from: 'home' } : {},
+      })
     } catch (err) {
       setSent(null)
       setError(err instanceof Error ? err.message : String(err))
@@ -274,7 +293,6 @@ export function useNewRunDraft(
     pluginListing,
     uploadAttachment,
     nativeQuery,
-    allNativeSessions: Boolean(options.allNativeSessions),
     resumeSessionId,
     resumeSessionLabel,
     blockedReason,
@@ -287,7 +305,7 @@ export function useNewRunDraft(
     addingProject,
     setAddingProject,
     selectProject,
-    selectBranch: setWorkspaceId,
+    selectBranch,
     selectRuntime,
     clearResume,
     pickNativeSession,

@@ -967,6 +967,63 @@
         }
       }
     },
+    "/api/v1/code/highlight": {
+      "post": {
+        "operationId": "code.highlight",
+        "summary": "Tokenize a snippet with the app's own highlighter; answers class names, not colours.",
+        "tags": [
+          "code"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "x-openrun-clients": [
+          "desktop"
+        ],
+        "x-openrun-capability": "code.highlight",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/git/get-file-diff": {
       "get": {
         "operationId": "git.getFileDiff",

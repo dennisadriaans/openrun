@@ -444,6 +444,10 @@ body {
   /* Assistant prose font — `inherit` keeps the app's sans stack. */
   --chat-prose-font-family: inherit;
 
+  /* Inline `code` inside prose. A token rather than a rule, so the native
+     clients can read the same value instead of recomputing the mix. */
+  --chat-inline-code: color-mix(in oklab, var(--syntax-string) 48%, var(--text-primary));
+
   /* The user's own message. */
   --chat-user-align: flex-end;
   --chat-user-width: 80%;
@@ -885,7 +889,7 @@ body {
   padding: 0;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.9em;
-  color: color-mix(in oklab, var(--syntax-string) 48%, var(--text-primary));
+  color: var(--chat-inline-code);
 }
 
 .chat-markdown strong {

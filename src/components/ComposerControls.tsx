@@ -15,7 +15,6 @@ import {
   EyeOff,
   FolderGit2,
   GitBranch,
-  MessageSquare,
   Plus,
 } from 'lucide-react'
 import {
@@ -34,9 +33,11 @@ import { relativeTime } from '../lib/format'
 import type { NativeSession, NativeSessionGroup } from '../lib/nativeSessions'
 import { useNativeSessionPaging } from '../hooks/useNativeSessionPaging'
 import { truncateBranchLabel, truncateNavTitle } from '../lib/truncateLabel'
+import { groupThreadLensRuns, type ThreadLensRun } from '../lib/threadLens'
+import { NavigationItem, NavigationSearch } from './workspace/NavigationPicker'
 import {
   hiddenRuntimesIn,
-  installedRuntimes,
+  isAlwaysVisibleRuntime,
   toggleHiddenRuntime,
   visibleRuntimes,
 } from '../lib/pickRuntime'
@@ -238,6 +239,7 @@ export function FooterMenu({
 
 export function MenuItem({
   active,
+  showActiveIndicator = true,
   disabled,
   label,
   hint,
@@ -245,6 +247,7 @@ export function MenuItem({
   onSelect,
 }: {
   active?: boolean
+  showActiveIndicator?: boolean
   disabled?: boolean
   label: string
   hint?: string
@@ -271,7 +274,9 @@ export function MenuItem({
           <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
         ) : null}
       </span>
-      {active ? <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" /> : null}
+      {active && showActiveIndicator ? (
+        <Check className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
+      ) : null}
     </button>
   )
 }
@@ -337,6 +342,7 @@ function HideableMenuItem({
   hint,
   leading,
   active,
+  disabled = false,
   hidden,
   hideTitle,
   showTitle,
@@ -352,6 +358,7 @@ function HideableMenuItem({
   hint?: string
   leading?: ReactNode
   active: boolean
+  disabled?: boolean
   hidden: boolean
   hideTitle: string
   showTitle: string
@@ -378,6 +385,7 @@ function HideableMenuItem({
         {...(hasSubmenu ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': submenuOpen } : {})}
         onFocus={onPointerEnter}
         onClick={onSelect}
+        disabled={disabled}
         className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 ${
           active || submenuOpen ? 'text-foreground' : 'text-foreground/85 hover:text-foreground'
         } ${hidden ? 'opacity-55' : ''}`}
@@ -391,12 +399,6 @@ function HideableMenuItem({
             <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
           ) : null}
         </span>
-        {active ? (
-          <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
-        ) : null}
-        {hasSubmenu ? (
-          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-tier-quaternary" />
-        ) : null}
       </button>
       <button
         type="button"
@@ -404,12 +406,22 @@ function HideableMenuItem({
         title={hidden ? showTitle : hideTitle}
         aria-label={hidden ? showTitle : hideTitle}
         onClick={onToggleHidden}
-        className="mr-0.5 flex size-8 shrink-0 items-center justify-center rounded-md text-tier-quaternary opacity-60 transition-[color,background-color,opacity] hover:bg-hover hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        className="group/action mr-0.5 flex size-8 shrink-0 items-center justify-center rounded-md text-tier-quaternary opacity-60 transition-[color,background-color,opacity] hover:bg-hover hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
+        <ChevronRight
+          aria-hidden="true"
+          className="h-3.5 w-3.5 group-hover/action:hidden group-focus-visible/action:hidden"
+        />
         {hidden ? (
-          <Eye aria-hidden="true" className="h-3.5 w-3.5" />
+          <Eye
+            aria-hidden="true"
+            className="hidden h-3.5 w-3.5 group-hover/action:block group-focus-visible/action:block"
+          />
         ) : (
-          <EyeOff aria-hidden="true" className="h-3.5 w-3.5" />
+          <EyeOff
+            aria-hidden="true"
+            className="hidden h-3.5 w-3.5 group-hover/action:block group-focus-visible/action:block"
+          />
         )}
       </button>
     </div>
@@ -969,26 +981,50 @@ function RuntimeSessionSubmenu({
   submenuRef,
   resumeSessionId,
   loading,
-  hideNewConversation,
   onHover,
   onLeave,
-  onSelectNew,
   onSelect,
   onLoadMore,
+  conversations,
 }: {
-  group: NativeSessionGroup
+  group?: NativeSessionGroup
+  conversations?: {
+    runs: ThreadLensRun[]
+    currentRunId: string
+    workspaceId: string
+    projectId: string
+    onIntent?: (runId: string) => void
+    onSelect: (runId: string) => unknown
+  }
   anchor: HTMLElement | null
   submenuRef: RefObject<HTMLDivElement | null>
   resumeSessionId: string
   loading: boolean
-  hideNewConversation?: boolean
   onHover: () => void
   onLeave: () => void
-  onSelectNew: () => void
   onSelect: (session: NativeSession) => void
   onLoadMore: () => void
 }) {
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const nativeSessions =
+    group?.sessions.filter((session) => {
+      const needle = query.trim().toLocaleLowerCase()
+      return (
+        !needle ||
+        session.title.toLocaleLowerCase().includes(needle) ||
+        session.projectName?.toLocaleLowerCase().includes(needle)
+      )
+    }) ?? []
+
+  const conversationGroups = conversations
+    ? groupThreadLensRuns(
+        conversations.runs,
+        { workspaceId: conversations.workspaceId, projectId: conversations.projectId },
+        query,
+      )
+    : []
 
   useLayoutEffect(() => {
     if (!anchor) {
@@ -1011,7 +1047,11 @@ function RuntimeSessionSubmenu({
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
     }
-  }, [anchor, group.sessions.length, loading])
+  }, [anchor, group?.sessions.length, loading])
+
+  useEffect(() => {
+    if (coords) inputRef.current?.focus()
+  }, [coords])
 
   return createPortal(
     <div
@@ -1026,34 +1066,89 @@ function RuntimeSessionSubmenu({
         zIndex: 401,
         visibility: coords ? 'visible' : 'hidden',
       }}
-      className="max-h-80 w-80 overflow-auto rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
+      className="max-h-[min(30rem,65vh)] w-80 overflow-auto rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
     >
-      {!hideNewConversation ? (
-        <MenuItem
-          active={!resumeSessionId}
-          label="New conversation"
-          leading={<MessageSquare className="h-3.5 w-3.5 shrink-0" />}
-          onSelect={onSelectNew}
+      <div className="border-b border-border pb-1">
+        <NavigationSearch
+          value={query}
+          onChange={setQuery}
+          placeholder="Search conversations..."
+          ariaLabel="Search conversations"
+          inputRef={inputRef}
         />
-      ) : null}
-      {group.sessions.length === 0 ? (
-        <p className="px-2.5 py-2 text-ui-sm text-tier-quaternary">No {group.label} chats yet.</p>
-      ) : (
-        group.sessions.map((session) => (
-          <MenuItem
+      </div>
+      {group && nativeSessions.length > 0 ? (
+        nativeSessions.map((session) => (
+          <NavigationItem
             key={`${session.workspaceId ?? ''}:${session.sessionId}`}
             active={session.sessionId === resumeSessionId}
+            showActiveIndicator={false}
             label={session.title}
             hint={`${relativeTime(session.modifiedAt)}${
               session.messageCount
                 ? ` · ${session.messageCount} message${session.messageCount === 1 ? '' : 's'}`
                 : ''
             }${session.projectName ? ` · ${session.projectName}` : ''}`}
+            icon={
+              <ProviderIcon
+                kind={modelKindForBin(group.bin || group.runtimeId)}
+                className="size-3.5 shrink-0"
+              />
+            }
             onSelect={() => onSelect(session)}
           />
         ))
-      )}
-      {group.hasMore ? (
+      ) : group && !conversations ? (
+        <p className="px-2.5 py-2 text-ui-sm text-tier-quaternary">
+          {query.trim() ? 'No conversations found' : `No ${group.label} chats yet.`}
+        </p>
+      ) : null}
+      {conversations ? (
+        <>
+          {conversationGroups
+            .flatMap((conversationGroup) => conversationGroup.runs)
+            .map((run) => (
+              <NavigationItem
+                key={run.id}
+                label={truncateNavTitle(run.chatTitle)}
+                icon={
+                  <ProviderIcon
+                    kind={modelKindForBin(run.runtimeId)}
+                    className="size-3.5 shrink-0"
+                  />
+                }
+                active={run.id === conversations.currentRunId}
+                showActiveIndicator={false}
+                unread={run.unread}
+                onPointerDown={() => conversations.onIntent?.(run.id)}
+                onPointerEnter={() => conversations.onIntent?.(run.id)}
+                onFocus={() => conversations.onIntent?.(run.id)}
+                meta={
+                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    {relativeTime(run.startedAt).replace(' ago', '')}
+                  </span>
+                }
+                onSelect={() => conversations.onSelect(run.id)}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey) {
+                    event.preventDefault()
+                    window.open(
+                      `/runs/${encodeURIComponent(run.id)}`,
+                      '_blank',
+                      'noopener,noreferrer',
+                    )
+                    return
+                  }
+                  conversations.onSelect(run.id)
+                }}
+              />
+            ))}
+          {conversationGroups.length === 0 && nativeSessions.length === 0 ? (
+            <p className="px-2.5 py-2 text-ui-sm text-tier-quaternary">No conversations found</p>
+          ) : null}
+        </>
+      ) : null}
+      {group?.hasMore ? (
         <button
           type="button"
           onClick={onLoadMore}
@@ -1072,28 +1167,39 @@ export function RuntimePicker({
   runtimes,
   runtimeId,
   disabled,
+  disableRuntimeSelection = false,
   align = 'end',
   initiallyOpen,
   keepOpen,
   sessions,
+  conversations,
   onChange,
 }: {
   runtimes: RuntimeOption[]
   runtimeId: string
   disabled?: boolean
+  /** Keep child conversation links usable while runtime switching is unavailable. */
+  disableRuntimeSelection?: boolean
   align?: 'start' | 'end'
   initiallyOpen?: boolean
   keepOpen?: boolean
   /** Adds a saved-chats submenu to every runtime that can resume one. */
   sessions?: {
     workspaceId: string
-    allWorkspaces?: boolean
     groups: NativeSessionGroup[]
     resumeSessionId: string
     resumeSessionLabel: string
     onOpen?: () => unknown
     onSelectNew: () => void
     onSelect: (session: NativeSession, group: NativeSessionGroup) => void
+  }
+  conversations?: {
+    runs: ThreadLensRun[]
+    currentRunId: string
+    workspaceId: string
+    projectId: string
+    onIntent?: (runId: string) => void
+    onSelect: (runId: string) => unknown
   }
   onChange: (id: string) => void
 }) {
@@ -1106,7 +1212,6 @@ export function RuntimePicker({
   const { mergedGroups, loadingKind, loadMore } = useNativeSessionPaging(
     sessions?.workspaceId ?? '',
     sessions?.groups ?? [],
-    sessions?.allWorkspaces,
   )
 
   const clearCloseTimer = () => {
@@ -1127,7 +1232,7 @@ export function RuntimePicker({
 
   if (runtimes.length === 0) return null
   const selected = runtimes.find((r) => r.id === runtimeId) ?? runtimes[0]!
-  const present = installedRuntimes(runtimes, selected.id)
+  const present = runtimes
   const shown = visibleRuntimes(present, prefs.hiddenRuntimes, selected.id)
   const hidden = hiddenRuntimesIn(present, prefs.hiddenRuntimes, selected.id)
   const explicitlyHidden = new Set(prefs.hiddenRuntimes ?? [])
@@ -1135,7 +1240,10 @@ export function RuntimePicker({
     remember({ hiddenRuntimes: toggleHiddenRuntime(prefs.hiddenRuntimes, id) })
 
   const groupFor = (id: string) => mergedGroups.find((g) => g.runtimeId === id)
+  const openRuntime = openSubmenuId ? runtimes.find((r) => r.id === openSubmenuId) : undefined
   const openGroup = openSubmenuId ? groupFor(openSubmenuId) : undefined
+  const conversationsFor = (id: string) =>
+    conversations?.runs.filter((run) => run.runtimeId === id) ?? []
   const resumeLabel =
     sessions?.resumeSessionId &&
     groupFor(selected.id)?.sessions.find((s) => s.sessionId === sessions.resumeSessionId)?.title
@@ -1158,6 +1266,8 @@ export function RuntimePicker({
         <>
           {(showHidden ? present : shown).map((r) => {
             const group = groupFor(r.id)
+            const runtimeConversations = conversationsFor(r.id)
+            const hasChildren = Boolean(group) || runtimeConversations.length > 0
             return (
               <HideableMenuItem
                 key={r.id}
@@ -1165,13 +1275,18 @@ export function RuntimePicker({
                 hint={r.bin}
                 leading={<ProviderIcon kind={runtimeIconKind(r)} className="size-4 shrink-0" />}
                 active={r.id === selected.id}
-                hidden={explicitlyHidden.has(r.id)}
-                hideTitle={`Hide ${r.label} from this list`}
+                disabled={disableRuntimeSelection}
+                hidden={explicitlyHidden.has(r.id) && !isAlwaysVisibleRuntime(r.id)}
+                hideTitle={
+                  isAlwaysVisibleRuntime(r.id)
+                    ? `${r.label} is always shown`
+                    : `Hide ${r.label} from this list`
+                }
                 showTitle={`Show ${r.label} again`}
                 rowRef={(el) => {
                   rowRefs.current[r.id] = el
                 }}
-                {...(group
+                {...(hasChildren
                   ? {
                       hasSubmenu: true,
                       submenuOpen: openSubmenuId === r.id,
@@ -1181,6 +1296,7 @@ export function RuntimePicker({
                   : { onPointerEnter: deferCloseSubmenu })}
                 onSelect={() => {
                   onChange(r.id)
+                  sessions?.onSelectNew()
                   close()
                 }}
                 onToggleHidden={() => toggleHidden(r.id)}
@@ -1202,28 +1318,33 @@ export function RuntimePicker({
               {showHidden ? 'Hide hidden runtimes' : `${hidden.length} hidden`}
             </button>
           ) : null}
-          {sessions && openGroup ? (
+          {(sessions && openGroup) ||
+          (conversations && openRuntime && conversationsFor(openRuntime.id).length > 0) ? (
             <RuntimeSessionSubmenu
-              group={openGroup}
-              anchor={rowRefs.current[openGroup.runtimeId] ?? null}
+              {...(openGroup ? { group: openGroup } : {})}
+              {...(conversations && openRuntime
+                ? {
+                    conversations: {
+                      ...conversations,
+                      runs: conversationsFor(openRuntime.id),
+                    },
+                  }
+                : {})}
+              anchor={rowRefs.current[openRuntime?.id ?? ''] ?? null}
               submenuRef={submenuRef}
-              resumeSessionId={sessions.resumeSessionId}
-              loading={loadingKind === openGroup.kind}
-              hideNewConversation={sessions.allWorkspaces}
-              onHover={() => openSubmenu(openGroup.runtimeId)}
+              resumeSessionId={sessions?.resumeSessionId ?? ''}
+              loading={openGroup ? loadingKind === openGroup.kind : false}
+              onHover={() => openSubmenu(openRuntime?.id ?? '')}
               onLeave={deferCloseSubmenu}
-              onSelectNew={() => {
-                onChange(openGroup.runtimeId)
-                sessions.onSelectNew()
-                setOpenSubmenuId(null)
-                close()
-              }}
               onSelect={(session) => {
+                if (!openGroup || !sessions) return
                 sessions.onSelect(session, openGroup)
                 setOpenSubmenuId(null)
                 close()
               }}
-              onLoadMore={() => void loadMore(openGroup.kind)}
+              onLoadMore={() => {
+                if (openGroup) void loadMore(openGroup.kind)
+              }}
             />
           ) : null}
         </>

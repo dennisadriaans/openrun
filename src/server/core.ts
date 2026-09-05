@@ -32,6 +32,7 @@ import {
   type TaskReadinessBlocker,
 } from '../lib/taskReadiness.ts'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
+import { highlightSnippet } from '../lib/highlight.ts'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import {
   requiresGhAuth,
@@ -3262,4 +3263,20 @@ export async function completeCloudLoginAndFinish(input: { code: string; state: 
   const session = await completeCloudLogin(input)
   await afterSignIn()
   return { email: session.email, userId: session.userId, next: session.next }
+}
+
+// ---------------------------------------------------------------------------
+// Syntax highlighting for clients without a highlighter of their own.
+// ---------------------------------------------------------------------------
+
+/**
+ * Tokenize a code block with the same lezer highlighter the web transcript and
+ * the git panel use, so a native client paints the identical colours instead
+ * of shipping a second grammar set that would drift from ours.
+ *
+ * Class names travel, not colours: the client maps `hl-keyword` onto its own
+ * theme token exactly as `styles.css` does.
+ */
+export function highlightCodeBlock(input: { code: string; language?: string; path?: string }) {
+  return highlightSnippet(input)
 }
