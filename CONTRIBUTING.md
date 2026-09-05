@@ -60,7 +60,7 @@ back, so they are worth knowing up front:
    module** (`lib/runPrereqGate.ts`, `enableGate.ts`, `runNowGate.ts`,
    `projectGate.ts`, `gitActionGate.ts`) — otherwise the UI and the server drift
    and the button lies.
-7. **Never hand-edit `src/routeTree.gen.ts`.** Run `pnpm generate-routes`.
+7. **Never hand-edit `src/routeTree.gen.ts`.** Run `pnpm build` to regenerate it.
 
 ## Conventions
 

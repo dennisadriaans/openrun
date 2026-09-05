@@ -146,6 +146,7 @@ export function openLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
 
   let closed = false
   let es: EventSource | null = null
+  let connectingAt: number | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let watchdogTimer: ReturnType<typeof setInterval> | null = null
   let hasBeenOpen = false
@@ -171,6 +172,7 @@ export function openLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     es.onerror = null
     es.close()
     es = null
+    connectingAt = null
   }
 
   const scheduleReconnect = () => {
@@ -194,7 +196,12 @@ export function openLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   const connect = () => {
     if (closed) return
     teardownSocket()
-    patch({ phase: hasBeenOpen ? 'reconnecting' : 'connecting' })
+    connectingAt = Date.now()
+    patch({
+      phase: hasBeenOpen ? 'reconnecting' : 'connecting',
+      openedAt: null,
+      lastFrameAt: null,
+    })
 
     let socket: EventSource
     try {
@@ -252,6 +259,10 @@ export function openLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     if (es && snapshot.phase === 'open' && isStale(snapshot.lastFrameAt, Date.now())) {
       patch({ lastError: 'no heartbeat' })
       reconnectNow()
+      return
+    }
+    if (es && snapshot.phase !== 'open' && isStale(connectingAt, Date.now())) {
+      drop('connection timed out')
       return
     }
     if (!es && !reconnectTimer) connect()

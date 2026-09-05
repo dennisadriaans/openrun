@@ -115,7 +115,6 @@ Direct production dependencies:
     @tanstack/react-query                  MIT
     @tanstack/react-router                 MIT
     @tanstack/react-start                  MIT
-    @tanstack/react-devtools               MIT
     @uiw/react-codemirror                  MIT
     better-sqlite3                         MIT
     cron-parser                            MIT

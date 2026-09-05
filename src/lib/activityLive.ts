@@ -54,6 +54,30 @@ export function needsActivityLiveStream(pathname: string): boolean {
   return match?.[1] === undefined || match[1] === 'new'
 }
 
+/** Coalesce bursts without postponing refreshes indefinitely under sustained activity. */
+export function createActivityBatch(invalidate: (key: readonly string[]) => void) {
+  const pending = new Map<string, readonly string[]>()
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  return {
+    bump(keys: readonly (readonly string[])[]) {
+      for (const key of keys) pending.set(JSON.stringify(key), key)
+      if (timer !== null || pending.size === 0) return
+      timer = setTimeout(() => {
+        timer = null
+        const batch = [...pending.values()]
+        pending.clear()
+        for (const key of batch) invalidate(key)
+      }, 100)
+    },
+    close() {
+      if (timer !== null) clearTimeout(timer)
+      timer = null
+      pending.clear()
+    },
+  }
+}
+
 /** Queue depth has its own event; approval frames target one conversation. */
 export const ACTIVITY_LIVE_RESUME_KEYS = [['runs'], ['dashboard'], ['tasks']] as const
 

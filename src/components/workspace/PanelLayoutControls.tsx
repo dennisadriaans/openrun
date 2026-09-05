@@ -1,4 +1,4 @@
-import { ChevronDown, Maximize2, Minimize2, PanelBottom, PanelRight } from 'lucide-react'
+import { ChevronDown, Maximize2, Minimize2, PanelRight } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
 
 /** Bordered chip used in the workspace top bars (git menu, panel tabs, etc.). */
@@ -69,23 +69,6 @@ function ToggleButton({
     >
       <Icon className="size-3.5" />
     </button>
-  )
-}
-
-export function TerminalToggleControl({
-  terminalOpen,
-  onToggle,
-}: {
-  terminalOpen: boolean
-  onToggle: () => void
-}) {
-  return (
-    <ToggleButton
-      icon={PanelBottom}
-      label="Toggle terminal"
-      active={terminalOpen}
-      onToggle={onToggle}
-    />
   )
 }
 

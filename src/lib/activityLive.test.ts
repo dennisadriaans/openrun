@@ -5,6 +5,7 @@ import {
   activityLiveInvalidateKeys,
   activityLiveStreamPath,
   needsActivityLiveStream,
+  createActivityBatch,
 } from './activityLive.ts'
 
 describe('activityLiveInvalidateKeys', () => {
@@ -90,5 +91,32 @@ describe('needsActivityLiveStream', () => {
   it('uses only the run-scoped stream on a run detail', () => {
     assert.equal(needsActivityLiveStream('/runs/run_123'), false)
     assert.equal(needsActivityLiveStream('/runs/run_123/'), false)
+  })
+})
+
+describe('activity batching', () => {
+  it('refreshes within 100ms even when events keep arriving', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const invalidated: (readonly string[])[] = []
+    const batch = createActivityBatch((key) => invalidated.push(key))
+    t.after(() => batch.close())
+    for (let i = 0; i < 5; i++) {
+      batch.bump([['runs'], ['dashboard']])
+      t.mock.timers.tick(20)
+    }
+    assert.deepEqual(invalidated, [['runs'], ['dashboard']])
+    batch.bump([['runs'], ['task', 'task-1']])
+    t.mock.timers.tick(100)
+    assert.deepEqual(invalidated, [['runs'], ['dashboard'], ['runs'], ['task', 'task-1']])
+  })
+
+  it('does not invalidate after unmount', (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const invalidated: (readonly string[])[] = []
+    const batch = createActivityBatch((key) => invalidated.push(key))
+    batch.bump([['runs']])
+    batch.close()
+    t.mock.timers.tick(100)
+    assert.deepEqual(invalidated, [])
   })
 })

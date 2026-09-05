@@ -32,7 +32,7 @@ pnpm typecheck       # tsc --noEmit
 pnpm contract:generate # rebuild every transport from src/contract/operations.ts
 pnpm contract:check    # regenerate, then fail if anything drifted (CI gate)
 pnpm test            # unit tests
-pnpm generate-routes # tsr generate  (see the routeTree gotcha — prefer `pnpm build`)
+pnpm generate-routes # compatibility alias for the Vite build, which regenerates routes
 pnpm ship "feat(x): y" # branch off main, commit, push, open the PR
 pnpm release:plan    # read-only: what would the next release be?
 pnpm release:prepare # write the version + changelog onto release/vX.Y.Z (--dry-run to rehearse)
@@ -390,10 +390,10 @@ one-paragraph import, never a restatement.
   run `pnpm contract:generate`. The generator formats its own output with Biome, so
   `pnpm lint:fix` and the generator cannot disagree.
 - `src/routeTree.gen.ts` is **generated**. Never hand-edit it, and don't resolve conflicts in
-  it by hand — regenerate. Regenerate with **`pnpm build`** (or `pnpm dev`), not
-  `pnpm generate-routes`: the standalone router-cli currently emits a different `Register`
-  block from the Vite plugin, dropping the `config` entry that types the `src/start.ts`
-  instance. The plugin's output is authoritative.
+  it by hand — regenerate with **`pnpm build`** (or `pnpm dev`). The compatibility
+  command `pnpm generate-routes` also runs the Vite build. Use the Vite plugin rather
+  than the standalone router CLI so the `Register` block retains the `config` entry
+  that types the `src/start.ts` instance.
 - Runs, automations, and the rest of app state live in `~/.openrun/openrun.db`
   (`OPENRUN_HOME` overrides the whole directory). Delete that file to reset.
   A leftover `data/openrun.db` in a checkout is moved there on first boot.

@@ -5,8 +5,7 @@
  * merge view of the on-disk file against the version last loaded from the
  * server, so unsaved edits are visible before committing to them.
  */
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
 import { MergeView } from '@codemirror/merge'
@@ -71,7 +70,8 @@ export function FileEditor({
 }) {
   const qc = useQueryClient()
   const [mode, setMode] = useState<Mode>('edit')
-  const [draft, setDraft] = useState('')
+  // Until the user edits, display the query directly. Refetches never replace a draft.
+  const [draft, setDraft] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const file = useQuery({
@@ -80,21 +80,23 @@ export function FileEditor({
     staleTime: 0,
   })
 
-  // Reset the buffer whenever a different file (or fresh content) arrives.
   const saved = file.data?.content ?? ''
-  useEffect(() => {
-    setDraft(saved)
-    setSaveError(null)
-    setMode('edit')
-  }, [saved, path])
+  const content = draft ?? saved
 
   const save = useMutation({
     mutationFn: (content: string) => fns.writeWorkspaceFile({ data: { runId, path, content } }),
-    onSuccess: () => {
+    onSuccess: async (result, submitted) => {
+      // Discard reads started before the write, then cache the confirmed contents.
+      await qc.cancelQueries({ queryKey: ['workspace-file', runId, path] })
+      qc.setQueryData<typeof file.data>(['workspace-file', runId, path], (previous) =>
+        previous ? { ...previous, content: submitted, size: result.size } : previous,
+      )
+      // Typing can continue while the write is in flight.
+      setDraft((current) => (current === submitted ? null : current))
       setSaveError(null)
-      // Refresh the file and any diff/status views that depend on it.
-      qc.invalidateQueries({ queryKey: ['workspace-file', runId, path] })
-      qc.invalidateQueries({ queryKey: ['conversation', runId] })
+      void qc.invalidateQueries({ queryKey: ['runWorkspace', runId] })
+      void qc.invalidateQueries({ queryKey: ['fileDiff', runId, path] })
+      void qc.invalidateQueries({ queryKey: ['conversation', runId] })
     },
     onError: (err: unknown) => {
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -102,19 +104,19 @@ export function FileEditor({
   })
 
   const readOnly = file.data?.readOnly ?? false
-  const dirty = !readOnly && draft !== saved
+  const dirty = !readOnly && content !== saved
 
   // Cmd/Ctrl+S saves without leaving the editor.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        if (dirty && !save.isPending) save.mutate(draft)
+        if (dirty && !save.isPending) save.mutate(content)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [dirty, draft, save])
+  }, [dirty, content, save])
 
   const extensions = useMemo(
     () => [workspaceSyntaxHighlighting, EditorView.lineWrapping, ...languageForPath(path)],
@@ -162,7 +164,7 @@ export function FileEditor({
           <button
             type="button"
             disabled={!dirty || save.isPending}
-            onClick={() => save.mutate(draft)}
+            onClick={() => save.mutate(content)}
             title="Save (Ctrl/Cmd+S)"
             className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-[var(--bg-luminous-quaternary)] px-2 py-1 text-[11px] text-foreground transition-colors hover:bg-[var(--bg-luminous-tertiary)] disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -209,10 +211,10 @@ export function FileEditor({
             </p>
           </div>
         ) : mode === 'diff' ? (
-          <DiffView original={saved} modified={draft} path={path} />
+          <DiffView original={saved} modified={content} path={path} />
         ) : (
           <CodeMirror
-            value={draft}
+            value={content}
             onChange={setDraft}
             extensions={extensions}
             theme={workspaceEditorTheme}

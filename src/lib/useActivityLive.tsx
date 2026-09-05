@@ -16,11 +16,10 @@ import {
   activityLiveInvalidateKeys,
   activityLiveStreamPath,
   needsActivityLiveStream,
+  createActivityBatch,
   type ActivityLiveEvent,
 } from './activityLive.ts'
 import { openLiveStream } from './liveStream.ts'
-
-const INVALIDATE_DEBOUNCE_MS = 100
 
 const ActivityLiveContext = createContext(false)
 
@@ -49,21 +48,9 @@ function useActivityLiveConnection(): boolean {
     }
     if (typeof EventSource === 'undefined') return
 
-    let invalidateTimer: ReturnType<typeof setTimeout> | null = null
-    let pendingKeys = new Set<string>()
-
-    const bump = (keys: readonly (readonly string[])[]) => {
-      if (keys.length === 0) return
-      for (const key of keys) pendingKeys.add(key.join('\0'))
-      if (invalidateTimer) clearTimeout(invalidateTimer)
-      invalidateTimer = setTimeout(() => {
-        const batch = [...pendingKeys]
-        pendingKeys = new Set()
-        for (const packed of batch) {
-          void qc.invalidateQueries({ queryKey: packed.split('\0') })
-        }
-      }, INVALIDATE_DEBOUNCE_MS)
-    }
+    const batch = createActivityBatch((queryKey) => {
+      void qc.invalidateQueries({ queryKey })
+    })
 
     const stream = openLiveStream({
       id: 'activity',
@@ -72,7 +59,7 @@ function useActivityLiveConnection(): boolean {
       onHealthyChange: setStreamHealthy,
       // Frames published while the socket was down are not replayed, so a
       // reconnect refetches rather than trusting what the cache still holds.
-      onResume: () => bump(ACTIVITY_LIVE_RESUME_KEYS),
+      onResume: () => batch.bump(ACTIVITY_LIVE_RESUME_KEYS),
       onMessage: (data) => {
         let event: ActivityLiveEvent
         try {
@@ -82,14 +69,14 @@ function useActivityLiveConnection(): boolean {
           return false
         }
         if (event.type === 'ping' || event.type === 'hello') return false
-        bump(activityLiveInvalidateKeys(event))
+        batch.bump(activityLiveInvalidateKeys(event))
         return true
       },
     })
 
     return () => {
       stream.close()
-      if (invalidateTimer) clearTimeout(invalidateTimer)
+      batch.close()
     }
   }, [enabled, qc])
 
