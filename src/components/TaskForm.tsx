@@ -1367,18 +1367,6 @@ export function TaskForm({
       ) : null}
 
       <div className="space-y-7">
-        {workspaceChanged ? (
-          <Card className="mt-6 p-4">
-            <h2 className="text-ui-sm font-medium text-tier-secondary">Project Change Not Saved</h2>
-            <p className="mt-1 text-ui-sm leading-relaxed text-tier-tertiary">
-              Save changes to validate {selectedBranch ? `“${selectedBranch}”` : 'this workspace'}.
-              Readiness will update from the new workspace immediately after saving.
-            </p>
-          </Card>
-        ) : (
-          readiness
-        )}
-
         <section>
           <StepLabel n={1}>What the agent should do</StepLabel>
           <div
@@ -1737,6 +1725,18 @@ export function TaskForm({
             />
           ) : null}
         </section>
+
+        {workspaceChanged ? (
+          <Card className="p-4">
+            <h2 className="text-ui-sm font-medium text-tier-secondary">Project Change Not Saved</h2>
+            <p className="mt-1 text-ui-sm leading-relaxed text-tier-tertiary">
+              Save changes to validate {selectedBranch ? `“${selectedBranch}”` : 'this workspace'}.
+              Readiness will update from the new workspace immediately after saving.
+            </p>
+          </Card>
+        ) : (
+          readiness
+        )}
 
         {save.isError ? (
           <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">
