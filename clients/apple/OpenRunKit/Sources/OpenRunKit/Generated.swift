@@ -1162,14 +1162,54 @@ public struct TasksGetRequest: Encodable, Sendable {
 }
 
 public struct TasksSaveRequest: Encodable, Sendable {
-    public var name: String?
-    public var runtimeId: String?
-    public var prompt: String?
+    public var id: String?
+    public var name: String
+    public var description: String
+    public var runtimeId: String
+    public var prompt: String
+    public var cwd: String
+    public var workspaceId: String
+    public var cron: String
+    public var enabled: Bool
+    public var model: String?
+    public var effort: String?
+    public var webhookIntegrationId: String?
+    public var webhookEvents: [String]?
+    public var webhookFilters: JSONValue?
+    public var verifyEnabled: Bool?
+    public var maxRepairAttempts: Double?
+    public var timeoutMinutes: Double?
+    public var resumeSessionId: String?
+    public var resumeSessionLabel: String?
+    public var fireOnce: Bool?
+    public var scheduledAt: Double?
+    public var requireIsolation: Bool?
+    public var requireGhAuth: Bool?
 
-    public init(name: String? = nil, runtimeId: String? = nil, prompt: String? = nil) {
+    public init(id: String? = nil, name: String, description: String, runtimeId: String, prompt: String, cwd: String, workspaceId: String, cron: String, enabled: Bool, model: String? = nil, effort: String? = nil, webhookIntegrationId: String? = nil, webhookEvents: [String]? = nil, webhookFilters: JSONValue? = nil, verifyEnabled: Bool? = nil, maxRepairAttempts: Double? = nil, timeoutMinutes: Double? = nil, resumeSessionId: String? = nil, resumeSessionLabel: String? = nil, fireOnce: Bool? = nil, scheduledAt: Double? = nil, requireIsolation: Bool? = nil, requireGhAuth: Bool? = nil) {
+        self.id = id
         self.name = name
+        self.description = description
         self.runtimeId = runtimeId
         self.prompt = prompt
+        self.cwd = cwd
+        self.workspaceId = workspaceId
+        self.cron = cron
+        self.enabled = enabled
+        self.model = model
+        self.effort = effort
+        self.webhookIntegrationId = webhookIntegrationId
+        self.webhookEvents = webhookEvents
+        self.webhookFilters = webhookFilters
+        self.verifyEnabled = verifyEnabled
+        self.maxRepairAttempts = maxRepairAttempts
+        self.timeoutMinutes = timeoutMinutes
+        self.resumeSessionId = resumeSessionId
+        self.resumeSessionLabel = resumeSessionLabel
+        self.fireOnce = fireOnce
+        self.scheduledAt = scheduledAt
+        self.requireIsolation = requireIsolation
+        self.requireGhAuth = requireGhAuth
     }
 }
 

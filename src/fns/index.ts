@@ -920,7 +920,31 @@ export const getTask = createServerFn({ method: 'GET' })
 
 export const saveTask = createServerFn({ method: 'POST' })
   .validator((d: TaskInput) =>
-    optionalShape(d, { name: 'string?', runtimeId: 'string?', prompt: 'string?' }),
+    shape(d, {
+      id: 'string?',
+      name: 'string',
+      description: 'string',
+      runtimeId: 'string',
+      prompt: 'string',
+      cwd: 'string',
+      workspaceId: 'string',
+      cron: 'string',
+      enabled: 'boolean',
+      model: 'string?',
+      effort: 'string?',
+      webhookIntegrationId: 'string?',
+      webhookEvents: 'string[]?',
+      webhookFilters: 'object?',
+      verifyEnabled: 'boolean?',
+      maxRepairAttempts: 'number?',
+      timeoutMinutes: 'number?',
+      resumeSessionId: 'string?',
+      resumeSessionLabel: 'string?',
+      fireOnce: 'boolean?',
+      scheduledAt: 'number?',
+      requireIsolation: 'boolean?',
+      requireGhAuth: 'boolean?',
+    }),
   )
   .handler(async ({ data }) => run('tasks.save', data) as Promise<CoreResult<'upsertTask'>>)
 

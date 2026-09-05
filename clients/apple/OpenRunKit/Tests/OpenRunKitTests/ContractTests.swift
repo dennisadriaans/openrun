@@ -26,7 +26,9 @@ final class ContractTests: XCTestCase {
 
     /// The phone must not be offered anything that writes to a repository.
     func testWritesAreNotOfferedToMobile() {
-        let writes: [Operation] = [.gitCommitChanges, .gitPushChanges, .filesWriteWorkspace]
+        let writes: [OpenRunKit.Operation] = [
+            .gitCommitChanges, .gitPushChanges, .filesWriteWorkspace,
+        ]
         for operation in writes {
             XCTAssertFalse(
                 operation.route.clients.contains("mobile"),

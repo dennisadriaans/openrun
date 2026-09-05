@@ -764,7 +764,31 @@ export class OpenRunClient {
     return this.call('tasks.get', input)
   }
 
-  saveTask(input?: { name?: string; runtimeId?: string; prompt?: string }): Promise<unknown> {
+  saveTask(input: {
+    id?: string
+    name: string
+    description: string
+    runtimeId: string
+    prompt: string
+    cwd: string
+    workspaceId: string
+    cron: string
+    enabled: boolean
+    model?: string
+    effort?: string
+    webhookIntegrationId?: string
+    webhookEvents?: string[]
+    webhookFilters?: Record<string, unknown>
+    verifyEnabled?: boolean
+    maxRepairAttempts?: number
+    timeoutMinutes?: number
+    resumeSessionId?: string
+    resumeSessionLabel?: string
+    fireOnce?: boolean
+    scheduledAt?: number
+    requireIsolation?: boolean
+    requireGhAuth?: boolean
+  }): Promise<unknown> {
     return this.call('tasks.save', input)
   }
 

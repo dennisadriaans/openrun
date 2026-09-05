@@ -5054,13 +5054,19 @@
         ],
         "x-openrun-capability": "tasks.save",
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "type": "string"
+                  },
                   "name": {
+                    "type": "string"
+                  },
+                  "description": {
                     "type": "string"
                   },
                   "runtimeId": {
@@ -5068,8 +5074,75 @@
                   },
                   "prompt": {
                     "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "cron": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string"
+                  },
+                  "webhookIntegrationId": {
+                    "type": "string"
+                  },
+                  "webhookEvents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "webhookFilters": {
+                    "type": "object"
+                  },
+                  "verifyEnabled": {
+                    "type": "boolean"
+                  },
+                  "maxRepairAttempts": {
+                    "type": "number"
+                  },
+                  "timeoutMinutes": {
+                    "type": "number"
+                  },
+                  "resumeSessionId": {
+                    "type": "string"
+                  },
+                  "resumeSessionLabel": {
+                    "type": "string"
+                  },
+                  "fireOnce": {
+                    "type": "boolean"
+                  },
+                  "scheduledAt": {
+                    "type": "number"
+                  },
+                  "requireIsolation": {
+                    "type": "boolean"
+                  },
+                  "requireGhAuth": {
+                    "type": "boolean"
                   }
                 },
+                "required": [
+                  "name",
+                  "description",
+                  "runtimeId",
+                  "prompt",
+                  "cwd",
+                  "workspaceId",
+                  "cron",
+                  "enabled"
+                ],
                 "additionalProperties": true
               }
             }
