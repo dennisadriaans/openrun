@@ -40,6 +40,7 @@ import {
   toggleHiddenRuntime,
   visibleRuntimes,
 } from '../lib/pickRuntime'
+import { NavigationSearch } from './workspace/NavigationPicker'
 import { ProviderIcon } from './ProviderIcons'
 import { Tooltip } from './ui'
 
