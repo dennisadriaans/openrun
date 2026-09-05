@@ -83,6 +83,7 @@ import { missingRuntimeBinaryMessage } from '../lib/runtimeBinary'
 import { AddProjectModal } from './AddProjectModal'
 import { IntegrationBrandIcon } from './IntegrationCard'
 import {
+  BaseRefPicker,
   EffortPicker,
   FooterMenu,
   MenuItem,
@@ -1318,23 +1319,18 @@ export function TaskForm({
             |
           </span>
 
-          <label className="flex items-center gap-2 text-tier-tertiary">
-            Base
-            <input
-              aria-label="Automation base branch or revision"
-              list="automation-base-refs"
-              className="w-40 rounded border border-border bg-transparent px-2 py-1 text-foreground"
-              value={v.baseRef ?? ''}
-              placeholder={selectedProject?.defaultBranch || 'Default branch'}
-              disabled={!projectId || Boolean(workspaceChangeBlockedReason)}
-              onChange={(e) => set('baseRef', e.target.value)}
-            />
-            <datalist id="automation-base-refs">
-              {gitBranches?.map((b) => (
-                <option key={b.name} value={b.name} />
-              ))}
-            </datalist>
-          </label>
+          <BaseRefPicker
+            branches={gitBranches ?? []}
+            value={v.baseRef ?? ''}
+            disabled={!projectId || Boolean(workspaceChangeBlockedReason)}
+            {...(workspaceChangeBlockedReason
+              ? { disabledReason: workspaceChangeBlockedReason }
+              : {})}
+            {...(selectedProject?.defaultBranch
+              ? { defaultBranch: selectedProject.defaultBranch }
+              : {})}
+            onChange={(ref) => set('baseRef', ref)}
+          />
         </div>
         {nativeError ? <p className="mt-2 text-[12px] text-rose-300">{nativeError}</p> : null}
         {workspaceError ? (
