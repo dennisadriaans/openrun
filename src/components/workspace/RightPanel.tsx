@@ -34,8 +34,6 @@ export function RightPanel({
   reviewPath,
   undoDisabled = false,
   undoDisabledReason,
-  terminalOpen: _terminalOpen,
-  onToggleTerminal: _onToggleTerminal,
   onToggleRightPanel,
   maximized = false,
   onToggleMaximized,
@@ -55,8 +53,6 @@ export function RightPanel({
   reviewPath: string | null
   undoDisabled?: boolean
   undoDisabledReason?: string
-  terminalOpen: boolean
-  onToggleTerminal: () => void
   onToggleRightPanel: () => void
   /** True when the panel has taken over the full workspace width. */
   maximized?: boolean
@@ -92,7 +88,6 @@ export function RightPanel({
   // reachable while the panel is maximized and the chat column is unmounted.
   const layoutControls = (
     <div className="flex shrink-0 items-center gap-0.5">
-      {/* <TerminalToggleControl terminalOpen={terminalOpen} onToggle={onToggleTerminal} /> */}
       <RightPanelMaximizeControl maximized={maximized} onToggle={onToggleMaximized} />
       <RightPanelToggleControl rightPanelOpen onToggle={onToggleRightPanel} />
     </div>
@@ -172,7 +167,12 @@ export function RightPanel({
               </div>
             }
           >
-            <FileEditor runId={runId} path={editingPath} onClose={() => setEditingPath(null)} />
+            <FileEditor
+              key={JSON.stringify([runId, editingPath])}
+              runId={runId}
+              path={editingPath}
+              onClose={() => setEditingPath(null)}
+            />
           </Suspense>
         </div>
       </div>

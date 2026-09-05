@@ -644,8 +644,6 @@ function RunDetail() {
               reviewPath={reviewPath}
               undoDisabled={runBusy}
               undoDisabledReason={undoFilesReason}
-              terminalOpen={layout.terminalOpen}
-              onToggleTerminal={() => patchLayout({ terminalOpen: !layout.terminalOpen })}
               onToggleRightPanel={() => patchLayout({ rightPanelOpen: false, maximized: false })}
               maximized={layout.maximized}
               onToggleMaximized={() =>
