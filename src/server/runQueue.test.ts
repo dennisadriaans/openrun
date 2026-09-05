@@ -168,7 +168,10 @@ describe('server pending-run queue', () => {
         "SELECT cwd, workspaceId, trigger FROM runs WHERE taskId = 'queue-task' ORDER BY startedAt DESC LIMIT 1",
       )
       .get() as { cwd: string; workspaceId: string; trigger: string } | undefined
-    assert.deepEqual(run, { cwd: newRepo, workspaceId: 'workspace-new', trigger: 'schedule' })
+    assert.equal(run?.workspaceId, 'workspace-new')
+    assert.equal(run?.trigger, 'schedule')
+    assert.notEqual(run?.cwd, newRepo)
+    assert.match(run!.cwd, /executions\/run_/)
 
     const deadline = Date.now() + 2000
     while (Date.now() < deadline) {
@@ -314,7 +317,7 @@ describe('server pending-run queue', () => {
     assert.equal(listQueue('workspace-cancel').length, 1)
   })
 
-  it('keeps a workspace and its queue held until aborted verification closes', async () => {
+  it('keeps an execution active until aborted verification closes without locking the project', async () => {
     seed()
     getDb().prepare("UPDATE runs SET status = 'error' WHERE id = 'cancel-run'").run()
     const started = join(root, 'verification-started')
@@ -352,7 +355,7 @@ setTimeout(() => {}, 30_000)
       workspaceId: task.workspaceId,
       trigger: 'webhook',
     })
-    assert.equal(queued.queued, true)
+    assert.equal(queued.queued, false)
 
     const startDeadline = Date.now() + 3000
     while (!existsSync(started) && Date.now() < startDeadline) {
@@ -369,7 +372,7 @@ setTimeout(() => {}, 30_000)
       (db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }).status,
       'running',
     )
-    assert.equal(listQueue(task.workspaceId).length, 1)
+    assert.equal(listQueue(task.workspaceId).length, 0)
 
     const deadline = Date.now() + 7000
     while (Date.now() < deadline) {

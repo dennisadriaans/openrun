@@ -7,7 +7,6 @@ import {
   PICK_WORKSPACE_MESSAGE,
   type IntegrationSetupGateInput,
 } from './setupGate.ts'
-import { MAIN_CHECKOUT_AUTOMATION_MESSAGE } from '../pickWorkspace.ts'
 
 const ready: IntegrationSetupGateInput = {
   workspaceId: 'ws_1',
@@ -58,11 +57,8 @@ test('a project with no verification checks cannot be armed', () => {
  * button that could only fail — and a webhook writing into the branch the
  * editor has open is the failure that costs the most.
  */
-test('the primary checkout is refused, not warned about', () => {
-  assert.equal(
-    integrationSetupBlockedReason({ ...ready, workspaceKind: 'main' }),
-    MAIN_CHECKOUT_AUTOMATION_MESSAGE,
-  )
+test('a project checkout is a valid automation target because executions are isolated', () => {
+  assert.equal(integrationSetupBlockedReason({ ...ready, workspaceKind: 'main' }), null)
 })
 
 /** A workspace that no longer resolves reads as "not found", not as ready. */

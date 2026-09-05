@@ -7,14 +7,14 @@
 import { runPrereqBlockedReason, type RunPrereqInput } from './runPrereqGate.ts'
 
 /** Fields the list/detail pages already have on TaskWithMeta. */
-export type RunNowGateInput = RunPrereqInput
+export type RunNowGateInput = RunPrereqInput & { executionBlockedReason?: string | null }
 
 /**
  * Developer-facing reason Run now would fail, in the same order as
  * `runTaskNow` → `startRun` on the server. `null` means the run may start.
  */
 export function runNowBlockedReason(input: RunNowGateInput): string | null {
-  return runPrereqBlockedReason(input)
+  return runPrereqBlockedReason(input) ?? input.executionBlockedReason ?? null
 }
 
 /** True when Run now may proceed. */

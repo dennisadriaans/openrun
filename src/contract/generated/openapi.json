@@ -941,6 +941,9 @@
                   "workspaceId": {
                     "type": "string"
                   },
+                  "runId": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -4029,6 +4032,58 @@
         "x-openrun-capability": "runs.startOptions"
       }
     },
+    "/api/v1/runs/repeat": {
+      "post": {
+        "operationId": "runs.repeat",
+        "summary": "runs.repeat",
+        "tags": [
+          "runs"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "x-openrun-clients": [
+          "web",
+          "desktop"
+        ],
+        "x-openrun-capability": "runs.create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runs/start-chat": {
       "post": {
         "operationId": "runs.startChat",
@@ -5126,6 +5181,9 @@
                   "scheduledAt": {
                     "type": "number"
                   },
+                  "baseRef": {
+                    "type": "string"
+                  },
                   "requireIsolation": {
                     "type": "boolean"
                   },
@@ -5906,68 +5964,6 @@
             }
           }
         ]
-      }
-    },
-    "/api/v1/workspaces/create": {
-      "post": {
-        "operationId": "workspaces.create",
-        "summary": "workspaces.create",
-        "tags": [
-          "workspaces"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Refused"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        },
-        "x-openrun-clients": [
-          "web",
-          "desktop"
-        ],
-        "x-openrun-capability": "workspaces.create",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string"
-                  },
-                  "branch": {
-                    "type": "string"
-                  },
-                  "fromBranch": {
-                    "type": "string"
-                  },
-                  "useExistingBranch": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "projectId",
-                  "branch"
-                ],
-                "additionalProperties": true
-              }
-            }
-          }
-        }
       }
     },
     "/api/v1/workspaces/retry-setup": {

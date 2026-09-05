@@ -203,8 +203,15 @@ export const restoreWorkspaceFile = createServerFn({ method: 'POST' })
 
 /** Upload a composer image; `data` is raw base64 without the data-URL prefix. */
 export const saveAttachment = createServerFn({ method: 'POST' })
-  .validator((d: { workspaceId: string; name: string; mimeType: string; data: string }) =>
-    shape(d, { workspaceId: 'string', name: 'string', mimeType: 'string', data: 'string' }),
+  .validator(
+    (d: { workspaceId: string; runId?: string; name: string; mimeType: string; data: string }) =>
+      shape(d, {
+        workspaceId: 'string',
+        runId: 'string?',
+        name: 'string',
+        mimeType: 'string',
+        data: 'string',
+      }),
   )
   .handler(
     async ({ data }) =>
@@ -705,6 +712,10 @@ export const startRunOptions = createServerFn({ method: 'GET' }).handler(
   async () => run('runs.startOptions') as Promise<CoreResult<'startRunOptions'>>,
 )
 
+export const repeatRun = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string }) => shape(d, { runId: 'string' }))
+  .handler(async ({ data }) => run('runs.repeat', data) as Promise<CoreResult<'repeatRun'>>)
+
 export const startChat = createServerFn({ method: 'POST' })
   .validator(
     (d: {
@@ -942,6 +953,7 @@ export const saveTask = createServerFn({ method: 'POST' })
       resumeSessionLabel: 'string?',
       fireOnce: 'boolean?',
       scheduledAt: 'number?',
+      baseRef: 'string?',
       requireIsolation: 'boolean?',
       requireGhAuth: 'boolean?',
     }),
@@ -1061,20 +1073,6 @@ export const listWorkspaces = createServerFn({ method: 'GET' })
   .validator((d: { projectId?: string }) => optionalShape(d, { projectId: 'string?' }))
   .handler(
     async ({ data }) => run('workspaces.list', data) as Promise<CoreResult<'listWorkspaces'>>,
-  )
-
-export const createWorkspace = createServerFn({ method: 'POST' })
-  .validator(
-    (d: { projectId: string; branch: string; fromBranch?: string; useExistingBranch?: boolean }) =>
-      shape(d, {
-        projectId: 'string',
-        branch: 'string',
-        fromBranch: 'string?',
-        useExistingBranch: 'boolean?',
-      }),
-  )
-  .handler(
-    async ({ data }) => run('workspaces.create', data) as Promise<CoreResult<'createWorkspace'>>,
   )
 
 export const retryWorkspaceSetup = createServerFn({ method: 'POST' })

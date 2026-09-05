@@ -1,8 +1,9 @@
-You no longer have to type or remember a base branch when creating a workspace:
-the picker starts on the project's default branch and lists recent alternatives.
+Automations now target a project and optional base revision instead of a persistent
+workspace. Every invocation gets a separate execution directory pinned to its resolved
+base commit; results remain reviewable after safe cleanup and are restored for follow-ups.
 
 You can now start an interactive chat on the primary checkout when you want Open
-Run to work alongside your editor, while automations remain on isolated worktrees.
+Run to work alongside your editor, including its current branch and uncommitted changes.
 
 You can now open a saved Codex chat with its existing conversation already
 visible instead of waiting for the next message to populate the run.

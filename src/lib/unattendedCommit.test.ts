@@ -83,9 +83,9 @@ describe('unattendedCommitMessage', () => {
 })
 
 describe('unattendedCommitFailedMessage', () => {
-  it('says what will happen to the next fire', () => {
+  it('explains where partial output is retained', () => {
     const message = unattendedCommitFailedMessage('Nothing staged to commit')
     assert.match(message, /Nothing staged to commit/)
-    assert.match(message, /refuse it/)
+    assert.match(message, /retained for recovery/)
   })
 })

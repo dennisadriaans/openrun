@@ -27,9 +27,7 @@ import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import {
   fetchLatestRunForWorkspace,
   useArchiveWorkspace,
-  useCreateWorkspace,
   useProjects,
-  useProjectBranches,
   useRemoveProject,
   useRetryWorkspaceSetup,
   useRuntimes,
@@ -95,7 +93,6 @@ export function ManageProjectsModal({
 
 function ProjectSection({ project }: { project: ProjectWithMeta }) {
   const { data: workspaces = [] } = useWorkspaces(project.id)
-  const [showNewWorkspace, setShowNewWorkspace] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const [showChecks, setShowChecks] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -177,17 +174,7 @@ function ProjectSection({ project }: { project: ProjectWithMeta }) {
                   ? 'No checks'
                   : `${checkCount} check${checkCount === 1 ? '' : 's'}`}
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={menuItem}
-                onClick={() => {
-                  setMenuOpen(false)
-                  setShowNewWorkspace(true)
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" /> New workspace
-              </button>
+
               <button
                 type="button"
                 role="menuitem"
@@ -207,16 +194,35 @@ function ProjectSection({ project }: { project: ProjectWithMeta }) {
       <Card className="divide-y divide-[var(--border-quaternary)]">
         {active.length === 0 ? (
           <div className="px-4 py-10 text-center text-ui-base text-tier-tertiary">
-            No workspaces yet — add one to give the agent a place to work.
+            Project checkout is unavailable. Check the registered folder.
           </div>
         ) : (
-          active.map((w) => <WorkspaceRow key={w.id} workspace={w} />)
+          <>
+            {active
+              .filter((w) => w.kind === 'main')
+              .map((w) => (
+                <WorkspaceRow key={w.id} workspace={w} />
+              ))}
+            {active.some((w) => w.kind === 'worktree') ? (
+              <details className="px-4 py-3">
+                <summary className="cursor-pointer text-ui-sm text-tier-tertiary">
+                  Legacy checkouts · recovery
+                </summary>
+                <p className="my-2 text-ui-sm text-tier-tertiary">
+                  Existing folders are preserved. New automation runs manage their own execution
+                  directories.
+                </p>
+                {active
+                  .filter((w) => w.kind === 'worktree')
+                  .map((w) => (
+                    <WorkspaceRow key={w.id} workspace={w} />
+                  ))}
+              </details>
+            ) : null}
+          </>
         )}
       </Card>
 
-      {showNewWorkspace ? (
-        <NewWorkspaceModal project={project} onClose={() => setShowNewWorkspace(false)} />
-      ) : null}
       {showDelete ? (
         <DeleteProjectModal project={project} onClose={() => setShowDelete(false)} />
       ) : null}
@@ -553,99 +559,6 @@ function ArchiveWorkspaceModal({
 
 // ---------------------------------------------------------------------------
 // New workspace modal
-// ---------------------------------------------------------------------------
-
-function NewWorkspaceModal({
-  project,
-  onClose,
-}: {
-  project: ProjectWithMeta
-  onClose: () => void
-}) {
-  const create = useCreateWorkspace()
-  const { data: baseBranches = [] } = useProjectBranches(project.id)
-  const [branch, setBranch] = useState('')
-  const [fromBranch, setFromBranch] = useState(project.defaultBranch)
-  const [useExistingBranch, setUseExistingBranch] = useState(false)
-  const branchChoices = [
-    project.defaultBranch,
-    ...baseBranches.map((candidate) => candidate.name),
-  ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index)
-
-  const submit = async () => {
-    await create.mutateAsync({
-      projectId: project.id,
-      branch: branch.trim(),
-      fromBranch: fromBranch.trim(),
-      useExistingBranch,
-    })
-    onClose()
-  }
-
-  return (
-    <Modal title={`New workspace — ${project.name}`} onClose={onClose}>
-      <div className="space-y-4">
-        <Field label="Branch name">
-          <input
-            className={`${inputClass} mono text-[13px]`}
-            value={branch}
-            onChange={(e) => setBranch(e.target.value)}
-            placeholder="feature/my-change"
-            autoFocus
-          />
-        </Field>
-
-        <Field label="Base branch" hint="defaults to the project's default branch">
-          <select
-            className={`${inputClass} mono text-[13px]`}
-            value={fromBranch}
-            onChange={(e) => setFromBranch(e.target.value)}
-          >
-            {branchChoices.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {candidate}
-                {candidate === project.defaultBranch ? ' (default)' : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <label className="flex items-center gap-2.5">
-          <input
-            type="checkbox"
-            className="h-3.5 w-3.5 accent-[var(--base)]"
-            checked={useExistingBranch}
-            onChange={(e) => setUseExistingBranch(e.target.checked)}
-          />
-          <span className="text-ui-base text-tier-secondary">
-            Use existing branch
-            <span className="ml-1.5 text-ui-sm text-tier-quaternary">
-              — check out "{branch || 'branch'}" instead of creating it
-            </span>
-          </span>
-        </label>
-
-        {create.isError ? (
-          <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">
-            {create.error instanceof Error ? create.error.message : String(create.error)}
-          </p>
-        ) : null}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={submit} disabled={!branch.trim() || create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create workspace'}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Delete project modal
 // ---------------------------------------------------------------------------
 
 function DeleteProjectModal({

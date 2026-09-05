@@ -898,7 +898,10 @@ export function Chat({
   const [pendingRuntimeId, setPendingRuntimeId] = useState<string | null>(null)
   const [dismissSwitchNote, setDismissSwitchNote] = useState(false)
 
-  const uploadAttachment = useMemo(() => attachmentUploader(workspaceId), [workspaceId])
+  const uploadAttachment = useMemo(
+    () => attachmentUploader(workspaceId, runId),
+    [workspaceId, runId],
+  )
   const queuedMessages = queued ?? []
 
   const runtimeCatalog = useMemo(() => runtimes ?? [], [runtimes])

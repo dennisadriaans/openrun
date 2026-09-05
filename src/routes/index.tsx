@@ -79,7 +79,7 @@ function StartPage() {
 
             {draft.workspace?.activeRunId ? (
               <p className="px-1 text-ui-sm text-tier-quaternary">
-                A run is already active in this branch — pick another branch above, or create one.
+                A chat is already working in this project. You can start another when it finishes.
               </p>
             ) : null}
             {draft.error ? <p className="px-1 text-ui-base text-danger">{draft.error}</p> : null}

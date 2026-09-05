@@ -10,6 +10,7 @@
  * The rules themselves live in `lib/unattendedGate.ts`; this module only does
  * the lookups those rules need.
  */
+import { automationBaseRefusal } from './runEnvironment.ts'
 import {
   requiresGhAuth,
   unattendedBlockedReason,
@@ -42,7 +43,7 @@ export function unattendedVerificationRefusal(input: {
 }
 
 /** The two automation columns the AFK rules read. */
-export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth'>
+export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth' | 'baseRef'>
 
 /** Reason an unattended fire is unsafe, given an already-inspected workspace. */
 export function unattendedRefusalFor(input: {
@@ -51,8 +52,11 @@ export function unattendedRefusalFor(input: {
   workspace: WorkspaceRow
   health: WorkspaceHealth
 }): string | null {
+  const baseRefusal = automationBaseRefusal(input.workspace.id, input.task.baseRef)
+  if (baseRefusal) return baseRefusal
   const gh = ghStatus()
   return unattendedBlockedReason({
+    freshExecution: true,
     workspaceKind: input.workspace.kind,
     requireIsolation: input.task.requireIsolation === 1,
     health: input.health,
@@ -71,6 +75,8 @@ export function unattendedRefusalFor(input: {
  * refuse, or `null` to proceed.
  */
 export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | null {
+  if (task.resumeSessionId?.trim())
+    return 'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.'
   if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
   const verificationRefusal = unattendedVerificationRefusal({
     workspaceId: task.workspaceId,

@@ -5,7 +5,7 @@
  * Panel chrome adapted from t3code ChatView (MIT, T3 Tools Inc.).
  */
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowLeft, Ban, ChevronRight, MoreHorizontal, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Ban, MoreHorizontal, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
@@ -29,19 +29,18 @@ import {
   RUN_PRELOAD_STALE_MS,
   scheduleIdleWorkspacePrefetch,
   useConversation,
-  useCreateWorkspace,
   useDiscard,
   useMarkRunRead,
   useRemoveRun,
   useRuntimes,
   useRunWorkspace,
   useRunPullRequest,
-  useStartChat,
+  useRepeatRun,
   useQueuedMessageActions,
   useSendMessage,
 } from '../lib/queries'
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
-import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
+import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
 import { runListTitle } from '../lib/runPreview'
 import {
@@ -124,14 +123,11 @@ function RunDetail() {
   const [dropCommits, setDropCommits] = useState(false)
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout(runId))
   const layoutChosenRef = useRef(hasStoredLayout(runId))
-  const [newBranchOpen, setNewBranchOpen] = useState(false)
-  const [newBranchName, setNewBranchName] = useState('')
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
   const listRow = peekCachedRunSummary(qc, runId)
   const navigate = useNavigate()
-  const createWorkspace = useCreateWorkspace()
   const showRight = layout.rightPanelOpen || layout.maximized
   // Every changed-files surface reads this: the right panel, the strip above the
   // composer, the diff overlay and the undo dialog. Only the panel is gated on
@@ -148,7 +144,7 @@ function RunDetail() {
   const markRead = useMarkRunRead()
   const sendMessage = useSendMessage(runId)
   const queueActions = useQueuedMessageActions(runId)
-  const startNewRun = useStartChat()
+  const startNewRun = useRepeatRun()
   const discard = useDiscard(runId)
   const remove = useRemoveRun()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -345,7 +341,6 @@ function RunDetail() {
   const canDropCommits = commitsBlockedReason === null
   const workspace = data?.workspace ?? null
   const project = data?.project ?? null
-  const workspaces = data?.workspaces ?? []
   const booting = isLoading || !data
   const fallbackRuntime = runtimes?.find(
     (runtime) => runtime.id === (data?.runtime?.id ?? listRow?.runtimeId),
@@ -386,20 +381,10 @@ function RunDetail() {
   const startNewRunMutate = startNewRun.mutate
   const onNewRun = () => {
     if (!run || !workspace?.id || !newRunRuntimeId || !firstPrompt || runBusy) return
-    startNewRunMutate(
-      {
-        workspaceId: workspace.id,
-        runtimeId: newRunRuntimeId,
-        prompt: firstPrompt,
-        model: data?.model ?? run.model,
-        effort: data?.effort ?? run.effort,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
-      },
-      {
-        onSuccess: ({ runId: newRunId }) =>
-          void navigate({ to: '/runs/$runId', params: { runId: newRunId } }),
-      },
-    )
+    startNewRunMutate(run.id, {
+      onSuccess: ({ runId: newRunId }) =>
+        void navigate({ to: '/runs/$runId', params: { runId: newRunId } }),
+    })
     setMoreMenuOpen(false)
   }
 
@@ -421,31 +406,6 @@ function RunDetail() {
       navigate({ to: '/runs' })
     } catch {
       // Keep the modal open so the accessible error can be retried.
-    }
-  }
-
-  const submitNewBranch = async () => {
-    if (!project || !newBranchName.trim()) return
-    try {
-      const created = await createWorkspace.mutateAsync({
-        projectId: project.id,
-        branch: newBranchName.trim(),
-        fromBranch: workspace?.branch || project.defaultBranch,
-      })
-      setNewBranchOpen(false)
-      setNewBranchName('')
-      void navigate({
-        to: '/runs/new',
-        search: {
-          projectId: project.id,
-          workspaceId: created.id,
-          runtimeId: data?.runtime?.id,
-          model: data?.model || undefined,
-          effort: data?.effort || undefined,
-        },
-      })
-    } catch {
-      // Mutation state renders the server's Git/setup error in the dialog.
     }
   }
 
@@ -471,12 +431,9 @@ function RunDetail() {
               <WorkspaceBreadcrumb
                 projectId={project?.id}
                 projectName={project?.name}
-                branch={workspace?.branch}
-                isMainCheckout={workspace?.kind === 'main'}
-                workspace={workspace}
-                workspaces={workspaces}
+                branch={data?.execution ? run?.headBranch : workspace?.branch}
+                isMainCheckout={!data?.execution && workspace?.kind === 'main'}
                 branchDisabled={booting}
-                onRequestNewBranch={project ? () => setNewBranchOpen(true) : undefined}
                 trailing={
                   run ? (
                     <ThreadStack
@@ -825,6 +782,20 @@ function RunDetail() {
         Spans the full workspace width rather than the chat column, so the
         terminal toggle still works while the right panel is maximized.
       */}
+      {data?.execution && (data.execution.note || data.execution.setupLog) ? (
+        <details className="border-t border-border px-4 py-2 text-ui-sm text-tier-tertiary">
+          <summary className="cursor-pointer">Execution recovery and setup</summary>
+          {data.execution.note ? <p className="mt-2">{data.execution.note}</p> : null}
+          {data.execution.note ? (
+            <p className="mt-1 break-all mono">{data.execution.path}</p>
+          ) : null}
+          {data.execution.setupLog ? (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap">
+              {data.execution.setupLog}
+            </pre>
+          ) : null}
+        </details>
+      ) : null}
       <TerminalDrawer
         open={layout.terminalOpen}
         height={layout.terminalHeight}
@@ -833,51 +804,6 @@ function RunDetail() {
         stdout={run?.stdout ?? ''}
         stderr={run?.stderr ?? ''}
       />
-
-      {newBranchOpen && project ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-elevated p-5 shadow-2xl">
-            <div className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
-              <ChevronRight className="size-4" />
-              New branch workspace
-            </div>
-            <p className="mb-4 text-xs text-muted-foreground">
-              Creates a separate worktree from {workspace?.branch || project.defaultBranch}, then
-              opens a new chat in it. Only committed Git state is copied.
-            </p>
-            <input
-              autoFocus
-              value={newBranchName}
-              onChange={(e) => setNewBranchName(e.target.value)}
-              placeholder="feature/my-branch"
-              className="mb-4 w-full rounded-lg border border-border bg-chrome px-3 py-2 mono text-sm outline-none focus:border-ring"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void submitNewBranch()
-                if (e.key === 'Escape') setNewBranchOpen(false)
-              }}
-            />
-            {createWorkspace.isError ? (
-              <p className="mb-4 text-xs text-danger">
-                {createWorkspace.error instanceof Error
-                  ? createWorkspace.error.message
-                  : String(createWorkspace.error)}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setNewBranchOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!newBranchName.trim() || createWorkspace.isPending}
-                onClick={() => void submitNewBranch()}
-              >
-                {createWorkspace.isPending ? 'Creating…' : 'Create'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {confirmDelete && run ? (
         <Modal title="Delete run" onClose={closeDelete}>

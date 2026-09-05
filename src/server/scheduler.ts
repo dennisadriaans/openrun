@@ -13,7 +13,7 @@ import { hasWorkspaceId } from '../lib/workspaceRef'
 import { getDb, type RuntimeRow, type TaskRow } from './db'
 import { runTask } from './executor'
 import { isShuttingDown } from './processControl'
-import { drainAllQueues, enqueueRun, workspaceBusy, WORKSPACE_BUSY_MESSAGE } from './runQueue'
+import { drainAllQueues, enqueueRun, WORKSPACE_BUSY_MESSAGE } from './runQueue'
 import { lastFireObservedAt, recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
 import { isSchedulableCron } from './cronValidation.ts'
 import { unattendedRefusal } from './unattendedPreflight'
@@ -55,7 +55,6 @@ function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string
   // Busy-first is important: a healthy run is expected to dirty or switch its
   // worktree while it is active. Let that fire queue, then inspect the tree
   // after the owner has really finished.
-  if (workspaceBusy(task.workspaceId)) return null
   if (!runtime) return { outcome: 'failed', detail: 'Runtime not found for automation.' }
   // Nobody is watching this fire: refuse a shared checkout, a contaminated
   // worktree, or a GitHub capability that is not actually usable, rather than

@@ -99,6 +99,7 @@ public enum Operation: String, CaseIterable, Sendable {
     case runsGetLatestForWorkspace = "runs.getLatestForWorkspace"
     case runsGetLatestForProject = "runs.getLatestForProject"
     case runsStartOptions = "runs.startOptions"
+    case runsRepeat = "runs.repeat"
     case runsStartChat = "runs.startChat"
     case runsOpenNativeChat = "runs.openNativeChat"
     case runsGetConversation = "runs.getConversation"
@@ -140,7 +141,6 @@ public enum Operation: String, CaseIterable, Sendable {
     case workspacesRestore = "workspaces.restore"
     case workspacesRunBaseline = "workspaces.runBaseline"
     case workspacesList = "workspaces.list"
-    case workspacesCreate = "workspaces.create"
     case workspacesRetrySetup = "workspaces.retrySetup"
     case workspacesArchive = "workspaces.archive"
 
@@ -229,6 +229,7 @@ public enum Operation: String, CaseIterable, Sendable {
         case .runsGetLatestForWorkspace: return Route(method: "GET", path: "/api/v1/runs/get-latest-for-workspace", capability: "runs.getLatestForWorkspace", clients: ["web", "desktop"])
         case .runsGetLatestForProject: return Route(method: "GET", path: "/api/v1/runs/get-latest-for-project", capability: "runs.getLatestForProject", clients: ["web", "desktop"])
         case .runsStartOptions: return Route(method: "GET", path: "/api/v1/runs/start-options", capability: "runs.startOptions", clients: ["web", "desktop", "mobile"])
+        case .runsRepeat: return Route(method: "POST", path: "/api/v1/runs/repeat", capability: "runs.create", clients: ["web", "desktop"])
         case .runsStartChat: return Route(method: "POST", path: "/api/v1/runs/start-chat", capability: "runs.create", clients: ["web", "desktop", "mobile"])
         case .runsOpenNativeChat: return Route(method: "POST", path: "/api/v1/runs/open-native-chat", capability: "runs.openNativeChat", clients: ["web", "desktop"])
         case .runsGetConversation: return Route(method: "GET", path: "/api/v1/runs/get-conversation", capability: "runs.read", clients: ["web", "desktop", "mobile"])
@@ -264,7 +265,6 @@ public enum Operation: String, CaseIterable, Sendable {
         case .workspacesRestore: return Route(method: "POST", path: "/api/v1/workspaces/restore", capability: "workspaces.restore", clients: ["web", "desktop"])
         case .workspacesRunBaseline: return Route(method: "POST", path: "/api/v1/workspaces/run-baseline", capability: "workspaces.runBaseline", clients: ["web", "desktop"])
         case .workspacesList: return Route(method: "GET", path: "/api/v1/workspaces/list", capability: "workspaces.list", clients: ["web", "desktop"])
-        case .workspacesCreate: return Route(method: "POST", path: "/api/v1/workspaces/create", capability: "workspaces.create", clients: ["web", "desktop"])
         case .workspacesRetrySetup: return Route(method: "POST", path: "/api/v1/workspaces/retry-setup", capability: "workspaces.retrySetup", clients: ["web", "desktop"])
         case .workspacesArchive: return Route(method: "POST", path: "/api/v1/workspaces/archive", capability: "workspaces.archive", clients: ["web", "desktop"])
         }
@@ -411,12 +411,14 @@ public struct FilesRestoreWorkspaceRequest: Encodable, Sendable {
 /// Upload a composer image; `data` is raw base64 without the data-URL prefix.
 public struct FilesSaveAttachmentRequest: Encodable, Sendable {
     public var workspaceId: String
+    public var runId: String?
     public var name: String
     public var mimeType: String
     public var data: String
 
-    public init(workspaceId: String, name: String, mimeType: String, data: String) {
+    public init(workspaceId: String, runId: String? = nil, name: String, mimeType: String, data: String) {
         self.workspaceId = workspaceId
+        self.runId = runId
         self.name = name
         self.mimeType = mimeType
         self.data = data
@@ -959,6 +961,14 @@ public struct RunsGetLatestForProjectRequest: Encodable, Sendable {
     }
 }
 
+public struct RunsRepeatRequest: Encodable, Sendable {
+    public var runId: String
+
+    public init(runId: String) {
+        self.runId = runId
+    }
+}
+
 public struct RunsStartChatRequest: Encodable, Sendable {
     public var workspaceId: String
     public var runtimeId: String
@@ -1183,10 +1193,11 @@ public struct TasksSaveRequest: Encodable, Sendable {
     public var resumeSessionLabel: String?
     public var fireOnce: Bool?
     public var scheduledAt: Double?
+    public var baseRef: String?
     public var requireIsolation: Bool?
     public var requireGhAuth: Bool?
 
-    public init(id: String? = nil, name: String, description: String, runtimeId: String, prompt: String, cwd: String, workspaceId: String, cron: String, enabled: Bool, model: String? = nil, effort: String? = nil, webhookIntegrationId: String? = nil, webhookEvents: [String]? = nil, webhookFilters: JSONValue? = nil, verifyEnabled: Bool? = nil, maxRepairAttempts: Double? = nil, timeoutMinutes: Double? = nil, resumeSessionId: String? = nil, resumeSessionLabel: String? = nil, fireOnce: Bool? = nil, scheduledAt: Double? = nil, requireIsolation: Bool? = nil, requireGhAuth: Bool? = nil) {
+    public init(id: String? = nil, name: String, description: String, runtimeId: String, prompt: String, cwd: String, workspaceId: String, cron: String, enabled: Bool, model: String? = nil, effort: String? = nil, webhookIntegrationId: String? = nil, webhookEvents: [String]? = nil, webhookFilters: JSONValue? = nil, verifyEnabled: Bool? = nil, maxRepairAttempts: Double? = nil, timeoutMinutes: Double? = nil, resumeSessionId: String? = nil, resumeSessionLabel: String? = nil, fireOnce: Bool? = nil, scheduledAt: Double? = nil, baseRef: String? = nil, requireIsolation: Bool? = nil, requireGhAuth: Bool? = nil) {
         self.id = id
         self.name = name
         self.description = description
@@ -1208,6 +1219,7 @@ public struct TasksSaveRequest: Encodable, Sendable {
         self.resumeSessionLabel = resumeSessionLabel
         self.fireOnce = fireOnce
         self.scheduledAt = scheduledAt
+        self.baseRef = baseRef
         self.requireIsolation = requireIsolation
         self.requireGhAuth = requireGhAuth
     }
@@ -1328,20 +1340,6 @@ public struct WorkspacesListRequest: Encodable, Sendable {
 
     public init(projectId: String? = nil) {
         self.projectId = projectId
-    }
-}
-
-public struct WorkspacesCreateRequest: Encodable, Sendable {
-    public var projectId: String
-    public var branch: String
-    public var fromBranch: String?
-    public var useExistingBranch: Bool?
-
-    public init(projectId: String, branch: String, fromBranch: String? = nil, useExistingBranch: Bool? = nil) {
-        self.projectId = projectId
-        self.branch = branch
-        self.fromBranch = fromBranch
-        self.useExistingBranch = useExistingBranch
     }
 }
 

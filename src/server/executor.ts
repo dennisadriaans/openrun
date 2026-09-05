@@ -1,3 +1,15 @@
+import {
+  createRunEnvironment,
+  getRunEnvironment,
+  ensureRunEnvironment,
+  releaseRunEnvironment,
+  assertOwnedEnvironment,
+  holdRunEnvironment,
+  recordSetupArtifacts,
+} from './runEnvironment.ts'
+import { runCommand } from './command.ts'
+import { resolveCommit } from './git.ts'
+import { SETUP_TIMEOUT_MS } from '../lib/commandBudget.ts'
 /**
  * Process executor.
  *
@@ -279,6 +291,8 @@ export type StartRunInput = {
    * the full planning instructions.
    */
   cliPrompt?: string
+  isolated?: boolean
+  executionBaseRef?: string
   cwd: string
   workspaceId: string
   trigger: 'manual' | 'schedule' | 'planner' | 'chat' | 'webhook'
@@ -323,7 +337,13 @@ export function startRun(input: StartRunInput): string {
   // leaves a queued/running row behind. Legacy callers (workspaceId='') keep
   // the old cwd-or-process.cwd() fallback untouched. Planner stores a target
   // workspaceId for install cards but does not lock or chdir into it.
-  const lockWorkspace = input.lockWorkspace !== false
+  const isolated =
+    (input.isolated === true ||
+      Boolean(input.taskId) ||
+      input.trigger === 'schedule' ||
+      input.trigger === 'webhook') &&
+    input.trigger !== 'planner'
+  const lockWorkspace = input.lockWorkspace !== false && !isolated
   let cwd: string
   if (input.workspaceId && input.workspaceId.trim().length > 0 && lockWorkspace) {
     assertWorkspaceFree(input.workspaceId)
@@ -331,7 +351,7 @@ export function startRun(input: StartRunInput): string {
   } else {
     cwd = input.cwd && input.cwd.trim().length > 0 ? input.cwd : process.cwd()
   }
-  assertRunCwdExists(cwd)
+  if (!isolated) assertRunCwdExists(cwd)
 
   // Claude and Grok let us choose the session id up front, which avoids having
   // to parse it back out of the output before the user can send a follow-up.
@@ -341,6 +361,10 @@ export function startRun(input: StartRunInput): string {
   const kind = runtimeKind(input.runtime.bin)
   const resumeSessionId = input.resumeSessionId?.trim() ?? ''
   const resumeKind = nativeResumeKindFor(input.runtime)
+  if (isolated && resumeSessionId)
+    throw new Error(
+      'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.',
+    )
   if (resumeSessionId) {
     if (!resumeKind) {
       throw new Error(nativeResumeNotSupportedMessage())
@@ -374,6 +398,17 @@ export function startRun(input: StartRunInput): string {
   // refuse before inserting so "Run now" / schedules fail with a clear error.
   assertRuntimeOnPath(input.runtime.bin)
 
+  const task =
+    isolated && input.taskId
+      ? (db.prepare('SELECT baseRef FROM tasks WHERE id = ?').get(input.taskId) as
+          | { baseRef: string }
+          | undefined)
+      : undefined
+  const environment = isolated
+    ? createRunEnvironment(runId, input.workspaceId, input.executionBaseRef ?? task?.baseRef)
+    : undefined
+  if (environment) cwd = environment.path
+
   // When the runtime is allowed to open PRs, append the shipping instruction to
   // the CLI prompt only — the stored user message stays the user's own text.
   // Planner runs never inherit the PR appendix (JSON-only, no shipping).
@@ -399,7 +434,7 @@ export function startRun(input: StartRunInput): string {
     throw new Error(`The "${input.runtime.label}" runtime does not support resuming a conversation`)
   }
 
-  const baseBranch = namedBranch(cwd)
+  const baseBranch = environment?.baseRef ?? namedBranch(cwd)
 
   db.prepare(
     `INSERT INTO runs (id, taskId, taskName, runtimeId, trigger, status, command, cwd, workspaceId, pid, exitCode, stdout, stderr, startedAt, finishedAt, sessionId, baseBranch, headBranch, baseSnapshot, model, effort, runtimeMode)
@@ -418,8 +453,8 @@ export function startRun(input: StartRunInput): string {
     baseBranch,
     // Seed with the starting branch so a live run has a stable identity too;
     // finalizeRun replaces it with the branch actually used by the agent.
-    headBranch: baseBranch,
-    baseSnapshot: captureBaseSnapshot(cwd),
+    headBranch: environment?.branch ?? baseBranch,
+    baseSnapshot: environment?.baseCommit ?? captureBaseSnapshot(cwd),
     model,
     effort,
     runtimeMode,
@@ -468,20 +503,29 @@ export function startRun(input: StartRunInput): string {
     })
   }
 
+  const openingMessageId = environment
+    ? recordSetupPrompt(runId, input.prompt, undefined, input.source)
+    : undefined
   publishActivityLive({ type: 'run_changed', runId, status: 'running' })
-  spawnTurn({
-    runId,
-    runtime: input.runtime,
-    cwd,
-    prompt: input.prompt,
-    turn,
-    timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
-    // Only scheduler/webhook openings are unattended. Manual "Run now" and
-    // chat openings are attended workflows; treating every opening as AFK
-    // would quarantine a human's own checkout after an ordinary conversation.
-    unattended: input.trigger === 'schedule' || input.trigger === 'webhook',
-    ...(input.source ? { source: input.source } : {}),
-  })
+  const spawnOpening = () =>
+    spawnTurn({
+      runId,
+      runtime: input.runtime,
+      cwd,
+      prompt: input.prompt,
+      recordedUserMessage: Boolean(openingMessageId),
+      userMessageId: openingMessageId,
+      turn,
+      timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
+      // Only scheduler/webhook openings are unattended. Manual "Run now" and
+      // chat openings are attended workflows; treating every opening as AFK
+      // would quarantine a human's own checkout after an ordinary conversation.
+      unattended: isolated,
+      ...(input.source ? { source: input.source } : {}),
+    })
+  if (environment) void setupRunEnvironment(runId, spawnOpening)
+  else spawnOpening()
+
   return runId
 }
 
@@ -608,14 +652,18 @@ export function sendFollowUp(input: {
       }
     | undefined
   if (!run) throw new Error('Run not found')
-  assertRunCwdExists(run.cwd)
   if (!input.internal && run.status === 'running') {
     throw new Error('This run is still working — wait for it to finish')
   }
 
   // A follow-up still writes into the same tree as the first turn — another
   // run must not be mid-edit in that workspace when we resume this one.
-  if (!input.internal && run.workspaceId && run.workspaceId.trim().length > 0) {
+  if (
+    !input.internal &&
+    !getRunEnvironment(input.runId) &&
+    run.workspaceId &&
+    run.workspaceId.trim().length > 0
+  ) {
     assertWorkspaceFree(run.workspaceId)
   }
 
@@ -658,6 +706,8 @@ export function sendFollowUp(input: {
       })
     : input.prompt
 
+  const restored = ensureRunEnvironment(input.runId)
+  assertRunCwdExists(run.cwd)
   const turn = buildTurnCommand({
     runtime,
     prompt: cliPrompt,
@@ -700,17 +750,102 @@ export function sendFollowUp(input: {
 
   publishActivityLive({ type: 'run_changed', runId: input.runId, status: 'running' })
 
-  return spawnTurn({
-    runId: input.runId,
-    runtime,
-    cwd: run.cwd,
-    prompt: input.prompt,
-    turn,
-    timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
-    unattended: input.internal === true,
-    userMessageId: input.userMessageId,
-    assistantMessageId: input.assistantMessageId,
-  })
+  const userMessageId = input.userMessageId ?? randomId('msg')
+  const assistantMessageId = input.assistantMessageId ?? randomId('msg')
+  if (restored) recordSetupPrompt(input.runId, input.prompt, userMessageId)
+  const spawnFollowUp = () =>
+    spawnTurn({
+      runId: input.runId,
+      runtime,
+      cwd: run.cwd,
+      prompt: input.prompt,
+      turn,
+      timeoutMs: resolveRunTimeoutMs(input.timeoutMs),
+      unattended: input.internal === true,
+      userMessageId,
+      assistantMessageId,
+      recordedUserMessage: restored,
+    })
+  if (restored) void setupRunEnvironment(input.runId, spawnFollowUp)
+  else spawnFollowUp()
+  return { userMessageId, assistantMessageId }
+}
+
+/** Keep the prompt and webhook provenance even when setup never reaches the agent. */
+function recordSetupPrompt(
+  runId: string,
+  prompt: string,
+  messageId?: string,
+  source?: MessageSource,
+): string {
+  const id = messageId ?? randomId('msg')
+  const now = Date.now()
+  getDb()
+    .prepare(`INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
+    VALUES (?, ?, 'user', ?, '', '', 'success', NULL, '', ?, ?, ?, ?, ?)`)
+    .run(
+      id,
+      runId,
+      prompt,
+      source?.provider ?? '',
+      source?.url ?? '',
+      source?.label ?? '',
+      now,
+      now,
+    )
+  return id
+}
+
+/** Setup is part of the run: cancellable, budgeted, and its pid survives a crash. */
+async function setupRunEnvironment(runId: string, spawnReady: () => unknown): Promise<void> {
+  const env = getRunEnvironment(runId)!
+  const controller = new AbortController()
+  verifyingMap().set(runId, controller)
+  try {
+    assertOwnedEnvironment(runId)
+    const project = getDb()
+      .prepare('SELECT setupCommand FROM projects WHERE id = ?')
+      .get(env.projectId) as { setupCommand: string } | undefined
+    if (project?.setupCommand.trim()) {
+      const result = await runCommand({
+        command: project.setupCommand,
+        cwd: env.path,
+        shell: true,
+        timeoutMs: SETUP_TIMEOUT_MS,
+        signal: controller.signal,
+        onSpawn: (pid) => {
+          getDb().prepare('UPDATE runs SET pid = ? WHERE id = ?').run(pid, runId)
+        },
+      })
+      getDb()
+        .prepare('UPDATE run_environments SET setupLog = ? WHERE runId = ?')
+        .run(result.stdout + result.stderr, runId)
+      if (result.status !== 0 || result.timedOut || result.outputTooLarge)
+        throw new Error('Project setup failed. See the execution setup log.')
+    }
+    if (controller.signal.aborted || cancellationMap().has(runId)) return
+    recordSetupArtifacts(runId)
+    assertOwnedEnvironment(runId)
+    if (repoInfo(env.path).dirty)
+      throw new Error(
+        'Project setup left uncommitted changes. Commit setup inputs in the base revision before running.',
+      )
+    if (resolveCommit(env.path, 'HEAD') !== (env.resultCommit || env.baseCommit))
+      throw new Error('Project setup changed the base revision.')
+    verifyingMap().delete(runId)
+    getDb().prepare('UPDATE runs SET pid = NULL WHERE id = ?').run(runId)
+    spawnReady()
+  } catch (err) {
+    if (!cancellationMap().has(runId)) {
+      const note = `\n${err instanceof Error ? err.message : String(err)}\n`
+      getDb().prepare('UPDATE runs SET stderr = stderr || ? WHERE id = ?').run(note, runId)
+      verifyingMap().delete(runId)
+      finalizeRun(runId, 'error', -1, 'crashed', env.path)
+    }
+  } finally {
+    if (verifyingMap().get(runId) === controller) verifyingMap().delete(runId)
+    if (cancellationMap().has(runId)) completeCancelledRun(runId)
+  }
 }
 
 /** Transcript replayed to a runtime taking over the conversation. */
@@ -784,6 +919,7 @@ function spawnTurn(input: {
   source?: MessageSource
   userMessageId?: string
   assistantMessageId?: string
+  recordedUserMessage?: boolean
 }): { userMessageId: string; assistantMessageId: string } {
   const { runId, runtime, cwd, prompt, turn, timeoutMs, unattended, source } = input
   const db = getDb()
@@ -798,18 +934,19 @@ function spawnTurn(input: {
     `INSERT INTO messages (id, runId, role, content, stdout, stderr, status, exitCode, diffSummary, sourceProvider, sourceUrl, sourceLabel, createdAt, finishedAt)
      VALUES (@id, @runId, @role, @content, '', '', @status, NULL, '', @sourceProvider, @sourceUrl, @sourceLabel, @createdAt, @finishedAt)`,
   )
-  insertMessage.run({
-    id: userMsgId,
-    runId,
-    role: 'user',
-    content: prompt,
-    status: 'success',
-    sourceProvider: source?.provider ?? '',
-    sourceUrl: source?.url ?? '',
-    sourceLabel: source?.label ?? '',
-    createdAt: now,
-    finishedAt: now,
-  })
+  if (!input.recordedUserMessage)
+    insertMessage.run({
+      id: userMsgId,
+      runId,
+      role: 'user',
+      content: prompt,
+      status: 'success',
+      sourceProvider: source?.provider ?? '',
+      sourceUrl: source?.url ?? '',
+      sourceLabel: source?.label ?? '',
+      createdAt: now,
+      finishedAt: now,
+    })
   insertMessage.run({
     id: assistantMsgId,
     runId,
@@ -1845,6 +1982,7 @@ export function setRunFinalizedHook(hook: RunFinalizedHook | null): void {
 }
 
 function onRunFinalized(runId: string) {
+  releaseRunEnvironment(runId)
   if (!runFinalizedHook) return
   try {
     runFinalizedHook(runId)
@@ -1886,7 +2024,10 @@ function completeCancelledRun(runId: string): void {
 
   cancellationMap().delete(runId)
   drainOnExitSet().delete(runId)
-  if (pending.trigger === 'schedule' || pending.trigger === 'webhook') {
+  if (
+    !getRunEnvironment(runId) &&
+    (pending.trigger === 'schedule' || pending.trigger === 'webhook')
+  ) {
     recordRunOutcomeForWorkspace({
       workspaceId: pending.workspaceId,
       taskName: pending.taskName || 'an unattended run',
@@ -2057,7 +2198,12 @@ function commitUnattendedChanges(input: {
   const workspace = db.prepare('SELECT kind FROM workspaces WHERE id = ?').get(input.workspaceId) as
     | { kind: string }
     | undefined
-  if (!workspace) return
+  if (!workspace && !getRunEnvironment(input.runId)) return
+  try {
+    assertOwnedEnvironment(input.runId)
+  } catch {
+    return
+  }
 
   let dirty = false
   try {
@@ -2069,7 +2215,7 @@ function commitUnattendedChanges(input: {
 
   if (
     !shouldCommitUnattendedChanges({
-      workspaceKind: workspace.kind,
+      workspaceKind: getRunEnvironment(input.runId) ? 'worktree' : workspace!.kind,
       dirty,
       verdict: input.verdict,
     })
@@ -2246,11 +2392,12 @@ async function concludeTurn(input: {
       taskName: taskName?.taskName ?? 'a scheduled run',
       verdict,
     })
-    recordRunOutcomeForWorkspace({
-      workspaceId: run.workspaceId,
-      taskName: taskName?.taskName ?? 'a scheduled run',
-      verdict,
-    })
+    if (!getRunEnvironment(input.runId))
+      recordRunOutcomeForWorkspace({
+        workspaceId: run.workspaceId,
+        taskName: taskName?.taskName ?? 'a scheduled run',
+        verdict,
+      })
   }
 
   finalizeRun(input.runId, input.status, input.exitCode, verdict, input.cwd)
@@ -2295,7 +2442,9 @@ export async function runChecksNow(runId: string): Promise<CheckResultRow[]> {
   if (defs.length === 0) throw new Error('This project has no verification checks configured')
 
   // Checks execute in the run's worktree; another run must not be mid-edit.
-  if (run.workspaceId.trim().length > 0) assertWorkspaceFree(run.workspaceId)
+  if (!getRunEnvironment(runId) && run.workspaceId.trim().length > 0)
+    assertWorkspaceFree(run.workspaceId)
+  ensureRunEnvironment(runId)
 
   const last = db
     .prepare(
@@ -2306,8 +2455,10 @@ export async function runChecksNow(runId: string): Promise<CheckResultRow[]> {
 
   clearCheckPass(runId, messageId, run.repairAttempts)
 
+  const releaseEnvironment = holdRunEnvironment(runId)
   const controller = new AbortController()
   verifyingMap().set(runId, controller)
+  db.prepare("UPDATE runs SET status = 'running' WHERE id = ?").run(runId)
   let results: CheckResultRow[] = []
   try {
     const pass = await runCheckPass({
@@ -2321,7 +2472,16 @@ export async function runChecksNow(runId: string): Promise<CheckResultRow[]> {
     results = pass.results
   } finally {
     verifyingMap().delete(runId)
+    releaseEnvironment()
+    if (cancellationMap().has(runId)) completeCancelledRun(runId)
+    else db.prepare('UPDATE runs SET status = ?, pid = NULL WHERE id = ?').run(run.status, runId)
   }
+  if (
+    cancellationMap().has(runId) ||
+    (db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string })
+      ?.status === 'cancelled'
+  )
+    return results
 
   // The verdict is a statement about the checks, so re-running them restates
   // it. No repair turn: this path is explicitly the user asking, not the
@@ -2336,6 +2496,7 @@ export async function runChecksNow(runId: string): Promise<CheckResultRow[]> {
   publishRunLive(runId, { type: 'verdict', verdict, repairAttempts: run.repairAttempts })
   publishActivityLive({ type: 'run_changed', runId, status: run.status, verdict })
 
+  releaseRunEnvironment(runId)
   return results
 }
 
@@ -2379,12 +2540,13 @@ export function cancelRun(runId: string, opts?: { drainQueue?: boolean }): boole
   if (drainQueue) drainOnExitSet().add(runId)
   else drainOnExitSet().delete(runId)
   cancellationMap().set(runId, {
-    workspaceId: row.workspaceId,
+    workspaceId: getRunEnvironment(runId) ? runId : row.workspaceId,
     trigger: row.trigger,
     taskName: row.taskName,
     drainQueue,
   })
-  if (row.workspaceId.trim()) reserveWorkspaceCancellation(row.workspaceId)
+  if (row.workspaceId.trim())
+    reserveWorkspaceCancellation(getRunEnvironment(runId) ? runId : row.workspaceId)
 
   // A run in verification has no live agent child but is very much still
   // occupying the worktree — cancel has to reach the checks too.
@@ -2502,7 +2664,7 @@ export function reconcileOrphanRuns(): { marked: number; killed: number } {
     if (pidLive && row.workspaceId.trim()) reserveWorkspaceCancellation(row.workspaceId)
     if (pidLive && row.pid != null && killPidTree(row.pid)) killed += 1
 
-    if (row.trigger === 'schedule' || row.trigger === 'webhook') {
+    if (!getRunEnvironment(row.id) && (row.trigger === 'schedule' || row.trigger === 'webhook')) {
       // A restarted server cannot know whether the child was about to commit,
       // edit, or run checks. Treat the tree as contaminated until an explicit
       // restore (or a later verified run) clears the quarantine.

@@ -46,6 +46,8 @@ export type RuntimeRow = {
 }
 
 export type TaskRow = {
+  /** Branch/ref resolved to an immutable commit for each isolated invocation. */
+  baseRef?: string
   id: string
   name: string
   description: string
@@ -833,6 +835,25 @@ function migrate(db: Database.Database) {
   // additive metadata backfilled below for rows that predate workspaces.
   addColumn(db, 'runs', 'workspaceId', "TEXT NOT NULL DEFAULT ''")
   addColumn(db, 'tasks', 'workspaceId', "TEXT NOT NULL DEFAULT ''")
+  addColumn(db, 'tasks', 'baseRef', "TEXT NOT NULL DEFAULT ''")
+  // Execution ownership is independent of workspace inventory and survives
+  // deleting run history. Orphan results must remain recoverable.
+  db.exec(`CREATE TABLE IF NOT EXISTS run_environments (
+    runId TEXT PRIMARY KEY,
+    projectId TEXT NOT NULL,
+    repoPath TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    baseRef TEXT NOT NULL,
+    baseCommit TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    gitDir TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'creating',
+    resultCommit TEXT NOT NULL DEFAULT '',
+    resultView TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    setupLog TEXT NOT NULL DEFAULT '',
+    createdAt INTEGER NOT NULL
+  )`)
   // Persist the task's picked model/effort so runs use the UI selection instead
   // of falling through to the CLI default (which is Opus for Claude).
   addColumn(db, 'tasks', 'model', "TEXT NOT NULL DEFAULT ''")
@@ -843,6 +864,7 @@ function migrate(db: Database.Database) {
   addColumn(db, 'runs', 'archivedAt', 'INTEGER')
   // Runtime capability: may the agent open its own PR during a run (ticket 05).
   addColumn(db, 'runtimes', 'canOpenPrs', 'INTEGER NOT NULL DEFAULT 0')
+  addColumn(db, 'run_environments', 'setupArtifacts', "TEXT NOT NULL DEFAULT '{}'")
   // How we talk to the runtime. Existing rows are all stdout-parsing CLIs, and
   // the default keeps them that way — ACP is opt-in per runtime.
   addColumn(db, 'runtimes', 'transport', "TEXT NOT NULL DEFAULT 'cli'")

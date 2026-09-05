@@ -15,7 +15,7 @@ import { renderWebhookPrompt, webhookSourceLink } from '../../lib/integrations/p
 import type { CanonicalWebhookEvent } from '../../lib/integrations/types.ts'
 import { getDb, type RuntimeRow, type TaskRow } from '../db.ts'
 import { startRun } from '../executor.ts'
-import { enqueueRun, workspaceBusy, WORKSPACE_BUSY_MESSAGE } from '../runQueue.ts'
+import { enqueueRun, WORKSPACE_BUSY_MESSAGE } from '../runQueue.ts'
 import { unattendedRefusal } from '../unattendedPreflight.ts'
 import { getIntegration } from './connections.ts'
 import { getWorkspace } from '../workspaces.ts'
@@ -111,7 +111,6 @@ function webhookRefusal(task: TaskRow): string | null {
   // Queue that explicit busy condition before health inspection; all other
   // failures are permanent delivery failures and must not be hidden in the
   // queue.
-  if (workspaceBusy(task.workspaceId)) return null
   return unattendedRefusal(task, runtime)
 }
 

@@ -223,50 +223,23 @@ describe('AFK safety core boundaries', () => {
     assert.ok(task.id)
   })
 
-  it('enforces one enabled unattended owner through save, enable, and webhook update', () => {
-    core.upsertTask(
-      taskInput({
-        name: 'First owner',
-        enabled: true,
-        webhookIntegrationId: 'afk-integration',
-      }),
+  it('allows multiple enabled automations to target the same project', () => {
+    const first = core.upsertTask(
+      taskInput({ name: 'First', enabled: true, webhookIntegrationId: 'afk-integration' }),
     )
     const second = core.upsertTask(
-      taskInput({
-        name: 'Second owner',
-        enabled: false,
-        webhookIntegrationId: 'afk-integration',
-      }),
+      taskInput({ name: 'Second', enabled: false, webhookIntegrationId: 'afk-integration' }),
     )
-    assert.match(
-      second.readinessBlockers.find((blocker) => blocker.id === 'unattended')?.message ?? '',
-      /already assigned.*First owner/i,
-    )
-    assert.throws(() => core.setTaskEnabled(second.id, true), /already assigned.*First owner/i)
-    assert.throws(
-      () =>
-        core.upsertTask(
-          taskInput({
-            name: 'Third owner',
-            enabled: true,
-            webhookIntegrationId: 'afk-integration',
-          }),
-        ),
-      /already assigned.*First owner/i,
-    )
-
-    const webhookLater = core.upsertTask(taskInput({ name: 'Webhook later', enabled: true }))
-    assert.throws(
-      () =>
-        core.updateTaskWebhook({
-          taskId: webhookLater.id,
-          webhookIntegrationId: 'afk-integration',
-        }),
-      /already assigned.*First owner/i,
+    assert.equal(second.unattendedBlockedReason, null)
+    assert.doesNotThrow(() => core.setTaskEnabled(second.id, true))
+    assert.equal(core.getTask(first.id)!.enabled, 1)
+    const later = core.upsertTask(taskInput({ name: 'Later', enabled: true }))
+    assert.doesNotThrow(() =>
+      core.updateTaskWebhook({ taskId: later.id, webhookIntegrationId: 'afk-integration' }),
     )
   })
 
-  it('quarantines AFK failures but leaves an attended manual failure reusable', async () => {
+  it('an isolated failure does not quarantine the project or legacy checkout', async () => {
     const db = getDb()
     db.prepare("UPDATE runtimes SET argsTemplate = ? WHERE id = 'afk-runtime'").run(
       JSON.stringify(['-e', 'process.exit(2)']),
@@ -306,7 +279,7 @@ describe('AFK safety core boundaries', () => {
           blockedKind: string
         }
       ).blockedKind,
-      'run',
+      '',
     )
   })
 
@@ -337,10 +310,14 @@ describe('AFK safety core boundaries', () => {
       encoding: 'utf8',
     }).trim()
     assert.equal(status, '', `expected a clean worktree, got:\n${status}`)
-    const subject = execFileSync('git', ['log', '-1', '--format=%s'], {
-      cwd: worktree,
-      encoding: 'utf8',
-    }).trim()
+    const subject = execFileSync(
+      'git',
+      ['log', '-1', '--format=%s', core.getRun(firstId)!.headBranch],
+      {
+        cwd: worktree,
+        encoding: 'utf8',
+      },
+    ).trim()
     assert.match(subject, /Nightly output \(verified\)/)
 
     // …which is what lets the *next* scheduled fire through. Before this, the
@@ -350,7 +327,7 @@ describe('AFK safety core boundaries', () => {
     assert.equal(await waitForTerminal(secondId), 'success')
   })
 
-  it("leaves the main checkout dirty rather than committing the user's own work", async () => {
+  it('leaves the project checkout unchanged for every scheduled entry point', async () => {
     // `upsertTask` refuses the primary checkout outright, so drive the
     // unattended path directly: the guard has to hold for any scheduled run,
     // not only the ones the task form can produce.
@@ -381,16 +358,12 @@ describe('AFK safety core boundaries', () => {
       cwd: repo,
       encoding: 'utf8',
     }).trim()
-    assert.match(status, /main-output\.txt/)
-    execFileSync('git', ['clean', '-fd'], { cwd: repo })
+    assert.equal(status, '')
   })
 
-  it('rejects the primary checkout as an agent workspace', () => {
+  it('accepts a project checkout as an automation target', () => {
     seed({ kind: 'main' })
-    assert.throws(
-      () => core.upsertTask(taskInput({ name: 'Primary checkout task' })),
-      /isolated worktree/i,
-    )
+    assert.doesNotThrow(() => core.upsertTask(taskInput({ name: 'Primary checkout task' })))
   })
 
   it('rejects changing the saved workspace while the task is active', () => {
