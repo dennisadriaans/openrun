@@ -74,7 +74,6 @@ function NewTaskPage() {
     <div className="px-8 py-8">
       <TaskForm
         initial={initial}
-        onCancel={() => navigate({ to: '/tasks' })}
         onSaved={(id) => navigate({ to: '/tasks/$taskId', params: { taskId: id } })}
       />
     </div>

@@ -896,14 +896,12 @@ function StepLabel({ n, children }: { n: number; children: ReactNode }) {
 export function TaskForm({
   initial,
   onSaved,
-  onCancel,
   readiness,
   workspaceChangeBlockedReason,
   demoPreview = false,
 }: {
   initial?: Partial<TaskFormValues>
   onSaved: (id: string) => void
-  onCancel: () => void
   readiness?: ReactNode
   workspaceChangeBlockedReason?: string | null
   /** Interactive, page-local preview that never persists an automation. */
@@ -1277,9 +1275,6 @@ export function TaskForm({
             autoFocus
           />
           <div className="flex shrink-0 items-center gap-2 pt-2">
-            <Button type="button" variant="ghost" onClick={onCancel}>
-              Cancel
-            </Button>
             <span className="inline-flex" title={saveBlockReason}>
               {/*
                 Every refusal in one place: `saveBlockReason` already folds in
@@ -1683,7 +1678,7 @@ export function TaskForm({
           </div>
         </section>
 
-        <section>
+        <section className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <Button
               type="button"
@@ -1700,6 +1695,7 @@ export function TaskForm({
               </span>
             ) : null}
           </div>
+          {workspaceChanged ? null : readiness}
           {showVerificationSettings ? (
             <VerificationSection
               verifyEnabled={verifyEnabled}
@@ -1722,6 +1718,7 @@ export function TaskForm({
                 setDirty(true)
                 setRequireGhAuth(on)
               }}
+              className="w-full"
             />
           ) : null}
         </section>
@@ -1734,9 +1731,7 @@ export function TaskForm({
               Readiness will update from the new workspace immediately after saving.
             </p>
           </Card>
-        ) : (
-          readiness
-        )}
+        ) : null}
 
         {save.isError ? (
           <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">
@@ -1773,6 +1768,7 @@ function VerificationSection({
   onTimeoutMinutesChange,
   requireGhAuth,
   onRequireGhAuthChange,
+  className,
 }: {
   verifyEnabled: boolean
   onVerifyEnabledChange: (value: boolean) => void
@@ -1782,9 +1778,12 @@ function VerificationSection({
   onTimeoutMinutesChange: (value: number) => void
   requireGhAuth: boolean
   onRequireGhAuthChange: (value: boolean) => void
+  className?: string
 }) {
   return (
-    <div className="mt-2 space-y-3 rounded-xl border border-border bg-elevated px-3.5 py-3">
+    <div
+      className={`mt-2 space-y-3 rounded-xl border border-border bg-elevated px-3.5 py-3 ${className ?? ''}`}
+    >
       <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
