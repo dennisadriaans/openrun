@@ -36,6 +36,7 @@ export const ROUTES: Record<string, RouteInfo> = {
   'files.writeWorkspace': { method: 'POST', path: '/api/v1/files/write-workspace' },
   'files.restoreWorkspace': { method: 'POST', path: '/api/v1/files/restore-workspace' },
   'files.saveAttachment': { method: 'POST', path: '/api/v1/files/save-attachment' },
+  'code.highlight': { method: 'POST', path: '/api/v1/code/highlight' },
   'git.getFileDiff': { method: 'GET', path: '/api/v1/git/get-file-diff' },
   'git.commitChanges': { method: 'POST', path: '/api/v1/git/commit-changes' },
   'git.pushChanges': { method: 'POST', path: '/api/v1/git/push-changes' },
@@ -317,6 +318,11 @@ export class OpenRunClient {
     data: string
   }): Promise<unknown> {
     return this.call('files.saveAttachment', input)
+  }
+
+  /** Tokenize a snippet with the app's own highlighter; answers class names, not colours. */
+  highlightCodeBlock(input: { code: string; language?: string; path?: string }): Promise<unknown> {
+    return this.call('code.highlight', input)
   }
 
   getFileDiff(input: { runId: string; path: string; whole?: boolean }): Promise<unknown> {

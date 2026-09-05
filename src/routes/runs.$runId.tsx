@@ -11,7 +11,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
 import { Chat } from '../components/Chat'
 import { ChatDebugMenuItem } from '../components/chat/ChatDebugToggle'
-import { ThreadStack } from '../components/chat/ThreadStack'
 import { TerminalPaletteMenuItems } from '../components/chat/TerminalPalettePicker'
 import { useChatTheme } from '../components/chat/ChatThemeProvider'
 import { DiffPanel } from '../components/DiffPanel'
@@ -42,7 +41,6 @@ import {
 import { defaultEffort, defaultModel, modelsForRuntime } from '../lib/models'
 import type { RuntimeMode } from '../lib/runtimeMode'
 import { isWorkspaceReady } from '../lib/workspaceReady'
-import { runListTitle } from '../lib/runPreview'
 import {
   NO_RUN_COMMITS,
   shortSha,
@@ -52,7 +50,24 @@ import {
 import { isDemoDetailRun, isDemoMode } from '../lib/demoData.ts'
 import { useRunLive } from '../lib/useRunLive'
 
+type RunDetailSearch = {
+  from?: 'home'
+  projectId?: string
+  workspaceId?: string
+  runtimeId?: string
+  model?: string
+  effort?: string
+}
+
 export const Route = createFileRoute('/runs/$runId')({
+  validateSearch: (search: Record<string, unknown>): RunDetailSearch => ({
+    ...(search.from === 'home' ? { from: 'home' as const } : {}),
+    ...(typeof search.projectId === 'string' ? { projectId: search.projectId } : {}),
+    ...(typeof search.workspaceId === 'string' ? { workspaceId: search.workspaceId } : {}),
+    ...(typeof search.runtimeId === 'string' ? { runtimeId: search.runtimeId } : {}),
+    ...(typeof search.model === 'string' ? { model: search.model } : {}),
+    ...(typeof search.effort === 'string' ? { effort: search.effort } : {}),
+  }),
   loader: ({ context, params }) => {
     void prefetchConversation(context.queryClient, params.runId)
   },
@@ -112,6 +127,14 @@ function loadLayout(runId: string): LayoutState {
 
 function RunDetail() {
   const { runId } = Route.useParams()
+  const {
+    from,
+    projectId: homeProjectId,
+    workspaceId,
+    runtimeId,
+    model,
+    effort,
+  } = Route.useSearch()
   const { streamHealthy } = useRunLive(runId)
   const { data, isLoading } = useConversation(runId, { streamHealthy })
   const { data: runtimes } = useRuntimes()
@@ -303,6 +326,19 @@ function RunDetail() {
     })
   }, [data, qc])
 
+  // Escape is the keyboard equivalent of cancelling a working run. The
+  // composer handles it first, so an open completion menu cannot obscure it.
+  useEffect(() => {
+    if (!runWorking) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat) return
+      event.preventDefault()
+      onStop()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onStop, runWorking])
+
   // Keep the workspace chrome mounted while conversation loads — only the
   // transcript waits. "Not found" waits until the first fetch settles.
   if (!isLoading && !data) {
@@ -421,9 +457,20 @@ function RunDetail() {
             <header className="flex h-[var(--workspace-topbar-height,44px)] shrink-0 items-center gap-1.5 border-b border-border px-3">
               {!sidebarOpen ? <SidebarToggle /> : null}
               <Link
-                to="/runs"
+                to={from === 'home' ? '/' : '/runs'}
+                search={
+                  from === 'home'
+                    ? {
+                        projectId: homeProjectId,
+                        workspaceId,
+                        runtimeId,
+                        model,
+                        effort,
+                      }
+                    : {}
+                }
                 className="flex shrink-0 items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground"
-                title="Back to run history"
+                title={from === 'home' ? 'Back to home' : 'Back to run history'}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Link>
@@ -568,6 +615,7 @@ function RunDetail() {
                 checkResults={checkResults}
                 pullRequest={pullRequest ?? null}
                 repositoryUrl={project?.remoteUrl}
+                returnToHome={from === 'home'}
                 models={models}
                 runId={runId}
                 runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
