@@ -10,10 +10,12 @@
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useRouterState } from '@tanstack/react-router'
 import {
   ACTIVITY_LIVE_RESUME_KEYS,
   activityLiveInvalidateKeys,
   activityLiveStreamPath,
+  needsActivityLiveStream,
   type ActivityLiveEvent,
 } from './activityLive.ts'
 import { openLiveStream } from './liveStream.ts'
@@ -36,8 +38,15 @@ export function ActivityLiveProvider({ children }: { children: ReactNode }) {
 function useActivityLiveConnection(): boolean {
   const qc = useQueryClient()
   const [streamHealthy, setStreamHealthy] = useState(false)
+  const enabled = useRouterState({
+    select: (state) => needsActivityLiveStream(state.location.pathname),
+  })
 
   useEffect(() => {
+    if (!enabled) {
+      setStreamHealthy(false)
+      return
+    }
     if (typeof EventSource === 'undefined') return
 
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null
@@ -82,7 +91,7 @@ function useActivityLiveConnection(): boolean {
       stream.close()
       if (invalidateTimer) clearTimeout(invalidateTimer)
     }
-  }, [qc])
+  }, [enabled, qc])
 
   return streamHealthy
 }

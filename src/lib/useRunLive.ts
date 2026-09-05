@@ -8,7 +8,7 @@
  * While the stream is healthy, HTTP polling stays off; on stream loss it
  * resumes 1s / 5s.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   applyRunLiveEvent,
@@ -24,18 +24,47 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
   const qc = useQueryClient()
   const demo = isDemoMode() && isDemoDetailRun(runId)
   const [streamHealthy, setStreamHealthy] = useState(demo)
+  // A background tab cannot render the live tail, but its EventSource would
+  // still consume one of the browser's small per-origin connection slots.
+  // Closing it here means many open run tabs do not starve navigation or API
+  // requests; becoming visible again starts a fresh stream and refetches any
+  // frames that arrived while the tab was asleep.
+  const [visible, setVisible] = useState(() =>
+    typeof document === 'undefined' ? true : document.visibilityState === 'visible',
+  )
+  const wasHidden = useRef(false)
 
   useEffect(() => {
-    if (demo) {
-      setStreamHealthy(true)
-      return
+    if (typeof document === 'undefined') return
+    const onVisibilityChange = () => {
+      const nextVisible = document.visibilityState === 'visible'
+      if (!nextVisible) wasHidden.current = true
+      setVisible(nextVisible)
     }
-    if (typeof EventSource === 'undefined') return
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
 
+  useEffect(() => {
     const refetchConversation = () => {
       void qc.invalidateQueries({ queryKey: ['conversation', runId] })
       void qc.invalidateQueries({ queryKey: ['run', runId] })
       void qc.invalidateQueries({ queryKey: ['runWorkspace', runId] })
+    }
+
+    if (demo) {
+      setStreamHealthy(true)
+      return
+    }
+    if (!visible) {
+      setStreamHealthy(false)
+      return
+    }
+    if (typeof EventSource === 'undefined') return
+
+    if (wasHidden.current) {
+      wasHidden.current = false
+      refetchConversation()
     }
 
     const applyFrame = (event: RunLiveEvent) => {
@@ -103,7 +132,7 @@ export function useRunLive(runId: string): { streamHealthy: boolean } {
     })
 
     return () => stream.close()
-  }, [demo, runId, qc])
+  }, [demo, runId, qc, visible])
 
   return { streamHealthy }
 }
