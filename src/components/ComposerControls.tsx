@@ -40,6 +40,7 @@ import {
   toggleHiddenRuntime,
   visibleRuntimes,
 } from '../lib/pickRuntime'
+import { NavigationSearch } from './workspace/NavigationPicker'
 import { ProviderIcon } from './ProviderIcons'
 import { Tooltip } from './ui'
 
@@ -956,6 +957,130 @@ export function BranchPicker({
               />
             )
           ) : null}
+        </>
+      )}
+    </FooterMenu>
+  )
+}
+
+export type BaseRefOption = {
+  name: string
+  /** Only a remote-tracking ref exists locally under this name. */
+  remote?: boolean
+  current?: boolean
+}
+
+/**
+ * Base revision an automation checks out for every run. Typed text is accepted
+ * as well as a listed branch: a tag or commit is a legitimate base, and
+ * `git for-each-ref` only answers branches.
+ */
+export function BaseRefPicker({
+  branches,
+  value,
+  defaultBranch,
+  disabled,
+  disabledReason,
+  invalid,
+  'aria-describedby': ariaDescribedBy,
+  onChange,
+}: {
+  branches: BaseRefOption[]
+  value: string
+  defaultBranch?: string
+  disabled?: boolean
+  disabledReason?: string
+  invalid?: boolean
+  'aria-describedby'?: string
+  onChange: (ref: string) => void
+}) {
+  const [filter, setFilter] = useState('')
+  const [visibleCount, setVisibleCount] = useState(BRANCH_PAGE_SIZE)
+  const query = filter.trim()
+  const matches = query
+    ? branches.filter((b) => b.name.toLowerCase().includes(query.toLowerCase()))
+    : branches
+  const visible = matches.slice(0, visibleCount)
+  const fallbackLabel = defaultBranch ? `${defaultBranch} (default)` : 'Default branch'
+
+  const pick = (ref: string, close: () => void) => {
+    onChange(ref)
+    close()
+  }
+
+  return (
+    <FooterMenu
+      label={truncateBranchLabel(value || fallbackLabel)}
+      title={disabledReason ?? (value || fallbackLabel)}
+      tooltip={disabledReason ?? 'Base revision every run starts from'}
+      disabled={disabled}
+      invalid={invalid}
+      aria-describedby={ariaDescribedBy}
+      leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+      onOpen={() => {
+        setFilter('')
+        setVisibleCount(BRANCH_PAGE_SIZE)
+      }}
+    >
+      {(close) => (
+        <>
+          <div
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || !query) return
+              event.preventDefault()
+              pick(query, close)
+            }}
+          >
+            <NavigationSearch
+              value={filter}
+              onChange={(next) => {
+                setFilter(next)
+                setVisibleCount(BRANCH_PAGE_SIZE)
+              }}
+              placeholder="Branch, tag or commit"
+              ariaLabel="Automation base branch or revision"
+            />
+          </div>
+          {query ? (
+            matches.some((b) => b.name === query) ? null : (
+              <MenuItem
+                label={`Use “${query}”`}
+                hint="Tag or commit"
+                leading={<Plus aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                onSelect={() => pick(query, close)}
+              />
+            )
+          ) : (
+            <MenuItem
+              active={!value}
+              label={fallbackLabel}
+              hint="Follows the project default"
+              leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+              onSelect={() => pick('', close)}
+            />
+          )}
+          {matches.length === 0 ? (
+            <div className="px-2.5 py-2 text-ui-base text-tier-quaternary">
+              {query ? 'No branch matches' : 'No branches yet'}
+            </div>
+          ) : null}
+          {visible.map((branch) => (
+            <MenuItem
+              key={branch.name}
+              active={branch.name === value}
+              label={branch.name}
+              hint={branch.remote ? 'Remote branch' : branch.current ? 'Checked out' : undefined}
+              leading={<GitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+              onSelect={() => pick(branch.name, close)}
+            />
+          ))}
+          <MenuListExpandToggle
+            totalCount={matches.length}
+            visibleCount={visibleCount}
+            pageSize={BRANCH_PAGE_SIZE}
+            expandLabel="More branches"
+            onVisibleCountChange={setVisibleCount}
+          />
         </>
       )}
     </FooterMenu>
