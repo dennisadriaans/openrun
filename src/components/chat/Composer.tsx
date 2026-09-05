@@ -2,10 +2,11 @@
  * Chat / new-run prompt box: slash commands, plugin mentions, attachments, send.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ListPlus, Square } from 'lucide-react'
+import { Square } from 'lucide-react'
 import { ComposerModelControls } from '../ComposerControls'
 import { PluginMentionMenu } from '../PluginMentionMenu'
 import { SlashCommandMenu } from '../SlashCommandMenu'
+import { useClickOutside } from '../../hooks/useClickOutside'
 import {
   appCommandFor,
   applySlashCommand,
@@ -119,14 +120,18 @@ export function Composer({
   const [value, setValue] = useState(restoredDraft ?? '')
   const [activeIndex, setActiveIndex] = useState(0)
   const [menuDismissed, setMenuDismissed] = useState(false)
+  const [sendMenuOpen, setSendMenuOpen] = useState(false)
   const [commandError, setCommandError] = useState('')
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const dragDepth = useRef(0)
+  const sendMenuRef = useRef<HTMLDivElement>(null)
   const files = usePendingAttachments(uploadAttachment)
   // Queueing accepts everything a live send does, attachments included.
   const blocked = disabled || (running && !canQueue)
   const canAttach = Boolean(uploadAttachment) && !blocked
+
+  useClickOutside(sendMenuOpen, () => setSendMenuOpen(false), [sendMenuRef])
 
   useEffect(() => {
     const el = ref.current
@@ -219,6 +224,11 @@ export function Composer({
         ref.current?.focus()
       },
     )
+  }
+
+  const pickSendAction = (now: boolean) => {
+    setSendMenuOpen(false)
+    submit(now)
   }
 
   const canSend =
@@ -367,7 +377,7 @@ export function Composer({
             ) : null}
           </div>
 
-          <div className="relative flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2 pb-2 sm:px-2.5 sm:pb-2.5">
+          <div className="relative flex min-w-0 flex-nowrap items-center gap-1 px-3 pb-2.5 sm:px-3.5 sm:pb-3">
             {leading}
             <ComposerModelControls
               models={models}
@@ -379,16 +389,63 @@ export function Composer({
             />
 
             <div className="flex shrink-0 items-center gap-1">
-              {running && onStop ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  aria-label="Stop"
-                  title="Stop"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn"
-                >
-                  <Square className="size-3.5 fill-current" />
-                </button>
+              {!running || canQueue ? (
+                <div ref={sendMenuRef} className="relative">
+                  {running && sendMenuOpen ? (
+                    <div
+                      role="menu"
+                      aria-label="Send options"
+                      className="absolute right-0 bottom-full z-30 mb-2 min-w-36 overflow-hidden rounded-lg border border-border bg-popover p-1 text-ui-sm text-popover-foreground shadow-xl"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => pickSendAction(true)}
+                        className="flex w-full items-center rounded-md px-2.5 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+                      >
+                        Send now
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => pickSendAction(false)}
+                        className="flex w-full items-center rounded-md px-2.5 py-2 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+                      >
+                        Send to queue
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={!canSend}
+                    onClick={() => (running ? setSendMenuOpen((open) => !open) : submit())}
+                    aria-label={pending ? 'Sending' : 'Send message'}
+                    aria-haspopup={running ? 'menu' : undefined}
+                    aria-expanded={running ? sendMenuOpen : undefined}
+                    title={running ? 'Choose when to send' : undefined}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-30"
+                  >
+                    {pending ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                    ) : (
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 14 14"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               ) : null}
               {uploadAttachment ? (
                 <AttachmentButton
@@ -396,32 +453,15 @@ export function Composer({
                   onFiles={(picked) => files.addFiles(picked)}
                 />
               ) : null}
-              {!running || canQueue ? (
+              {running && onStop ? (
                 <button
                   type="button"
-                  disabled={!canSend}
-                  onClick={() => submit()}
-                  aria-label={pending ? 'Sending' : running ? 'Queue message' : 'Send message'}
-                  title={
-                    running ? 'Queue this message (↵) · ⌘↵ interrupts and sends now' : undefined
-                  }
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90 text-primary-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-primary disabled:pointer-events-none disabled:opacity-30"
+                  onClick={onStop}
+                  aria-label="Stop"
+                  title="Stop"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
                 >
-                  {pending ? (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-                  ) : running ? (
-                    <ListPlus className="size-3.5" />
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                      <path
-                        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
+                  <Square className="size-3.5 fill-current" />
                 </button>
               ) : null}
             </div>

@@ -79,7 +79,6 @@ export function useNewRunDraft(
   const [refusedPrompt, setRefusedPrompt] = useState('')
   const [addingProject, setAddingProject] = useState(false)
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
   const { data: gitBranches } = useProjectBranches(projectId || undefined)
@@ -173,11 +172,6 @@ export function useNewRunDraft(
     setWorkspaceId('')
   }
 
-  const selectBranch = (id: string) => {
-    setWorkspaceError(null)
-    setWorkspaceId(id)
-  }
-
   const clearResume = () => {
     setResumeSessionId('')
     setResumeSessionLabel('')
@@ -192,7 +186,6 @@ export function useNewRunDraft(
   }
 
   const openNewWorkspace = () => {
-    setWorkspaceError(null)
     setNewWorkspaceOpen(true)
   }
 
@@ -305,7 +298,6 @@ export function useNewRunDraft(
     resumeSessionLabel,
     blockedReason,
     error,
-    workspaceError,
     refusedPrompt,
     sent,
     busy: startChat.isPending || openNativeChat.isPending,
@@ -319,7 +311,7 @@ export function useNewRunDraft(
     openNewWorkspace,
     createBranch,
     selectProject,
-    selectBranch,
+    selectBranch: setWorkspaceId,
     selectRuntime,
     clearResume,
     pickNativeSession,

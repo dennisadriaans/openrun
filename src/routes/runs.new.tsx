@@ -82,9 +82,6 @@ function NewRun() {
                 </div>
               ) : null}
               {draft.error ? <p className="mt-3 text-ui-base text-danger">{draft.error}</p> : null}
-              {draft.workspaceError ? (
-                <p className="mt-3 text-ui-base text-danger">{draft.workspaceError}</p>
-              ) : null}
             </div>
           </div>
         )}

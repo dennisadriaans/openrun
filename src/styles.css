@@ -444,7 +444,7 @@ body {
   /* Assistant prose font — `inherit` keeps the app's sans stack. */
   --chat-prose-font-family: inherit;
 
-  /* The user's own message: a bubble by default, a prompt line in a CLI theme. */
+  /* The user's own message. */
   --chat-user-align: flex-end;
   --chat-user-width: 80%;
   --chat-user-radius: 0.625rem;
@@ -1009,8 +1009,8 @@ body {
 
 /*
  * Terminal — the transcript the way `claude` and `codex exec` print it, for
- * people arriving from those CLIs: mono throughout, no bubble, `●` and `⎿`
- * markers instead of icons and cards, and work shown inline rather than folded.
+ * people arriving from those CLIs: mono throughout, `●` and `⎿` markers instead
+ * of icons and cards, and work shown inline rather than folded.
  *
  * Ids and the non-CSS half (what starts expanded) live in `lib/chatTheme.ts`.
  * Everything below is a token override — no rule here selects a component.
@@ -1021,22 +1021,6 @@ body {
   --chat-markdown-size: 0.75rem;
   --chat-markdown-leading: 1.55;
   --chat-markdown-block-gap: 0.5rem;
-
-  --chat-user-align: stretch;
-  --chat-user-width: 100%;
-  --chat-user-radius: 0;
-  --chat-user-border: none;
-  --chat-user-bg: transparent;
-  --chat-user-pad: 0.125rem 0;
-  --chat-user-color: var(--text-secondary);
-  --chat-user-font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-    'Liberation Mono', monospace;
-  --chat-user-font-size: var(--chat-markdown-size);
-  --chat-user-leading: var(--chat-markdown-leading);
-  --chat-user-prefix: '> ';
-  --chat-user-prefix-display: inline;
-  --chat-user-prefix-color: var(--accent);
-  --chat-user-meta-justify: flex-start;
 
   --chat-event-radius: 0.25rem;
   --chat-event-gap-y: 0;

@@ -83,9 +83,6 @@ function StartPage() {
               </p>
             ) : null}
             {draft.error ? <p className="px-1 text-ui-base text-danger">{draft.error}</p> : null}
-            {draft.workspaceError ? (
-              <p className="px-1 text-ui-base text-danger">{draft.workspaceError}</p>
-            ) : null}
           </div>
         </div>
       )}

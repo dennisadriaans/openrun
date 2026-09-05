@@ -178,6 +178,7 @@ test('antigravity binaries map to their own catalog', () => {
   assert.equal(modelKindForBin('agy'), 'antigravity')
   assert.equal(modelKindForBin('/opt/homebrew/bin/agy'), 'antigravity')
   assert.equal(modelKindForBin('claude'), 'claude')
+  assert.equal(modelKindForBin('/Applications/Codex'), 'codex')
 })
 
 test('fx binaries map to their own catalog', () => {

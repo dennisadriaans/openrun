@@ -799,7 +799,6 @@ export function Chat({
   workspaceId,
   onNewChat,
   pullRequest,
-  pullRequestError,
   repositoryUrl,
 }: {
   messages: ChatMessage[]
@@ -879,8 +878,6 @@ export function Chat({
   onNewChat?: () => void
   /** PR on the run's branch, if any — shown as a strip above the composer. */
   pullRequest?: RunPullRequest | null
-  /** A failed PR probe is shown alongside any stale cached result. */
-  pullRequestError?: string | null
   /** Repository remote used to resolve plain `PR #123` mentions. */
   repositoryUrl?: string
 }) {
@@ -892,9 +889,8 @@ export function Chat({
   const [composerHeight, setComposerHeight] = useState(140)
   const composerOverlayRef = useRef<HTMLDivElement | null>(null)
   const hasPrChip = Boolean(pullRequest)
-  const hasPrErrorStrip = Boolean(pullRequestError)
   const hasFilesStrip = Boolean(changedFiles && changedFiles.length > 0 && onReviewFile)
-  const hasStripAboveFiles = hasPrChip || hasPrErrorStrip
+  const hasStripAboveFiles = hasPrChip
   const hasStripAboveQueue = hasStripAboveFiles || hasFilesStrip
   const [model, setModel] = useState(initialModel)
   const [effort, setEffort] = useState(initialEffort)
@@ -1220,15 +1216,6 @@ export function Chat({
                   <PullRequestChip pr={pullRequest} runId={runId} busy={running} />
                 </div>
               ) : null}
-              {pullRequestError ? (
-                <div
-                  role="alert"
-                  className={`relative z-[6] mx-auto -mb-[2px] w-[92%] truncate px-2.5 py-1.5 text-[12.5px] text-danger chat-composer-strip${hasPrChip ? ' chat-composer-strip-continued' : ' chat-composer-strip-top'}`}
-                  title={pullRequestError}
-                >
-                  Pull request status unavailable: {pullRequestError}
-                </div>
-              ) : null}
               {changedFiles && changedFiles.length > 0 && onReviewFile ? (
                 <div className="relative mx-auto -mb-[2px] w-[92%]">
                   <FilesChanged
@@ -1261,8 +1248,7 @@ export function Chat({
                 className={
                   (changedFiles && changedFiles.length > 0 && onReviewFile) ||
                   queuedMessages.length > 0 ||
-                  pullRequest ||
-                  pullRequestError
+                  pullRequest
                     ? 'relative z-10 w-full'
                     : 'w-full'
                 }
