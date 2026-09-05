@@ -122,7 +122,13 @@ export function Modal({
   wide?: boolean
   className?: string
 }) {
-  return (
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => setMounted(true), [])
+
+  if (!mounted) return null
+
+  return createPortal(
     <div
       className={`fixed inset-0 flex items-start justify-center overflow-y-auto bg-scrim px-4 py-10 ${className}`}
       onClick={onClose}
@@ -144,7 +150,8 @@ export function Modal({
         </div>
         <div className="px-4 py-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

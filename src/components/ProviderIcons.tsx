@@ -1,4 +1,4 @@
-import type { SVGProps } from 'react'
+import { useId, type SVGProps } from 'react'
 import type { RuntimeModelKind } from '../lib/models'
 
 type IconProps = SVGProps<SVGSVGElement>
@@ -52,6 +52,26 @@ export function GrokIcon({ className, ...props }: IconProps) {
   )
 }
 
+export function GeminiIcon({ className, ...props }: IconProps) {
+  const gradientId = useId()
+  return (
+    <svg {...props} viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id={gradientId} x1="3" y1="21" x2="21" y2="3">
+          <stop offset="0" stopColor="#1a73e8" />
+          <stop offset="0.45" stopColor="#8ab4f8" />
+          <stop offset="0.72" stopColor="#c58af9" />
+          <stop offset="1" stopColor="#f6aea9" />
+        </linearGradient>
+      </defs>
+      <path
+        fill={`url(#${gradientId})`}
+        d="M12 1.75c.55 5.17 4.08 8.7 9.25 9.25-5.17.55-8.7 4.08-9.25 9.25C11.45 15.08 7.92 11.55 2.75 11 7.92 10.45 11.45 6.92 12 1.75Z"
+      />
+    </svg>
+  )
+}
+
 export function ProviderIcon({
   kind,
   className = 'size-3.5 shrink-0',
@@ -60,13 +80,17 @@ export function ProviderIcon({
   className?: string
 }) {
   if (kind === 'claude') return <ClaudeIcon className={className} />
-  if (kind === 'codex') return <OpenAIIcon className={className} />
-  if (kind === 'grok') return <GrokIcon className={className} />
-  if (kind === 'antigravity') return <AntigravityIcon className={className} />
-  if (kind === 'fx') return <FxIcon className={className} />
+  if (kind === 'codex') return <OpenAIIcon className={`${className} text-foreground`} />
+  if (kind === 'grok') return <GrokIcon className={`${className} text-foreground`} />
+  if (kind === 'gemini') return <GeminiIcon className={className} />
+  if (kind === 'antigravity') {
+    return <AntigravityIcon className={`${className} text-foreground`} />
+  }
+  if (kind === 'fx') return <FxIcon className={`${className} text-foreground`} />
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-sm bg-secondary text-[9px] font-semibold text-muted-foreground ${className}`}
+      aria-hidden="true"
+      className={`inline-flex items-center justify-center rounded border border-border bg-transparent text-[8px] font-semibold text-muted-foreground ${className}`}
     >
       AI
     </span>

@@ -203,8 +203,15 @@ export const restoreWorkspaceFile = createServerFn({ method: 'POST' })
 
 /** Upload a composer image; `data` is raw base64 without the data-URL prefix. */
 export const saveAttachment = createServerFn({ method: 'POST' })
-  .validator((d: { workspaceId: string; name: string; mimeType: string; data: string }) =>
-    shape(d, { workspaceId: 'string', name: 'string', mimeType: 'string', data: 'string' }),
+  .validator(
+    (d: { workspaceId: string; runId?: string; name: string; mimeType: string; data: string }) =>
+      shape(d, {
+        workspaceId: 'string',
+        runId: 'string?',
+        name: 'string',
+        mimeType: 'string',
+        data: 'string',
+      }),
   )
   .handler(
     async ({ data }) =>
@@ -705,6 +712,10 @@ export const startRunOptions = createServerFn({ method: 'GET' }).handler(
   async () => run('runs.startOptions') as Promise<CoreResult<'startRunOptions'>>,
 )
 
+export const repeatRun = createServerFn({ method: 'POST' })
+  .validator((d: { runId: string }) => shape(d, { runId: 'string' }))
+  .handler(async ({ data }) => run('runs.repeat', data) as Promise<CoreResult<'repeatRun'>>)
+
 export const startChat = createServerFn({ method: 'POST' })
   .validator(
     (d: {
@@ -920,7 +931,32 @@ export const getTask = createServerFn({ method: 'GET' })
 
 export const saveTask = createServerFn({ method: 'POST' })
   .validator((d: TaskInput) =>
-    optionalShape(d, { name: 'string?', runtimeId: 'string?', prompt: 'string?' }),
+    shape(d, {
+      id: 'string?',
+      name: 'string',
+      description: 'string',
+      runtimeId: 'string',
+      prompt: 'string',
+      cwd: 'string',
+      workspaceId: 'string',
+      cron: 'string',
+      enabled: 'boolean',
+      model: 'string?',
+      effort: 'string?',
+      webhookIntegrationId: 'string?',
+      webhookEvents: 'string[]?',
+      webhookFilters: 'object?',
+      verifyEnabled: 'boolean?',
+      maxRepairAttempts: 'number?',
+      timeoutMinutes: 'number?',
+      resumeSessionId: 'string?',
+      resumeSessionLabel: 'string?',
+      fireOnce: 'boolean?',
+      scheduledAt: 'number?',
+      baseRef: 'string?',
+      requireIsolation: 'boolean?',
+      requireGhAuth: 'boolean?',
+    }),
   )
   .handler(async ({ data }) => run('tasks.save', data) as Promise<CoreResult<'upsertTask'>>)
 
@@ -1037,20 +1073,6 @@ export const listWorkspaces = createServerFn({ method: 'GET' })
   .validator((d: { projectId?: string }) => optionalShape(d, { projectId: 'string?' }))
   .handler(
     async ({ data }) => run('workspaces.list', data) as Promise<CoreResult<'listWorkspaces'>>,
-  )
-
-export const createWorkspace = createServerFn({ method: 'POST' })
-  .validator(
-    (d: { projectId: string; branch: string; fromBranch?: string; useExistingBranch?: boolean }) =>
-      shape(d, {
-        projectId: 'string',
-        branch: 'string',
-        fromBranch: 'string?',
-        useExistingBranch: 'boolean?',
-      }),
-  )
-  .handler(
-    async ({ data }) => run('workspaces.create', data) as Promise<CoreResult<'createWorkspace'>>,
   )
 
 export const retryWorkspaceSetup = createServerFn({ method: 'POST' })

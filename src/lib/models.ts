@@ -279,7 +279,7 @@ export const ANTIGRAVITY_MODELS: ModelOption[] = [
 
 /** Map a runtime binary name to the model catalog kind. */
 export function modelKindForBin(bin: string): RuntimeModelKind {
-  const name = bin.split(/[\\/]/).pop() ?? bin
+  const name = (bin.split(/[\\/]/).pop() ?? bin).toLowerCase()
   if (name.includes('claude')) return 'claude'
   if (name.includes('codex')) return 'codex'
   if (name.includes('grok')) return 'grok'

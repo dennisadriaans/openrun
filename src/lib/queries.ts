@@ -1040,21 +1040,6 @@ export function useRemoveProject() {
   })
 }
 
-export function useCreateWorkspace() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (data: Parameters<typeof fns.createWorkspace>[0]['data']) =>
-      fns.createWorkspace({ data }),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['workspaces'] }),
-        qc.invalidateQueries({ queryKey: ['projects'] }),
-        qc.invalidateQueries({ queryKey: ['projectBranches'] }),
-      ])
-    },
-  })
-}
-
 export function useRetryWorkspaceSetup() {
   const qc = useQueryClient()
   return useMutation({
@@ -1078,12 +1063,12 @@ export function useArchiveWorkspace() {
  * Upload a composer image into a workspace, or `undefined` when no workspace is
  * settled yet — the composer hides its attachment affordances in that case.
  */
-export function attachmentUploader(workspaceId: string | undefined) {
+export function attachmentUploader(workspaceId: string | undefined, runId?: string) {
   if (!workspaceId) return undefined
   return async (file: File) => {
     const data = await fileToBase64(file)
     return fns.saveAttachment({
-      data: { workspaceId, name: file.name, mimeType: file.type, data },
+      data: { workspaceId, runId, name: file.name, mimeType: file.type, data },
     })
   }
 }
@@ -1115,6 +1100,16 @@ export function useOpenNativeChat() {
     // attempt fails the same way.
     onError: () => {
       qc.invalidateQueries({ queryKey: ['workspaces'] })
+    },
+  })
+}
+
+export function useRepeatRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (runId: string) => fns.repeatRun({ data: { runId } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['runs'] })
     },
   })
 }

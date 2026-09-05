@@ -25,11 +25,9 @@ import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import {
   attachmentUploader,
-  useCreateWorkspace,
   useNativeSessions,
   useOpenNativeChat,
   usePlugins,
-  useProjectBranches,
   useProjects,
   useRuntimes,
   useSlashCommands,
@@ -60,7 +58,6 @@ export function useNewRunDraft(
   const { data: runtimes } = useRuntimes()
   const startChat = useStartChat()
   const openNativeChat = useOpenNativeChat()
-  const createWorkspace = useCreateWorkspace()
 
   const [projectId, setProjectId] = useState(seed.projectId ?? '')
   const [workspaceId, setWorkspaceId] = useState(seed.workspaceId ?? '')
@@ -78,11 +75,8 @@ export function useNewRunDraft(
   // text has to be parked somewhere that outlives the swap.
   const [refusedPrompt, setRefusedPrompt] = useState('')
   const [addingProject, setAddingProject] = useState(false)
-  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
 
   const { data: allWorkspaces } = useWorkspaces(projectId || undefined)
-  const { data: gitBranches } = useProjectBranches(projectId || undefined)
   const nativeQuery = useNativeSessions(
     options.allNativeSessions ? { allWorkspaces: true } : { workspaceId },
     { enabled: options.allNativeSessions || Boolean(workspaceId) },
@@ -99,7 +93,7 @@ export function useNewRunDraft(
 
   const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
-    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
+    () => (allWorkspaces ?? []).filter((w) => w.kind === 'main' && w.status !== 'archived'),
     [allWorkspaces],
   )
 
@@ -111,10 +105,7 @@ export function useNewRunDraft(
   // Seed / re-seed the branch whenever the project's workspaces change.
   useEffect(() => {
     if (workspaces.some((w) => w.id === workspaceId)) return
-    const preferred =
-      workspaces.find(
-        (w) => w.kind === 'worktree' && isWorkspaceReady(w.status) && !w.activeRunId,
-      ) ?? workspaces.find((w) => isWorkspaceReady(w.status) && !w.activeRunId)
+    const preferred = workspaces.find((w) => w.kind === 'main')
     setWorkspaceId(preferred?.id ?? '')
   }, [workspaces, workspaceId])
 
@@ -159,11 +150,11 @@ export function useNewRunDraft(
   const blockedReason = !projects?.length
     ? 'Add a project before starting a run.'
     : !workspace
-      ? 'Pick a branch to run in.'
+      ? 'Choose a project.'
       : !isWorkspaceReady(workspace.status)
-        ? `Branch is ${workspace.status} — wait for setup to finish.`
+        ? `Project is ${workspace.status}. Check its folder in Projects.`
         : workspace.activeRunId
-          ? 'A run is already active in this branch.'
+          ? 'A chat is already working in this project. Wait for it to finish.'
           : !runtime
             ? 'Pick a runtime.'
             : null
@@ -171,11 +162,6 @@ export function useNewRunDraft(
   const selectProject = (id: string) => {
     setProjectId(id)
     setWorkspaceId('')
-  }
-
-  const selectBranch = (id: string) => {
-    setWorkspaceError(null)
-    setWorkspaceId(id)
   }
 
   const clearResume = () => {
@@ -189,17 +175,6 @@ export function useNewRunDraft(
     const nextKind = nativeResumeKindFor(runtimes?.find((row) => row.id === id) ?? {})
     if (!nextKind || nextKind !== previousKind) clearResume()
     remember({ runtimeId: id })
-  }
-
-  const openNewWorkspace = () => {
-    setWorkspaceError(null)
-    setNewWorkspaceOpen(true)
-  }
-
-  const createBranch = async (input: { branch: string; fromBranch?: string }) => {
-    const created = await createWorkspace.mutateAsync({ projectId, ...input })
-    setWorkspaceId(created.id)
-    setNewWorkspaceOpen(false)
   }
 
   /**
@@ -289,7 +264,6 @@ export function useNewRunDraft(
     workspaces,
     workspace,
     workspaceId,
-    gitBranches,
     runtimes,
     runtime,
     runtimeId,
@@ -305,21 +279,15 @@ export function useNewRunDraft(
     resumeSessionLabel,
     blockedReason,
     error,
-    workspaceError,
     refusedPrompt,
     sent,
     busy: startChat.isPending || openNativeChat.isPending,
     startChat,
     openNativeChat,
-    createWorkspace,
     addingProject,
     setAddingProject,
-    newWorkspaceOpen,
-    setNewWorkspaceOpen,
-    openNewWorkspace,
-    createBranch,
     selectProject,
-    selectBranch,
+    selectBranch: setWorkspaceId,
     selectRuntime,
     clearResume,
     pickNativeSession,

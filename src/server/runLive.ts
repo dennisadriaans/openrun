@@ -56,6 +56,7 @@ export function createRunLiveSseStream(
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   const pingMs = opts.pingMs ?? SERVER_PING_MS
+  let cleanup: (() => void) | null = null
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -65,11 +66,11 @@ export function createRunLiveSseStream(
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
         } catch {
-          cleanup()
+          cleanup?.()
         }
       }
 
-      const cleanup = () => {
+      cleanup = () => {
         if (closed) return
         closed = true
         clearInterval(ping)
@@ -82,7 +83,7 @@ export function createRunLiveSseStream(
         }
       }
 
-      const onAbort = () => cleanup()
+      const onAbort = () => cleanup?.()
       const unsub = subscribeRunLive(runId, send)
       const ping = setInterval(() => send({ type: 'ping' }), pingMs)
 
@@ -92,7 +93,10 @@ export function createRunLiveSseStream(
       if (opts.signal.aborted) cleanup()
     },
     cancel() {
-      // Reader cancelled — AbortSignal may already have fired; no-op safe.
+      // h3 cancels the response reader when the browser navigates away, but
+      // its Request signal is not guaranteed to abort as well. Clean up from
+      // either path so old tabs cannot leave SSE sockets and listeners behind.
+      cleanup?.()
     },
   })
 }

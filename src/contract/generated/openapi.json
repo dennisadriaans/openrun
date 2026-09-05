@@ -941,6 +941,9 @@
                   "workspaceId": {
                     "type": "string"
                   },
+                  "runId": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -4029,6 +4032,58 @@
         "x-openrun-capability": "runs.startOptions"
       }
     },
+    "/api/v1/runs/repeat": {
+      "post": {
+        "operationId": "runs.repeat",
+        "summary": "runs.repeat",
+        "tags": [
+          "runs"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Refused"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "x-openrun-clients": [
+          "web",
+          "desktop"
+        ],
+        "x-openrun-capability": "runs.create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runs/start-chat": {
       "post": {
         "operationId": "runs.startChat",
@@ -5054,13 +5109,19 @@
         ],
         "x-openrun-capability": "tasks.save",
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "type": "string"
+                  },
                   "name": {
+                    "type": "string"
+                  },
+                  "description": {
                     "type": "string"
                   },
                   "runtimeId": {
@@ -5068,8 +5129,78 @@
                   },
                   "prompt": {
                     "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "cron": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string"
+                  },
+                  "webhookIntegrationId": {
+                    "type": "string"
+                  },
+                  "webhookEvents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "webhookFilters": {
+                    "type": "object"
+                  },
+                  "verifyEnabled": {
+                    "type": "boolean"
+                  },
+                  "maxRepairAttempts": {
+                    "type": "number"
+                  },
+                  "timeoutMinutes": {
+                    "type": "number"
+                  },
+                  "resumeSessionId": {
+                    "type": "string"
+                  },
+                  "resumeSessionLabel": {
+                    "type": "string"
+                  },
+                  "fireOnce": {
+                    "type": "boolean"
+                  },
+                  "scheduledAt": {
+                    "type": "number"
+                  },
+                  "baseRef": {
+                    "type": "string"
+                  },
+                  "requireIsolation": {
+                    "type": "boolean"
+                  },
+                  "requireGhAuth": {
+                    "type": "boolean"
                   }
                 },
+                "required": [
+                  "name",
+                  "description",
+                  "runtimeId",
+                  "prompt",
+                  "cwd",
+                  "workspaceId",
+                  "cron",
+                  "enabled"
+                ],
                 "additionalProperties": true
               }
             }
@@ -5833,68 +5964,6 @@
             }
           }
         ]
-      }
-    },
-    "/api/v1/workspaces/create": {
-      "post": {
-        "operationId": "workspaces.create",
-        "summary": "workspaces.create",
-        "tags": [
-          "workspaces"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Refused"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        },
-        "x-openrun-clients": [
-          "web",
-          "desktop"
-        ],
-        "x-openrun-capability": "workspaces.create",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string"
-                  },
-                  "branch": {
-                    "type": "string"
-                  },
-                  "fromBranch": {
-                    "type": "string"
-                  },
-                  "useExistingBranch": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "projectId",
-                  "branch"
-                ],
-                "additionalProperties": true
-              }
-            }
-          }
-        }
       }
     },
     "/api/v1/workspaces/retry-setup": {

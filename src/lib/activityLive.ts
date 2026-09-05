@@ -43,6 +43,17 @@ export function activityLiveStreamPath(): string {
   return '/api/activity/stream'
 }
 
+/**
+ * A run detail already has a run-scoped stream. Opening the app-wide stream
+ * there as well wastes a permanent HTTP/1 connection; two detail tabs plus
+ * Vite HMR would consume Chrome's whole per-origin connection pool and leave
+ * mutations or reloads waiting for a socket.
+ */
+export function needsActivityLiveStream(pathname: string): boolean {
+  const match = /^\/runs\/([^/]+)\/?$/.exec(pathname)
+  return match?.[1] === undefined || match[1] === 'new'
+}
+
 /** Queue depth has its own event; approval frames target one conversation. */
 export const ACTIVITY_LIVE_RESUME_KEYS = [['runs'], ['dashboard'], ['tasks']] as const
 

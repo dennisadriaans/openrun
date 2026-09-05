@@ -4,6 +4,7 @@ import {
   ACTIVITY_LIVE_RESUME_KEYS,
   activityLiveInvalidateKeys,
   activityLiveStreamPath,
+  needsActivityLiveStream,
 } from './activityLive.ts'
 
 describe('activityLiveInvalidateKeys', () => {
@@ -76,5 +77,18 @@ describe('activityLiveInvalidateKeys', () => {
 describe('activityLiveStreamPath', () => {
   it('points at the activity SSE route', () => {
     assert.equal(activityLiveStreamPath(), '/api/activity/stream')
+  })
+})
+
+describe('needsActivityLiveStream', () => {
+  it('keeps the app-wide stream on list and creation pages', () => {
+    assert.equal(needsActivityLiveStream('/'), true)
+    assert.equal(needsActivityLiveStream('/runs'), true)
+    assert.equal(needsActivityLiveStream('/runs/new'), true)
+  })
+
+  it('uses only the run-scoped stream on a run detail', () => {
+    assert.equal(needsActivityLiveStream('/runs/run_123'), false)
+    assert.equal(needsActivityLiveStream('/runs/run_123/'), false)
   })
 })

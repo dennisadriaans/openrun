@@ -11,13 +11,12 @@
  * Browser-safe and dependency-free, like every gate module.
  */
 import { missingProjectChecksMessage } from '../checks.ts'
-import { MAIN_CHECKOUT_AUTOMATION_MESSAGE } from '../pickWorkspace.ts'
 import { missingRuntimeBinaryMessage } from '../runtimeBinary.ts'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../taskPrompt.ts'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../workspaceReady.ts'
 
 /** Thrown by `createIntegrationAutomation` when no workspace was chosen. */
-export const PICK_WORKSPACE_MESSAGE = 'Pick a project workspace for the automation.'
+export const PICK_WORKSPACE_MESSAGE = 'Choose a project for the automation.'
 
 /** Thrown by `createIntegrationAutomation` when no runtime was chosen. */
 export const PICK_RUNTIME_MESSAGE = 'Pick a runtime for the automation.'
@@ -53,7 +52,6 @@ export function integrationSetupBlockedReason(input: IntegrationSetupGateInput):
   }
   // Unattended by definition: a webhook fire into the checkout the editor has
   // open is the one outcome nobody asks for, and `upsertTask` refuses it.
-  if (input.workspaceKind === 'main') return MAIN_CHECKOUT_AUTOMATION_MESSAGE
   if (!input.runtimeId.trim()) return PICK_RUNTIME_MESSAGE
   if (!input.runtimeInstalled) return missingRuntimeBinaryMessage(input.runtimeBin ?? '')
   if (!hasTaskPrompt(input.prompt)) return emptyTaskPromptMessage()

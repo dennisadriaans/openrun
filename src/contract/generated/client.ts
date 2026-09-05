@@ -119,6 +119,7 @@ export const ROUTES: Record<string, RouteInfo> = {
   'runs.getLatestForWorkspace': { method: 'GET', path: '/api/v1/runs/get-latest-for-workspace' },
   'runs.getLatestForProject': { method: 'GET', path: '/api/v1/runs/get-latest-for-project' },
   'runs.startOptions': { method: 'GET', path: '/api/v1/runs/start-options' },
+  'runs.repeat': { method: 'POST', path: '/api/v1/runs/repeat' },
   'runs.startChat': { method: 'POST', path: '/api/v1/runs/start-chat' },
   'runs.openNativeChat': { method: 'POST', path: '/api/v1/runs/open-native-chat' },
   'runs.getConversation': { method: 'GET', path: '/api/v1/runs/get-conversation' },
@@ -157,7 +158,6 @@ export const ROUTES: Record<string, RouteInfo> = {
   'workspaces.restore': { method: 'POST', path: '/api/v1/workspaces/restore' },
   'workspaces.runBaseline': { method: 'POST', path: '/api/v1/workspaces/run-baseline' },
   'workspaces.list': { method: 'GET', path: '/api/v1/workspaces/list' },
-  'workspaces.create': { method: 'POST', path: '/api/v1/workspaces/create' },
   'workspaces.retrySetup': { method: 'POST', path: '/api/v1/workspaces/retry-setup' },
   'workspaces.archive': { method: 'POST', path: '/api/v1/workspaces/archive' },
 }
@@ -311,6 +311,7 @@ export class OpenRunClient {
   /** Upload a composer image; `data` is raw base64 without the data-URL prefix. */
   saveAttachment(input: {
     workspaceId: string
+    runId?: string
     name: string
     mimeType: string
     data: string
@@ -638,6 +639,10 @@ export class OpenRunClient {
     return this.call('runs.startOptions')
   }
 
+  repeatRun(input: { runId: string }): Promise<unknown> {
+    return this.call('runs.repeat', input)
+  }
+
   startChat(input: {
     workspaceId: string
     runtimeId: string
@@ -764,7 +769,32 @@ export class OpenRunClient {
     return this.call('tasks.get', input)
   }
 
-  saveTask(input?: { name?: string; runtimeId?: string; prompt?: string }): Promise<unknown> {
+  saveTask(input: {
+    id?: string
+    name: string
+    description: string
+    runtimeId: string
+    prompt: string
+    cwd: string
+    workspaceId: string
+    cron: string
+    enabled: boolean
+    model?: string
+    effort?: string
+    webhookIntegrationId?: string
+    webhookEvents?: string[]
+    webhookFilters?: Record<string, unknown>
+    verifyEnabled?: boolean
+    maxRepairAttempts?: number
+    timeoutMinutes?: number
+    resumeSessionId?: string
+    resumeSessionLabel?: string
+    fireOnce?: boolean
+    scheduledAt?: number
+    baseRef?: string
+    requireIsolation?: boolean
+    requireGhAuth?: boolean
+  }): Promise<unknown> {
     return this.call('tasks.save', input)
   }
 
@@ -836,15 +866,6 @@ export class OpenRunClient {
 
   listWorkspaces(input?: { projectId?: string }): Promise<unknown> {
     return this.call('workspaces.list', input)
-  }
-
-  createWorkspace(input: {
-    projectId: string
-    branch: string
-    fromBranch?: string
-    useExistingBranch?: boolean
-  }): Promise<unknown> {
-    return this.call('workspaces.create', input)
   }
 
   retryWorkspaceSetup(input: { id: string }): Promise<unknown> {

@@ -163,7 +163,9 @@ export function dequeueEntry(entryId: string): void {
 
 export function workspaceBusy(workspaceId: string): boolean {
   const row = getDb()
-    .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' LIMIT 1")
+    .prepare(
+      "SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' AND id NOT IN (SELECT runId FROM run_environments) LIMIT 1",
+    )
     .get(workspaceId) as { id: string } | undefined
   return Boolean(row) || isWorkspaceCancellationPending(workspaceId)
 }

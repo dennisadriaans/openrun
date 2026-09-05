@@ -39,6 +39,8 @@ export type RunCommandInput = {
   timeoutMs: number
   /** Run through the platform shell. Only for user-authored command strings. */
   shell?: boolean
+  signal?: AbortSignal
+  onSpawn?: (pid: number) => void
 }
 
 /**
@@ -62,9 +64,14 @@ export function runCommand(input: RunCommandInput): Promise<CommandResult> {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
+      input.signal?.removeEventListener('abort', stop)
       resolve({ status, stdout, stderr, timedOut, outputTooLarge })
     }
 
+    if (input.signal?.aborted) {
+      resolve({ status: -1, stdout, stderr: 'Cancelled', timedOut, outputTooLarge })
+      return
+    }
     let child: ReturnType<typeof spawn>
     try {
       child = spawn(input.command, input.args ?? [], {
@@ -87,6 +94,9 @@ export function runCommand(input: RunCommandInput): Promise<CommandResult> {
     }
 
     const stop = () => killChildTree(child, { stillLive: () => !settled })
+    if (child.pid) input.onSpawn?.(child.pid)
+    input.signal?.addEventListener('abort', stop, { once: true })
+    if (input.signal?.aborted) stop()
 
     timer = setTimeout(() => {
       timedOut = true

@@ -24,6 +24,8 @@ import { ghNotAuthenticatedMessage, ghNotInstalledMessage } from './gitActionGat
 import { workspaceHealthBlockedReason, type WorkspaceHealth } from './workspaceHealth.ts'
 
 export type UnattendedGateInput = {
+  /** The executor creates a fresh checkout from a resolved commit. */
+  freshExecution?: boolean
   /** 'main' is the user's own checkout; 'worktree' is app-managed and disposable. */
   workspaceKind: string
   /** Task opt-out. False lets an automation deliberately run in the main checkout. */
@@ -67,10 +69,10 @@ export function requiresGhAuth(input: { canOpenPrs: boolean; requireGhAuth: bool
  * Isolation first: a shared checkout makes every other signal untrustworthy.
  */
 export function unattendedBlockedReason(input: UnattendedGateInput): string | null {
-  if (input.requireIsolation && input.workspaceKind === 'main') {
+  if (!input.freshExecution && input.requireIsolation && input.workspaceKind === 'main') {
     return sharedCheckoutMessage()
   }
-  const health = workspaceHealthBlockedReason(input.health, { unattended: true })
+  const health = workspaceHealthBlockedReason(input.health, { unattended: !input.freshExecution })
   if (health) return health
   if (input.requiresGh && !(input.ghInstalled && input.ghAuthenticated)) {
     return ghPreflightMessage(input.ghInstalled)

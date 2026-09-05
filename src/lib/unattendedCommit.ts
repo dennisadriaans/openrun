@@ -55,10 +55,10 @@ export function unattendedCommitMessage(input: {
   runId: string
 }): string {
   const name = input.taskName.trim() || 'a scheduled run'
-  return `chore(openrun): ${name} (${input.verdict || 'unjudged'})\n\nCommitted automatically by Open Run so the workspace is clean for the next\nscheduled fire. Undo it from run ${input.runId}.`
+  return `chore(openrun): ${name} (${input.verdict || 'unjudged'})\n\nPreserved by Open Run as the result of this isolated invocation. Undo it from run ${input.runId}.`
 }
 
 /** Note appended to the run's stderr when the automatic commit could not run. */
 export function unattendedCommitFailedMessage(detail: string): string {
-  return `[executor] could not commit this run's changes: ${detail}. The workspace is left dirty, so the next unattended fire will refuse it until you commit, discard, or restore it.`
+  return `[executor] could not commit this run's changes: ${detail}. The execution directory is retained for recovery.`
 }

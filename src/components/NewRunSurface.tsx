@@ -9,7 +9,6 @@ import { AddProjectModal } from './AddProjectModal'
 import { Composer } from './chat/Composer'
 import { WorkingIndicator } from './chat/WorkingIndicator'
 import { RuntimePicker } from './ComposerControls'
-import { NewWorkspaceModal } from './NewWorkspaceModal'
 import { WorkspaceBreadcrumb } from './workspace/WorkspaceBreadcrumb'
 import type { NewRunDraft } from '../hooks/useNewRunDraft'
 
@@ -26,13 +25,8 @@ export function NewRunBreadcrumb({
       muted={compact}
       projectId={draft.projectId}
       projectName={draft.project?.name}
-      workspace={draft.workspace}
-      workspaces={draft.workspaces}
-      branchDisabled={draft.startChat.isPending || draft.createWorkspace.isPending}
       onAddProject={() => draft.setAddingProject(true)}
       onSelectProject={draft.selectProject}
-      onSelectWorkspace={draft.selectBranch}
-      onRequestNewBranch={draft.projectId ? draft.openNewWorkspace : undefined}
     />
   )
 }
@@ -122,17 +116,6 @@ export function NewRunModals({ draft }: { draft: NewRunDraft }) {
         <AddProjectModal
           onClose={() => draft.setAddingProject(false)}
           onAdded={(project) => draft.selectProject(project.id)}
-        />
-      ) : null}
-
-      {draft.newWorkspaceOpen && draft.project ? (
-        <NewWorkspaceModal
-          projectName={draft.project.name}
-          defaultBaseBranch={draft.project.defaultBranch || ''}
-          baseBranches={draft.gitBranches ?? []}
-          pending={draft.createWorkspace.isPending}
-          onClose={() => draft.setNewWorkspaceOpen(false)}
-          onCreate={draft.createBranch}
         />
       ) : null}
     </>

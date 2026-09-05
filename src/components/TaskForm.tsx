@@ -19,7 +19,7 @@ import { useClickOutside } from '../hooks/useClickOutside'
 import { createPortal } from 'react-dom'
 import { toast } from './toast'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
-import { NATIVE_RESUME_DEFAULT_PROMPT, nativeResumeKindFor } from '../lib/nativeSessions'
+import { nativeResumeKindFor } from '../lib/nativeSessions'
 import { DEFAULT_RUN_TIMEOUT_MS } from '../lib/runBudget'
 import { MAX_REPAIR_ATTEMPTS } from '../lib/verdict'
 import {
@@ -32,20 +32,16 @@ import {
 import { pickerPrefForRuntime, usePickerPrefs } from '../lib/pickerPrefs'
 import {
   useProjects,
-  useTasks,
   useRuntimes,
   useSaveTask,
   useSaveTaskWebhook,
   useWorkspaces,
   useIntegrations,
   useIntegrationProviders,
-  useNativeSessions,
   useProjectBranches,
-  useCreateWorkspace,
   usePlugins,
   useSlashCommands,
 } from '../lib/queries'
-import { parsePendingGitBranchId, projectBranchChoices } from '../lib/gitBranches'
 import {
   applyPluginMention,
   matchPlugins,
@@ -77,14 +73,9 @@ import {
   type ParsedSchedule,
 } from '../lib/schedule'
 import { pickDefaultRuntime, visibleRuntimes } from '../lib/pickRuntime'
-import {
-  isMainCheckout,
-  MAIN_CHECKOUT_AUTOMATION_MESSAGE,
-  pickDefaultWorkspace,
-} from '../lib/pickWorkspace'
+import { pickDefaultWorkspace } from '../lib/pickWorkspace'
 import { invalidTriggerEditorSeed } from '../lib/scheduleHealth'
 import { emptyTaskPromptMessage, hasTaskPrompt } from '../lib/taskPrompt'
-import { hasUnattendedTrigger } from '../lib/taskReadiness'
 import { workspaceBlockedReason } from '../lib/runPrereqGate'
 import { hasWorkspaceId, missingWorkspaceMessage } from '../lib/workspaceRef'
 import { isWorkspaceReady, workspaceNotReadyMessage } from '../lib/workspaceReady'
@@ -98,10 +89,7 @@ import {
   ModelPicker,
   ProjectPicker,
   RuntimePicker,
-  BranchPicker,
 } from './ComposerControls'
-import { NativeSessionMenu } from './NativeSessionMenu'
-import { NewWorkspaceModal } from './NewWorkspaceModal'
 import { ActiveToggle, Button, Card, inputClass } from './ui'
 
 const SCHEDULE_OPTIONS: Array<{
@@ -627,6 +615,7 @@ function TriggerAddMenu({
 }
 
 export type TaskFormValues = {
+  baseRef?: string
   id?: string
   name: string
   description: string
@@ -921,7 +910,6 @@ export function TaskForm({
 }) {
   const { data: runtimes } = useRuntimes()
   const { data: projects } = useProjects()
-  const { data: tasks } = useTasks()
   const save = useSaveTask()
   const { prefs, remember } = usePickerPrefs()
   // A brand-new automation seeds its pickers from the last-used selections; an
@@ -963,7 +951,6 @@ export function TaskForm({
   const [model, setModel] = useState(initial?.model ?? '')
   const [effort, setEffort] = useState(initial?.effort ?? '')
   const [verifyEnabled, setVerifyEnabled] = useState((initial?.verifyEnabled ?? 1) !== 0)
-  const [requireIsolation, setRequireIsolation] = useState((initial?.requireIsolation ?? 1) !== 0)
   const [requireGhAuth, setRequireGhAuth] = useState((initial?.requireGhAuth ?? 0) !== 0)
   const [repairAttempts, setRepairAttempts] = useState(initial?.maxRepairAttempts ?? 1)
   const [timeoutMinutes, setTimeoutMinutes] = useState(
@@ -972,8 +959,6 @@ export function TaskForm({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [promptError, setPromptError] = useState<string | null>(null)
   const [showAddProject, setShowAddProject] = useState(false)
-  const [showNewWorkspace, setShowNewWorkspace] = useState(false)
-  const [openingBranch, setOpeningBranch] = useState('')
   const [showVerificationSettings, setShowVerificationSettings] = useState(false)
   const [nativeError, setNativeError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -984,7 +969,6 @@ export function TaskForm({
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
   const { data: gitBranches } = useProjectBranches(projectId || undefined)
-  const createWorkspace = useCreateWorkspace()
 
   useEffect(() => {
     if (!v.workspaceId || projectId) return
@@ -1038,10 +1022,6 @@ export function TaskForm({
   const missingMentions = useMemo(
     () => unknownMentions(v.prompt, pluginListing?.plugins ?? []),
     [v.prompt, pluginListing],
-  )
-  const nativeQuery = useNativeSessions(
-    { workspaceId: v.workspaceId },
-    { enabled: hasWorkspaceId(v.workspaceId) },
   )
   const workspaceForNativeRef = useRef(v.workspaceId)
   useEffect(() => {
@@ -1142,90 +1122,23 @@ export function TaskForm({
 
   const selectProject = (pid: string) => {
     setProjectId(pid)
+    set('baseRef', '')
     setWorkspaceError(null)
     if (!pid) {
       set('workspaceId', '')
       return
     }
     const eligible = (allWorkspaces ?? []).filter(
-      (workspace) => workspace.projectId === pid && workspace.kind === 'worktree',
+      (workspace) => workspace.projectId === pid && workspace.kind === 'main',
     )
     set('workspaceId', pickDefaultWorkspace(eligible)?.id ?? '')
   }
 
   const selectedProject = projects?.find((project) => project.id === projectId)
-  const unattendedDraft = hasUnattendedTrigger({
-    cron: v.cron,
-    fireOnce: v.fireOnce,
-    webhookIntegrationId: webhookEnabled ? v.webhookIntegrationId : '',
-  })
-  const branchChoices = useMemo(
-    () =>
-      projectBranchChoices({
-        gitBranches: gitBranches ?? [],
-        workspaces: (projectWorkspaces ?? [])
-          .filter((w) => w.kind === 'worktree')
-          .map((w) => ({
-            id: w.id,
-            branch: w.configuredBranch,
-            kind: w.kind,
-            status: w.status,
-            activeRunId: w.activeRunId,
-            exists: w.exists,
-            dirty: w.dirty,
-            actualBranch: w.actualBranch,
-            quarantineReason: w.blockedReason,
-            unattendedOwnerName: tasks?.find(
-              (task) =>
-                task.id !== v.id &&
-                task.enabled === 1 &&
-                task.workspaceId === w.id &&
-                hasUnattendedTrigger(task),
-            )?.name,
-          })),
-        selectedWorkspaceId: v.workspaceId,
-        unattended: unattendedDraft,
-        requireIsolation,
-      }),
-    [gitBranches, projectWorkspaces, tasks, v.id, v.workspaceId, unattendedDraft, requireIsolation],
-  )
-
-  const selectBranch = async (id: string) => {
-    setWorkspaceError(null)
-    const pending = parsePendingGitBranchId(id)
-    if (!pending) {
-      set('workspaceId', id)
-      return
-    }
-    if (!projectId) return
-    const gitRow = (gitBranches ?? []).find((b) => b.name === pending)
-    setOpeningBranch(pending)
-    try {
-      const ws = await createWorkspace.mutateAsync({
-        projectId,
-        branch: pending,
-        fromBranch: pending,
-        useExistingBranch: gitRow ? !gitRow.remote : true,
-      })
-      set('workspaceId', ws.id)
-    } catch (err) {
-      setWorkspaceError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setOpeningBranch('')
-    }
-  }
-
-  const createNewWorkspace = async (input: { branch: string; fromBranch?: string }) => {
-    if (!projectId) return
-    const workspace = await createWorkspace.mutateAsync({ projectId, ...input })
-    set('workspaceId', workspace.id)
-    setShowNewWorkspace(false)
-  }
-
   useEffect(() => {
     if (!projectId || v.workspaceId) return
     const picked = pickDefaultWorkspace(
-      (projectWorkspaces ?? []).filter((workspace) => workspace.kind === 'worktree'),
+      (projectWorkspaces ?? []).filter((workspace) => workspace.kind === 'main'),
     )
     if (picked) {
       setV((prev) => ({ ...prev, workspaceId: picked.id }))
@@ -1296,7 +1209,8 @@ export function TaskForm({
       webhookEvents: webhookEnabled ? (v.webhookEvents ?? []) : [],
       webhookFilters: webhookEnabled ? (v.webhookFilters ?? {}) : {},
       verifyEnabled: verifyEnabled,
-      requireIsolation,
+      requireIsolation: true,
+      baseRef: v.baseRef ?? '',
       requireGhAuth,
       maxRepairAttempts: repairAttempts,
       timeoutMinutes: timeoutMinutes,
@@ -1312,7 +1226,7 @@ export function TaskForm({
   const workspaceChanged = Boolean(
     initial?.id && v.workspaceId && v.workspaceId !== initial.workspaceId,
   )
-  const selectedBranch = branchChoices.find((choice) => choice.id === v.workspaceId)?.branch
+  const selectedBranch = v.baseRef || selectedProject?.defaultBranch
   // Checks live on the project, so how many exist depends on which repository
   // the automation targets — worth saying out loud here, because with none the
   // "verified" outcome is unreachable no matter what this form is set to.
@@ -1332,15 +1246,11 @@ export function TaskForm({
         : undefined
       : workspaceBlockReason
         ? workspaceBlockReason
-        : // `upsertTask` throws on the primary checkout, so warning and letting
-          // Save through only moved the refusal to after the click.
-          isMainCheckout(selectedWorkspace)
-          ? MAIN_CHECKOUT_AUTOMATION_MESSAGE
-          : !promptUsable
-            ? emptyTaskPromptMessage()
-            : pristine
-              ? 'No changes to save'
-              : undefined
+        : !promptUsable
+          ? emptyTaskPromptMessage()
+          : pristine
+            ? 'No changes to save'
+            : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1408,62 +1318,23 @@ export function TaskForm({
             |
           </span>
 
-          <BranchPicker
-            workspaces={branchChoices}
-            workspaceId={v.workspaceId}
-            disabled={
-              !projectId || createWorkspace.isPending || Boolean(workspaceChangeBlockedReason)
-            }
-            disabledReason={workspaceChangeBlockedReason ?? undefined}
-            busyLabel={openingBranch ? `Opening ${openingBranch}…` : undefined}
-            invalid={Boolean(
-              workspaceError || branchChoices.find((w) => w.id === v.workspaceId)?.blockedReason,
-            )}
-            aria-describedby={workspaceError ? 'workspace-required-error' : undefined}
-            placeholder={createWorkspace.isPending ? 'Opening branch…' : 'Select branch'}
-            newBranchLabel="New branch and workspace"
-            onChange={(id) => void selectBranch(id)}
-            onRequestNewBranch={projectId ? () => setShowNewWorkspace(true) : undefined}
-          />
-
-          <span aria-hidden className="text-tier-quaternary">
-            |
-          </span>
-
-          <NativeSessionMenu
-            workspaceId={v.workspaceId}
-            groups={nativeQuery.data?.groups ?? []}
-            loading={nativeQuery.isFetching}
-            error={nativeQuery.data?.error}
-            selectedId={v.resumeSessionId ?? ''}
-            selectedLabel={v.resumeSessionLabel ?? ''}
-            onOpen={() => nativeQuery.refetch()}
-            disabled={!hasWorkspaceId(v.workspaceId)}
-            disabledReason={!projectId ? 'Select a project first' : 'Select a branch first'}
-            onSelectNew={() => {
-              setNativeError(null)
-              setDirty(true)
-              setV((prev) => ({ ...prev, resumeSessionId: '', resumeSessionLabel: '' }))
-            }}
-            onSelect={(session, group) => {
-              setNativeError(null)
-              setDirty(true)
-              seededRuntimeRef.current = null
-              setV((prev) => ({
-                ...prev,
-                runtimeId: group.runtimeId,
-                resumeSessionId: session.sessionId,
-                resumeSessionLabel: session.title,
-                prompt: hasTaskPrompt(prev.prompt) ? prev.prompt : NATIVE_RESUME_DEFAULT_PROMPT,
-                fireOnce: prev.cron.trim() ? 1 : prev.fireOnce,
-                scheduledAt:
-                  prev.cron.trim() && !prev.scheduledAt
-                    ? (nextRunAt(prev.cron) ?? 0)
-                    : prev.scheduledAt,
-              }))
-              remember({ runtimeId: group.runtimeId })
-            }}
-          />
+          <label className="flex items-center gap-2 text-tier-tertiary">
+            Base
+            <input
+              aria-label="Automation base branch or revision"
+              list="automation-base-refs"
+              className="w-40 rounded border border-border bg-transparent px-2 py-1 text-foreground"
+              value={v.baseRef ?? ''}
+              placeholder={selectedProject?.defaultBranch || 'Default branch'}
+              disabled={!projectId || Boolean(workspaceChangeBlockedReason)}
+              onChange={(e) => set('baseRef', e.target.value)}
+            />
+            <datalist id="automation-base-refs">
+              {gitBranches?.map((b) => (
+                <option key={b.name} value={b.name} />
+              ))}
+            </datalist>
+          </label>
         </div>
         {nativeError ? <p className="mt-2 text-[12px] text-rose-300">{nativeError}</p> : null}
         {workspaceError ? (
@@ -1475,11 +1346,20 @@ export function TaskForm({
             {workspaceError}
           </p>
         ) : null}
-        {(v.resumeSessionId ?? '').trim() ? (
-          <p className="mt-1 text-ui-sm text-tier-quaternary">
-            Continues that chat unattended with skip-permissions, even if it was a supervised
-            session. Open Run must be running at fire time.
-          </p>
+        <p className="mt-2 text-ui-sm text-tier-tertiary">
+          Each run starts from the locally known base revision in its own clean checkout.
+        </p>
+        {v.resumeSessionId ? (
+          <button
+            type="button"
+            className="mt-2 text-ui-sm text-warn"
+            onClick={() => {
+              set('resumeSessionId', '')
+              set('resumeSessionLabel', '')
+            }}
+          >
+            Clear saved chat to use isolated runs
+          </button>
         ) : null}
       </header>
 
@@ -1490,23 +1370,10 @@ export function TaskForm({
         />
       ) : null}
 
-      {showNewWorkspace && selectedProject ? (
-        <NewWorkspaceModal
-          projectName={selectedProject.name}
-          defaultBaseBranch={selectedProject.defaultBranch || ''}
-          baseBranches={gitBranches ?? []}
-          pending={createWorkspace.isPending}
-          onClose={() => setShowNewWorkspace(false)}
-          onCreate={createNewWorkspace}
-        />
-      ) : null}
-
       <div className="space-y-7">
         {workspaceChanged ? (
           <Card className="mt-6 p-4">
-            <h2 className="text-ui-sm font-medium text-tier-secondary">
-              Workspace Change Not Saved
-            </h2>
+            <h2 className="text-ui-sm font-medium text-tier-secondary">Project Change Not Saved</h2>
             <p className="mt-1 text-ui-sm leading-relaxed text-tier-tertiary">
               Save changes to validate {selectedBranch ? `“${selectedBranch}”` : 'this workspace'}.
               Readiness will update from the new workspace immediately after saving.
@@ -1866,11 +1733,6 @@ export function TaskForm({
                 setDirty(true)
                 setTimeoutMinutes(n)
               }}
-              requireIsolation={requireIsolation}
-              onRequireIsolationChange={(on) => {
-                setDirty(true)
-                setRequireIsolation(on)
-              }}
               requireGhAuth={requireGhAuth}
               onRequireGhAuthChange={(on) => {
                 setDirty(true)
@@ -1879,13 +1741,6 @@ export function TaskForm({
             />
           ) : null}
         </section>
-
-        {isMainCheckout(selectedWorkspace) ? (
-          <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-300">
-            This automation writes into your main checkout — the branch your editor has open. Pick
-            another branch to give it a worktree of its own under <code>~/.openrun</code>.
-          </p>
-        ) : null}
 
         {save.isError ? (
           <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-sm text-rose-300">
@@ -1920,8 +1775,6 @@ function VerificationSection({
   onRepairAttemptsChange,
   timeoutMinutes,
   onTimeoutMinutesChange,
-  requireIsolation,
-  onRequireIsolationChange,
   requireGhAuth,
   onRequireGhAuthChange,
 }: {
@@ -1931,8 +1784,6 @@ function VerificationSection({
   onRepairAttemptsChange: (value: number) => void
   timeoutMinutes: number
   onTimeoutMinutesChange: (value: number) => void
-  requireIsolation: boolean
-  onRequireIsolationChange: (value: boolean) => void
   requireGhAuth: boolean
   onRequireGhAuthChange: (value: boolean) => void
 }) {
@@ -1981,21 +1832,8 @@ function VerificationSection({
       </div>
 
       <div className="border-t border-[var(--border-quaternary)] pt-3">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-3.5 w-3.5 accent-[var(--base)]"
-            checked={requireIsolation}
-            onChange={(e) => onRequireIsolationChange(e.target.checked)}
-          />
-          <span className="text-ui-base text-foreground">
-            Scheduled runs need a worktree of their own
-          </span>
-        </label>
-        <p className="mt-1 text-ui-sm text-tier-tertiary">
-          Refuses to arm or fire against the main checkout, and against a worktree that has drifted
-          onto another branch or still holds an earlier run's changes. Turning this off lets one
-          automation's leftovers become the next one's starting point.
+        <p className="text-ui-sm text-tier-tertiary">
+          Every automation run is isolated from your project checkout and other runs.
         </p>
 
         <label className="mt-3 flex cursor-pointer items-center gap-2">

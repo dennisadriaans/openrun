@@ -57,17 +57,11 @@ function NewRun() {
             <div className="max-w-md text-center">
               <h1 className="text-ui-lg text-foreground">Start a new run</h1>
               <p className="mt-1.5 text-ui-base text-tier-tertiary">
-                Confirm the project and branch above, pick a runtime, then send the first message.
+                Choose a project and runtime, then send the first message. Your current branch and
+                local changes are ready to use.
               </p>
               {draft.workspace?.activeRunId ? (
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <Button
-                    variant="primary"
-                    onClick={draft.openNewWorkspace}
-                    disabled={draft.createWorkspace.isPending}
-                  >
-                    Create isolated workspace
-                  </Button>
                   <Button
                     variant="ghost"
                     onClick={() =>
@@ -82,9 +76,6 @@ function NewRun() {
                 </div>
               ) : null}
               {draft.error ? <p className="mt-3 text-ui-base text-danger">{draft.error}</p> : null}
-              {draft.workspaceError ? (
-                <p className="mt-3 text-ui-base text-danger">{draft.workspaceError}</p>
-              ) : null}
             </div>
           </div>
         )}

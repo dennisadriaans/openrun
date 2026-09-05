@@ -357,6 +357,7 @@ export function demoConversation(runId: string, now: number = Date.now()) {
     checkResults: [],
     queued: [],
     verdict: 'unverified' as const,
+    execution: null,
     canFollowUp: false,
     canQueueFollowUp: false,
     canSwitchRuntime: false,

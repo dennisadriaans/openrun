@@ -61,6 +61,7 @@ export function executeCheck(input: {
   cwd: string
   timeoutMs: number
   signal?: AbortSignal
+  onSpawn?: (pid: number) => void
 }): Promise<CheckRunOutcome> {
   return new Promise((resolve) => {
     const startedAt = Date.now()
@@ -113,6 +114,7 @@ export function executeCheck(input: {
       return
     }
 
+    if (child.pid) input.onSpawn?.(child.pid)
     const stop = () => {
       killChildTree(child, { stillLive: () => !settled })
     }
@@ -253,6 +255,9 @@ export async function runCheckPass(input: {
     })
 
     const outcome = await executeCheck({
+      onSpawn: (pid) => {
+        getDb().prepare('UPDATE runs SET pid = ? WHERE id = ?').run(pid, input.runId)
+      },
       command: def.command,
       cwd: input.cwd,
       timeoutMs: CHECK_TIMEOUT_MS,

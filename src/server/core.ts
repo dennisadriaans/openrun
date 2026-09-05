@@ -1,3 +1,17 @@
+import {
+  automationBaseRefusal,
+  getRunEnvironment,
+  collectRunEnvironments,
+  migrateAutomationTargets,
+  releasedResult,
+  resultFileDiff,
+  resultFile,
+  resultDirectory,
+  ensureRunEnvironment,
+  releaseRunEnvironment,
+  usingRunEnvironment,
+} from './runEnvironment.ts'
+import { reconcileWorkspaces } from './workspaces.ts'
 /**
  * Server-only facade.
  *
@@ -18,7 +32,6 @@ import {
   type TaskReadinessBlocker,
 } from '../lib/taskReadiness.ts'
 import { clampRepairAttempts, parseVerdict } from '../lib/verdict'
-import { MAIN_CHECKOUT_AUTOMATION_MESSAGE } from '../lib/pickWorkspace'
 import { assertWorkspaceId, hasWorkspaceId } from '../lib/workspaceRef'
 import {
   requiresGhAuth,
@@ -74,7 +87,6 @@ import {
   forgetDeletedRuntimeId,
   getDb,
   rememberDeletedRuntimeId,
-  slugify,
   type CheckResultRow,
   type MessageRow,
   type RuntimeRow,
@@ -132,7 +144,6 @@ import {
   type PreviewCommandResult,
 } from './commandPreview'
 import {
-  createWorkspace,
   getProject,
   getWorkspace,
   getUnattendedWorkspaceOwner,
@@ -205,6 +216,11 @@ if (!bootSafety.__agentopsSafetyBooted) {
   bootSafety.__agentopsSafetyBooted = true
   reconcileOrphanRuns()
   installProcessShutdownHooks()
+  reconcileWorkspaces()
+  migrateAutomationTargets()
+  collectRunEnvironments()
+  const cleanupTimer = setInterval(collectRunEnvironments, 60_000)
+  cleanupTimer.unref()
 }
 bootScheduler()
 warmModelCatalogs()
@@ -221,7 +237,9 @@ setRunFinalizedHook((runId) => {
   if (!run) return
   let changed = 0
   try {
-    changed = git.changedFiles(run.cwd, run.baseSnapshot || undefined).length
+    changed =
+      releasedResult(runId)?.files.length ??
+      git.changedFiles(run.cwd, run.baseSnapshot || undefined).length
   } catch {
     // Non-git or missing cwd — the notification just reports zero.
   }
@@ -239,7 +257,6 @@ export {
   addProject,
   archiveWorkspace,
   createLocalFolder,
-  createWorkspace,
   deleteProject,
   getProject,
   getWorkspace,
@@ -815,18 +832,24 @@ function decorate(
     requireGhAuth: task.requireGhAuth === 1,
   })
   const unattendedOwner = workspace ? getUnattendedWorkspaceOwner(workspace.id, task.id) : undefined
-  const unattendedBlocked = unattendedOwner
-    ? workspaceOwnerMessage(unattendedOwner.name)
-    : workspace
-      ? unattendedBlockedReason({
-          workspaceKind: workspace.kind,
-          requireIsolation: task.requireIsolation === 1,
-          health,
-          requiresGh,
-          ghInstalled: gh.installed,
-          ghAuthenticated: gh.authenticated,
-        })
-      : null
+  const baseBlocked = task.resumeSessionId
+    ? 'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.'
+    : automationBaseRefusal(task.workspaceId, task.baseRef)
+  const unattendedBlocked =
+    baseBlocked ||
+    (unattendedOwner
+      ? workspaceOwnerMessage(unattendedOwner.name)
+      : workspace
+        ? unattendedBlockedReason({
+            freshExecution: true,
+            workspaceKind: workspace.kind,
+            requireIsolation: task.requireIsolation === 1,
+            health,
+            requiresGh,
+            ghInstalled: gh.installed,
+            ghAuthenticated: gh.authenticated,
+          })
+        : null)
   const readinessBlockers = taskReadinessBlockers({
     enabled: task.enabled,
     cron: task.cron,
@@ -864,6 +887,7 @@ function decorate(
     ghInstalled: gh.installed,
     ghAuthenticated: gh.authenticated,
     unattendedBlockedReason: unattendedBlocked,
+    executionBlockedReason: baseBlocked,
     checkCount: parseChecks(project?.checks).length,
     effectiveTimeoutMs: resolveRunTimeoutMs(task.timeoutMs),
     lastScheduleFire: (scheduleFires ?? latestScheduleFires([task.id]))[task.id] ?? null,
@@ -1046,6 +1070,7 @@ export function getTask(taskId: string): TaskWithMeta | undefined {
 }
 
 export type TaskInput = {
+  baseRef?: string
   id?: string
   name: string
   description: string
@@ -1103,10 +1128,9 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     assertTaskWorkspaceIdle(tid)
   }
 
-  const taskWorkspace = getWorkspace(workspaceId)
-  if (taskWorkspace?.kind === 'main') {
-    throw new Error(MAIN_CHECKOUT_AUTOMATION_MESSAGE)
-  }
+  const baseRef = input.baseRef?.trim() ?? existingRow?.baseRef ?? ''
+  const baseRefusal = automationBaseRefusal(workspaceId, baseRef)
+  if (baseRefusal) throw new Error(baseRefusal)
 
   // cwd stays the source of truth for git operations (executor, diff panel,
   // etc.) — resolve once here so cwd stays in sync with the workspace path.
@@ -1171,12 +1195,11 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     input.resumeSessionLabel !== undefined
       ? input.resumeSessionLabel.trim()
       : (existingRow?.resumeSessionLabel ?? '')
-  const requireIsolation =
-    input.requireIsolation !== undefined
-      ? input.requireIsolation
-        ? 1
-        : 0
-      : (existingRow?.requireIsolation ?? 1)
+  if (resumeSessionId)
+    throw new Error(
+      'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.',
+    )
+  const requireIsolation = 1
   const requireGhAuth =
     input.requireGhAuth !== undefined
       ? input.requireGhAuth
@@ -1213,7 +1236,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     const runtime = getRuntime(input.runtimeId)
     if (checked && runtime) {
       const refused = unattendedRefusalFor({
-        task: { requireIsolation, requireGhAuth },
+        task: { requireIsolation, requireGhAuth, baseRef },
         runtime,
         workspace: checked.workspace,
         health: checked.health,
@@ -1223,11 +1246,11 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
   }
 
   db.prepare(
-    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, scheduledAt, requireIsolation, requireGhAuth, createdAt, updatedAt, lastRunAt)
-     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @scheduledAt, @requireIsolation, @requireGhAuth, @createdAt, @updatedAt, NULL)
+    `INSERT INTO tasks (id, name, description, runtimeId, prompt, cwd, workspaceId, baseRef, cron, enabled, model, effort, webhookIntegrationId, webhookEvents, webhookFilters, verifyEnabled, maxRepairAttempts, timeoutMs, resumeSessionId, resumeSessionLabel, fireOnce, scheduledAt, requireIsolation, requireGhAuth, createdAt, updatedAt, lastRunAt)
+     VALUES (@id, @name, @description, @runtimeId, @prompt, @cwd, @workspaceId, @baseRef, @cron, @enabled, @model, @effort, @webhookIntegrationId, @webhookEvents, @webhookFilters, @verifyEnabled, @maxRepairAttempts, @timeoutMs, @resumeSessionId, @resumeSessionLabel, @fireOnce, @scheduledAt, @requireIsolation, @requireGhAuth, @createdAt, @updatedAt, NULL)
      ON CONFLICT(id) DO UPDATE SET
        name=@name, description=@description, runtimeId=@runtimeId, prompt=@prompt,
-       cwd=@cwd, workspaceId=@workspaceId, cron=@cron, enabled=@enabled,
+       cwd=@cwd, workspaceId=@workspaceId, baseRef=@baseRef, cron=@cron, enabled=@enabled,
        model=@model, effort=@effort,
        webhookIntegrationId=@webhookIntegrationId, webhookEvents=@webhookEvents,
        webhookFilters=@webhookFilters, verifyEnabled=@verifyEnabled,
@@ -1238,6 +1261,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
        updatedAt=@updatedAt`,
   ).run({
     id: tid,
+    baseRef,
     name: input.name,
     description: input.description,
     runtimeId: input.runtimeId,
@@ -1451,55 +1475,10 @@ export function runTaskNow(taskId: string): { runId: string } {
  * give up and switch isolation off instead, so it is one call.
  */
 export async function isolateTaskWorkspace(taskId: string): Promise<TaskWithMeta> {
-  const db = getDb()
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined
+  const task = getTask(taskId)
   if (!task) throw new Error('Task not found')
-  assertTaskWorkspaceIdle(taskId)
-
-  const active = db
-    .prepare("SELECT id FROM runs WHERE taskId = ? AND status = 'running' LIMIT 1")
-    .get(taskId) as { id: string } | undefined
-  if (active) {
-    throw new Error('Cannot isolate an automation while a run is in progress. Stop it first.')
-  }
-  const queued = db.prepare('SELECT id FROM run_queue WHERE taskId = ? LIMIT 1').get(taskId) as
-    | { id: string }
-    | undefined
-  if (queued) {
-    throw new Error(
-      'Cannot isolate an automation while a run is queued. Let it drain or remove it first.',
-    )
-  }
-
-  const current = getWorkspace(assertWorkspaceId(task.workspaceId))
-  if (!current) throw new Error('Workspace not found')
-  const owner = getUnattendedWorkspaceOwner(current.id, task.id)
-  if (current.kind === 'worktree' && !owner) {
-    throw new Error('This automation already has its own worktree.')
-  }
-  const project = getProject(current.projectId)
-  if (!project) throw new Error('Project not found')
-
-  // Branch name has to be unique per automation, not per project: two
-  // automations sharing one branch share one worktree, which is the shared
-  // checkout problem again with extra steps.
-  const base = slugify(task.name) || 'automation'
-  const branch = `openrun/${base}-${task.id.split('_').pop() ?? Date.now().toString(36)}`
-
-  const workspace = await createWorkspace({
-    projectId: project.id,
-    branch,
-    fromBranch: project.defaultBranch,
-  })
-
-  db.prepare('UPDATE tasks SET workspaceId = ?, cwd = ?, updatedAt = ? WHERE id = ?').run(
-    workspace.id,
-    workspace.path,
-    Date.now(),
-    taskId,
-  )
-  syncTask(taskId)
-  return getTask(taskId)!
+  // Old clients may still offer this action. Isolation is automatic now.
+  return task
 }
 
 /**
@@ -1668,7 +1647,7 @@ export function startRunOptions(): {
   runtimes: StartRunRuntimeOption[]
 } {
   const workspaces = listWorkspaces()
-    .filter((workspace) => workspace.status !== 'archived')
+    .filter((workspace) => workspace.kind === 'main' && workspace.status !== 'archived')
     .map((workspace) => {
       // Read, never repair: `decorate` documents why drawing a list must not
       // demote a row, and the same holds here.
@@ -1740,7 +1719,7 @@ export function startChat(input: {
   const runId = startRun({
     runtime,
     taskId: null,
-    taskName: `Chat · ${workspace.branch}`,
+    taskName: `Chat · ${getProject(workspace.projectId)?.name ?? workspace.branch}`,
     prompt,
     cwd: '',
     workspaceId: workspace.id,
@@ -1752,6 +1731,35 @@ export function startChat(input: {
     resumeSessionLabel: input.resumeSessionLabel,
   })
   return { runId }
+}
+
+/** Repeat the opening task without reusing an earlier execution directory. */
+export function repeatRun(runId: string): { runId: string } {
+  const run = getRun(runId)
+  if (!run) throw new Error('Run not found')
+  if (run.status === 'running') throw new Error('Wait for this run to finish before repeating it.')
+  const runtime = getRuntime(run.runtimeId)
+  if (!runtime) throw new Error('Runtime not found')
+  const prompt = listMessages(runId)
+    .find((m) => m.role === 'user')
+    ?.content.trim()
+  if (!prompt) throw new Error('This run has no opening prompt to repeat.')
+  const env = getRunEnvironment(runId)
+  return {
+    runId: startRun({
+      runtime,
+      taskId: run.taskId,
+      taskName: run.taskName,
+      prompt,
+      cwd: run.cwd,
+      workspaceId: run.workspaceId,
+      trigger: env ? 'manual' : 'chat',
+      ...(env ? { executionBaseRef: env.baseCommit, isolated: true } : {}),
+      model: run.model,
+      effort: run.effort,
+      runtimeMode: run.runtimeMode,
+    }),
+  }
 }
 
 /**
@@ -2162,6 +2170,7 @@ export function getConversation(runId: string) {
 
   return {
     run,
+    execution: getRunEnvironment(runId) ?? null,
     messages,
     checkResults: listCheckResults(runId),
     /** Follow-ups typed while this run was working, oldest first. */
@@ -2274,7 +2283,10 @@ export async function getRunPullRequest(runId: string): Promise<RunPullRequest |
   // starting branch, which is a safe identity; never inspect today's mutable
   // checkout for a completed legacy run.
   const branch = run.headBranch.trim() || run.baseBranch.trim()
-  const fresh = await git.pullRequestForBranchAsync(run.cwd, branch)
+  const fresh = await git.pullRequestForBranchAsync(
+    getRunEnvironment(runId)?.repoPath ?? run.cwd,
+    branch,
+  )
   if (fresh.kind === 'error') {
     // Keep a previously good cache intact. Throwing lets React Query expose the
     // probe failure while retaining stale data during a refetch.
@@ -2283,6 +2295,7 @@ export async function getRunPullRequest(runId: string): Promise<RunPullRequest |
   // Only an authoritative empty list clears the cache. A successful PR result
   // replaces it, including state transitions such as open → merged.
   persistRunPullRequest(runId, fresh.kind === 'found' ? fresh.pullRequest : null)
+  if (fresh.kind === 'found' && fresh.pullRequest.state === 'merged') releaseRunEnvironment(runId)
   return fresh.kind === 'found' ? fresh.pullRequest : null
 }
 
@@ -2296,11 +2309,12 @@ export async function getRunWorkspace(runId: string) {
   const run = getRun(runId)
   if (!run) return null
 
+  const saved = releasedResult(runId)
   const [files, repo, gh, commits] = await Promise.all([
-    git.changedFilesAsync(run.cwd, run.baseSnapshot || undefined),
-    git.repoInfoAsync(run.cwd),
+    saved ? saved.files : git.changedFilesAsync(run.cwd, run.baseSnapshot || undefined),
+    saved ? saved.repo : git.repoInfoAsync(run.cwd),
     git.ghStatusAsync(),
-    git.runCommitsAsync(run.cwd, run.baseSnapshot || ''),
+    saved ? saved.commits : git.runCommitsAsync(run.cwd, run.baseSnapshot || ''),
   ])
   // Derive dirty from the same file list — avoid a second changedFiles pass.
   if (run.baseSnapshot) {
@@ -2458,6 +2472,7 @@ export function postMessage(input: {
 function runCwd(runId: string): string {
   const run = getRun(runId)
   if (!run) throw new Error('Run not found')
+  ensureRunEnvironment(runId)
   return run.cwd
 }
 
@@ -2471,18 +2486,28 @@ export function getFileDiff(input: { runId: string; path: string; whole?: boolea
   return {
     path: input.path,
     whole: !!input.whole,
-    diff: git.fileDiff(run.cwd, input.path, run.baseSnapshot || undefined, context),
+    diff: releasedResult(input.runId)
+      ? resultFileDiff(releasedResult(input.runId)!.env, input.path, context)
+      : git.fileDiff(run.cwd, input.path, run.baseSnapshot || undefined, context),
   }
 }
 
 // --- Workspace files -------------------------------------------------------
 
 export function listWorkspaceFiles(input: { runId: string; dir?: string }) {
-  return { entries: files.listDirectory(runCwd(input.runId), input.dir ?? '') }
+  const saved = releasedResult(input.runId)
+  return {
+    entries: saved
+      ? resultDirectory(saved.env, input.dir ?? '')
+      : files.listDirectory(runCwd(input.runId), input.dir ?? ''),
+  }
 }
 
 export function readWorkspaceFile(input: { runId: string; path: string }) {
-  return files.readWorkspaceFile(runCwd(input.runId), input.path)
+  const saved = releasedResult(input.runId)
+  return saved
+    ? resultFile(saved.env, input.path)
+    : files.readWorkspaceFile(runCwd(input.runId), input.path)
 }
 
 export function writeWorkspaceFile(input: { runId: string; path: string; content: string }) {
@@ -2502,12 +2527,13 @@ export function restoreWorkspaceFile(input: { runId: string; path: string; conte
  * before a run exists.
  */
 export function saveWorkspaceAttachment(input: {
+  runId?: string
   workspaceId: string
   name: string
   mimeType: string
   data: string
 }) {
-  const cwd = resolveWorkspacePath(input.workspaceId)
+  const cwd = input.runId ? runCwd(input.runId) : resolveWorkspacePath(input.workspaceId)
   return saveAttachment({ cwd, name: input.name, mimeType: input.mimeType, data: input.data })
 }
 
@@ -2534,15 +2560,18 @@ function commitableRunPaths(
 export function commitChanges(input: { runId: string; message: string; paths?: string[] }) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
+  ensureRunEnvironment(input.runId)
   const paths = commitableRunPaths(run, input.paths)
   if (run.baseSnapshot && (!paths || paths.length === 0)) {
     throw new Error('Nothing staged to commit')
   }
-  return git.commit(run.cwd, input.message, paths)
+  const result = git.commit(run.cwd, input.message, paths)
+  releaseRunEnvironment(input.runId)
+  return result
 }
 
 export function pushChanges(input: { runId: string }) {
-  return git.push(runCwd(input.runId))
+  return usingRunEnvironment(input.runId, () => git.push(runCwd(input.runId)))
 }
 
 /**
@@ -2557,20 +2586,26 @@ export function pushChanges(input: { runId: string }) {
 export function discardChanges(input: { runId: string; paths?: string[]; resetCommits?: boolean }) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
+  ensureRunEnvironment(input.runId)
   if (input.resetCommits && input.paths && input.paths.length > 0) {
     throw new Error('Dropping commits undoes the whole run, so it cannot be scoped to files')
   }
 
   const discarded = git.discard(run.cwd, input.paths, run.baseSnapshot || undefined)
-  if (!input.resetCommits) return { ...discarded, commitsDropped: 0, previousHead: '' }
+  if (!input.resetCommits) {
+    releaseRunEnvironment(input.runId)
+    return { ...discarded, commitsDropped: 0, previousHead: '' }
+  }
 
   const reset = git.resetRunCommits(run.cwd, run.baseSnapshot || '')
+  releaseRunEnvironment(input.runId)
   return { ...discarded, commitsDropped: reset.dropped, previousHead: reset.previousHead }
 }
 
 export function discardHunk(input: { runId: string; path: string; hunkIndex: number }) {
   const run = getRun(input.runId)
   if (!run) throw new Error('Run not found')
+  ensureRunEnvironment(input.runId)
   const since = run.baseSnapshot || undefined
   const delta = git.changedFiles(run.cwd, since)
   if (!delta.some((file) => file.path === input.path)) {
@@ -2589,32 +2624,39 @@ export async function openPullRequest(input: {
   body: string
   base?: string
 }) {
-  const run = getRun(input.runId)
-  if (!run) throw new Error('Run not found')
+  return usingRunEnvironment(input.runId, async () => {
+    const run = getRun(input.runId)
+    if (!run) throw new Error('Run not found')
+    ensureRunEnvironment(input.runId)
 
-  // Default an unspecified base to the *project's* default branch, not just
-  // "whatever git would pick" — a worktree is typically branched off another
-  // worktree's in-progress branch (fromBranch), and that branch was never
-  // pushed to origin. Opening a PR against it would fail or target a branch
-  // the reviewer can't see. The project's defaultBranch is always a real,
-  // pushed branch, so it's the only safe default.
-  let base = input.base
-  if (!base) {
-    const workspace = run.workspaceId ? getWorkspace(run.workspaceId) : undefined
-    const project = workspace ? getProject(workspace.projectId) : undefined
-    base = project?.defaultBranch
-  }
+    // Default an unspecified base to the *project's* default branch, not just
+    // "whatever git would pick" — a worktree is typically branched off another
+    // worktree's in-progress branch (fromBranch), and that branch was never
+    // pushed to origin. Opening a PR against it would fail or target a branch
+    // the reviewer can't see. The project's defaultBranch is always a real,
+    // pushed branch, so it's the only safe default.
+    let base = input.base
+    if (!base) {
+      const workspace = run.workspaceId ? getWorkspace(run.workspaceId) : undefined
+      const project = workspace ? getProject(workspace.projectId) : undefined
+      const executionBase = getRunEnvironment(input.runId)?.baseRef
+      base =
+        executionBase && !/^[a-f0-9]{40,64}$/.test(executionBase)
+          ? executionBase
+          : project?.defaultBranch
+    }
 
-  // Await before invalidating: the cache must only be dropped once a PR
-  // actually exists, or the next probe re-reads and re-caches "no PR".
-  const result = await git.createPullRequest({
-    cwd: run.cwd,
-    title: input.title,
-    body: input.body,
-    base,
+    // Await before invalidating: the cache must only be dropped once a PR
+    // actually exists, or the next probe re-reads and re-caches "no PR".
+    const result = await git.createPullRequest({
+      cwd: run.cwd,
+      title: input.title,
+      body: input.body,
+      base,
+    })
+    invalidateRunPullRequest(input.runId)
+    return result
   })
-  invalidateRunPullRequest(input.runId)
-  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -2744,73 +2786,75 @@ export async function shipRun(input: {
   /** Skip the agent and commit everything as one conventional commit. */
   skipPlan?: boolean
 }): Promise<ShipRunResult> {
-  const run = getRun(input.runId)
-  if (!run) throw new Error('Run not found')
+  return usingRunEnvironment(input.runId, async () => {
+    const run = getRun(input.runId)
+    if (!run) throw new Error('Run not found')
 
-  const gh = git.ghStatus()
-  const info = git.repoInfo(run.cwd)
-  const files = git.changedFiles(run.cwd, run.baseSnapshot || undefined)
-  // Only run-owned paths that are still dirty can be committed; anything the
-  // run already committed mid-flight is carried by `ahead` instead.
-  const committable = new Set(commitableRunPaths(run) ?? files.map((f) => f.path))
-  const pending = files.filter((f) => committable.has(f.path))
+    const gh = git.ghStatus()
+    const info = git.repoInfo(run.cwd)
+    const files = git.changedFiles(run.cwd, run.baseSnapshot || undefined)
+    // Only run-owned paths that are still dirty can be committed; anything the
+    // run already committed mid-flight is carried by `ahead` instead.
+    const committable = new Set(commitableRunPaths(run) ?? files.map((f) => f.path))
+    const pending = files.filter((f) => committable.has(f.path))
 
-  const blocked = shipBlockedReason({
-    hasRemote: Boolean(info.remote),
-    ghInstalled: gh.installed,
-    ghAuthenticated: gh.authenticated,
-    hasChanges: pending.length > 0,
-    ahead: info.ahead,
+    const blocked = shipBlockedReason({
+      hasRemote: Boolean(info.remote),
+      ghInstalled: gh.installed,
+      ghAuthenticated: gh.authenticated,
+      hasChanges: pending.length > 0,
+      ahead: info.ahead,
+    })
+    if (blocked) throw new Error(blocked)
+
+    let plan: ShipPlan | null = null
+    let planFallbackReason = ''
+    if (pending.length > 0) {
+      if (!input.skipPlan) {
+        const asked = await requestShipPlan({
+          run,
+          files: pending,
+          diff: git.changedDiff(run.cwd, run.baseSnapshot || undefined, SHIP_DIFF_BUDGET),
+        })
+        plan = asked.plan
+        planFallbackReason = asked.reason
+      }
+      if (!plan) {
+        plan = fallbackShipPlan({
+          taskName: run.taskName ?? '',
+          changed: pending.map((f) => f.path),
+        })
+      }
+    }
+
+    // Commit. Each group is staged by path, so a plan that groups by feature
+    // produces a history that reads by feature.
+    const commits: ShipRunResult['commits'] = []
+    for (const entry of plan?.commits ?? []) {
+      const result = git.commit(run.cwd, commitMessageText(entry), entry.paths)
+      commits.push({ message: entry.message, sha: result.sha, paths: entry.paths })
+    }
+
+    const pushed = await git.push(run.cwd)
+
+    // Title the PR from the plan when there is one; a ship that only pushes
+    // existing commits falls back to the run's own name.
+    const title =
+      plan?.prTitle || fallbackShipPlan({ taskName: run.taskName ?? '', changed: [] }).prTitle
+    const body =
+      plan?.prBody ||
+      `## Summary\n- ${run.taskName || 'Changes produced by an Open Run run.'}\n\n## Test plan\n- [ ] Review the diff and exercise the affected surface`
+
+    const pr = await openPullRequest({ runId: input.runId, title, body, base: input.base })
+
+    return {
+      commits,
+      branch: pushed.branch,
+      url: pr.url,
+      prTitle: title,
+      ...(planFallbackReason ? { planFallbackReason } : {}),
+    }
   })
-  if (blocked) throw new Error(blocked)
-
-  let plan: ShipPlan | null = null
-  let planFallbackReason = ''
-  if (pending.length > 0) {
-    if (!input.skipPlan) {
-      const asked = await requestShipPlan({
-        run,
-        files: pending,
-        diff: git.changedDiff(run.cwd, run.baseSnapshot || undefined, SHIP_DIFF_BUDGET),
-      })
-      plan = asked.plan
-      planFallbackReason = asked.reason
-    }
-    if (!plan) {
-      plan = fallbackShipPlan({
-        taskName: run.taskName ?? '',
-        changed: pending.map((f) => f.path),
-      })
-    }
-  }
-
-  // Commit. Each group is staged by path, so a plan that groups by feature
-  // produces a history that reads by feature.
-  const commits: ShipRunResult['commits'] = []
-  for (const entry of plan?.commits ?? []) {
-    const result = git.commit(run.cwd, commitMessageText(entry), entry.paths)
-    commits.push({ message: entry.message, sha: result.sha, paths: entry.paths })
-  }
-
-  const pushed = await git.push(run.cwd)
-
-  // Title the PR from the plan when there is one; a ship that only pushes
-  // existing commits falls back to the run's own name.
-  const title =
-    plan?.prTitle || fallbackShipPlan({ taskName: run.taskName ?? '', changed: [] }).prTitle
-  const body =
-    plan?.prBody ||
-    `## Summary\n- ${run.taskName || 'Changes produced by an Open Run run.'}\n\n## Test plan\n- [ ] Review the diff and exercise the affected surface`
-
-  const pr = await openPullRequest({ runId: input.runId, title, body, base: input.base })
-
-  return {
-    commits,
-    branch: pushed.branch,
-    url: pr.url,
-    prTitle: title,
-    ...(planFallbackReason ? { planFallbackReason } : {}),
-  }
 }
 
 // ---------------------------------------------------------------------------

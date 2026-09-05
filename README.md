@@ -68,9 +68,10 @@ Open <http://localhost:3000>.
 - **Diff review** — every run ends in a file-by-file diff, not a wall of agent chatter.
 - **Git actions** — commit, cut a branch, push, or open the pull request in one click;
   Undo All restores the snapshot taken when the run started.
-- **Isolated worktrees** — a new automation defaults to its own git worktree under
-  `~/.openrun`, on its own branch, so it never writes into the checkout your editor has
-  open.
+- **Project-first execution** — interactive chats use the checkout and uncommitted work
+  already open in your editor. Each automation invocation gets a clean execution directory
+  under `~/.openrun/executions`, pinned to its recorded base commit and isolated from every
+  other run.
 - **Supervised runs** — surface each tool call as Allow/Deny before it happens.
 - **Local by default** — runs, prompts, transcripts and diffs live in a local SQLite
   file. Webhooks reach localhost over an outbound WebSocket to openrun.sh, so there is

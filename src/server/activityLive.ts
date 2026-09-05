@@ -46,6 +46,7 @@ export function createActivityLiveSseStream(opts: {
 }): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   const pingMs = opts.pingMs ?? SERVER_PING_MS
+  let cleanup: (() => void) | null = null
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -55,11 +56,11 @@ export function createActivityLiveSseStream(opts: {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
         } catch {
-          cleanup()
+          cleanup?.()
         }
       }
 
-      const cleanup = () => {
+      cleanup = () => {
         if (closed) return
         closed = true
         clearInterval(ping)
@@ -72,7 +73,7 @@ export function createActivityLiveSseStream(opts: {
         }
       }
 
-      const onAbort = () => cleanup()
+      const onAbort = () => cleanup?.()
       const unsub = subscribeActivityLive(send)
       const ping = setInterval(() => send({ type: 'ping' }), pingMs)
 
@@ -82,7 +83,9 @@ export function createActivityLiveSseStream(opts: {
       if (opts.signal.aborted) cleanup()
     },
     cancel() {
-      // Reader cancelled — AbortSignal may already have fired; no-op safe.
+      // A disconnected response can cancel its reader without aborting the
+      // Request signal. Treat both notifications as authoritative teardown.
+      cleanup?.()
     },
   })
 }

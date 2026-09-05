@@ -1,21 +1,6 @@
-/**
- * Projects & workspaces.
- *
- * A "project" is a git repo on disk — either cloned by this app (`managed=1`,
- * safe to delete) or an existing local repo the user pointed us at
- * (`managed=0`, we never touch its directory). A "workspace" is a git worktree
- * + branch checked out off a project so an agent run gets its own isolated
- * working tree instead of fighting other runs (or the user's editor) over the
- * same files.
- *
- * Worktrees always live under `~/.openrun/worktrees/<projectSlug>/<branch>`,
- * never inside the project's own repo directory. That keeps them out of the
- * agent's own file listings when it `ls`s the repo root, keeps `git status` in
- * the user's primary checkout clean, and means archiving a workspace can never
- * accidentally remove something the user placed inside their repo.
- *
- * The primary checkout is project metadata, never an agent workspace. Every
- * run executes in a separate Git worktree.
+/** Project checkouts and legacy workspace compatibility metadata.
+ * New automation execution directories belong to runs (runEnvironment.ts).
+ * Never discover ownership from a Git worktree name or import the inventory.
  */
 import { spawnSync } from 'node:child_process'
 import { runCommand } from './command.ts'
@@ -128,16 +113,6 @@ export function reconcileWorkspaces(projectId?: string): void {
       ? db.prepare('SELECT * FROM projects WHERE id = ?').all(projectId)
       : db.prepare('SELECT * FROM projects').all()
   ) as ProjectRow[]
-  const insert = db.prepare(
-    `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
-     VALUES (@id, @projectId, @name, @branch, @path, 'worktree', 'ready', '', NULL, '', '', 0, @baseCommit, @createdAt, NULL)`,
-  )
-  const revive = db.prepare(
-    `UPDATE workspaces
-     SET name = ?, branch = ?, status = 'ready', setupLog = '', setupExitCode = NULL,
-         blockedKind = '', blockedReason = '', blockedAt = 0, baseCommit = ?, archivedAt = NULL
-     WHERE id = ?`,
-  )
   const references = db.prepare(
     `SELECT
        EXISTS(SELECT 1 FROM tasks WHERE workspaceId = ?) AS hasTask,
@@ -179,9 +154,6 @@ export function reconcileWorkspaces(projectId?: string): void {
     const recorded = db
       .prepare("SELECT * FROM workspaces WHERE projectId = ? AND kind = 'worktree'")
       .all(project.id) as WorkspaceRow[]
-    const recordedByPath = new Map(
-      recorded.map((workspace) => [canonicalPath(workspace.path), workspace]),
-    )
 
     // Interactive chats may deliberately share the checkout open in the
     // user's editor. Keep one stable row for it, but never treat it as an
@@ -212,25 +184,6 @@ export function reconcileWorkspaces(projectId?: string): void {
         if (workspace.status !== 'archived') archive.run(Date.now(), workspace.id)
       } else {
         remove.run(workspace.id)
-      }
-    }
-
-    for (const entry of registered) {
-      const workspacePath = canonicalPath(entry.path)
-      const branch = entry.branch.trim() || path.basename(workspacePath)
-      const existing = recordedByPath.get(workspacePath)
-      if (!existing) {
-        insert.run({
-          id: id('ws'),
-          projectId: project.id,
-          name: branch,
-          branch,
-          path: workspacePath,
-          baseCommit: entry.head,
-          createdAt: Date.now(),
-        })
-      } else if (existing.status === 'archived') {
-        revive.run(branch, branch, entry.head, existing.id)
       }
     }
 
@@ -443,6 +396,7 @@ export async function addProject(input: AddProjectInput): Promise<ProjectRow> {
        VALUES (@id, @name, @slug, @path, @defaultBranch, @remoteUrl, @managed, @setupCommand, @checks, @createdAt)`,
     ).run(project)
 
+    reconcileWorkspaces(project.id)
     return project
   }
 
@@ -478,6 +432,7 @@ export async function addProject(input: AddProjectInput): Promise<ProjectRow> {
      VALUES (@id, @name, @slug, @path, @defaultBranch, @remoteUrl, @managed, @setupCommand, @checks, @createdAt)`,
   ).run(project)
 
+  reconcileWorkspaces(project.id)
   return project
 }
 
@@ -534,26 +489,23 @@ export function deleteProject(id: string, deleteFiles: boolean): void {
 
   for (const ws of workspaces) {
     const active = db
-      .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
+      .prepare(
+        "SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' AND id NOT IN (SELECT runId FROM run_environments)",
+      )
       .get(ws.id) as { id: string } | undefined
     if (active) {
       throw new Error(`Cannot delete project — workspace "${ws.name}" has a run in progress`)
     }
   }
 
-  // Best-effort removal of worktrees before the row disappears. Force, since
-  // the project itself is being torn down — there is no "retry later".
-  for (const ws of workspaces) {
-    if (ws.kind === 'worktree') {
-      try {
-        git.removeWorktree(project.path, ws.path, true)
-      } catch {
-        // The worktree directory may already be gone; the project row delete
-        // below is what actually matters for app state.
-      }
-    }
-  }
-
+  // Legacy rows have no trustworthy ownership marker. Removing a project
+  // registration must not delete their files, even when they look disposable.
+  const execution = db
+    .prepare(
+      "SELECT r.id FROM runs r JOIN run_environments e ON e.runId = r.id WHERE e.projectId = ? AND r.status = 'running'",
+    )
+    .get(id)
+  if (execution) throw new Error('Cannot delete a project with a run in progress')
   db.prepare('DELETE FROM projects WHERE id = ?').run(id) // cascades to workspaces
   rememberDeletedProjectPath(project.path)
 
@@ -575,7 +527,9 @@ function toWorkspaceWithMeta(db: ReturnType<typeof getDb>, ws: WorkspaceRow): Wo
     | { name: string }
     | undefined
   const active = db
-    .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
+    .prepare(
+      "SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' AND id NOT IN (SELECT runId FROM run_environments)",
+    )
     .get(ws.id) as { id: string } | undefined
 
   // Archived/missing worktrees have nothing to inspect on disk; avoid
@@ -633,21 +587,10 @@ export function getUnattendedWorkspaceOwner(
   workspaceId: string,
   taskId: string,
 ): { id: string; name: string } | undefined {
-  if (!workspaceId.trim()) return undefined
-  return getDb()
-    .prepare(
-      `SELECT t.id, t.name
-       FROM tasks t
-       JOIN workspaces w ON w.id = t.workspaceId
-       WHERE t.enabled = 1
-         AND t.id != ?
-         AND t.workspaceId = ?
-         AND w.kind = 'worktree'
-         AND (trim(t.cron) != '' OR trim(t.webhookIntegrationId) != '')
-       ORDER BY t.updatedAt ASC
-       LIMIT 1`,
-    )
-    .get(taskId, workspaceId) as { id: string; name: string } | undefined
+  // Compatibility API: each invocation now owns its execution directory.
+  void workspaceId
+  void taskId
+  return undefined
 }
 
 export async function createWorkspace(input: {
@@ -786,7 +729,9 @@ export function archiveWorkspace(
   if (!workspace) throw new Error('Workspace not found')
 
   const active = db
-    .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
+    .prepare(
+      "SELECT id FROM runs WHERE workspaceId = ? AND status = 'running' AND id NOT IN (SELECT runId FROM run_environments)",
+    )
     .get(id) as { id: string } | undefined
   if (active) throw new Error('Cannot archive a workspace with a run in progress')
 
@@ -867,8 +812,10 @@ export function assertWorkspaceFree(workspaceId: string): void {
     throw new Error(workspaceBusyMessage())
   }
   const active = getDb()
-    .prepare("SELECT id FROM runs WHERE workspaceId = ? AND status = 'running'")
-    .get(workspaceId) as { id: string } | undefined
+    .prepare(
+      "SELECT id FROM runs WHERE (workspaceId = ? OR cwd = ?) AND status = 'running' AND id NOT IN (SELECT runId FROM run_environments)",
+    )
+    .get(workspaceId, getWorkspace(workspaceId)?.path ?? '') as { id: string } | undefined
   if (active) {
     throw new Error(workspaceBusyMessage())
   }

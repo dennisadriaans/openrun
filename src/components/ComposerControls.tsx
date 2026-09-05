@@ -55,6 +55,12 @@ export type RuntimeOption = {
   models?: ModelOption[]
 }
 
+/** Prefer the configured binary, then the stable built-in id for wrappers. */
+function runtimeIconKind(runtime: RuntimeOption) {
+  const fromBin = modelKindForBin(runtime.bin)
+  return fromBin === 'generic' ? modelKindForBin(runtime.id) : fromBin
+}
+
 export function FooterMenu({
   label,
   title,
@@ -167,14 +173,14 @@ export function FooterMenu({
       }}
       className={
         compact
-          ? `flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] disabled:opacity-40 ${
+          ? `flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-1 py-0.5 transition-colors hover:bg-[var(--bg-luminous-quaternary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-40 ${
               invalid
                 ? 'text-rose-300'
                 : muted
                   ? 'text-muted-foreground'
                   : 'font-medium text-foreground'
             }`
-          : `inline-flex h-8 max-w-52 min-w-0 items-center gap-2 truncate rounded-lg px-2.5 text-ui-base transition-colors hover:bg-hover disabled:pointer-events-none disabled:opacity-40 sm:max-w-60 ${
+          : `inline-flex h-7 max-w-52 min-w-0 items-center gap-1.5 truncate rounded-md px-2 text-ui-sm transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-40 sm:max-w-60 ${
               invalid
                 ? 'text-rose-300 hover:text-rose-200'
                 : 'text-tier-tertiary hover:text-tier-secondary'
@@ -219,7 +225,7 @@ export function FooterMenu({
                 maxHeight: coords?.maxHeight,
                 visibility: coords ? 'visible' : 'hidden',
               }}
-              className="min-w-52 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-elevated p-1 shadow-xl shadow-black/40"
+              className="min-w-60 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-elevated p-1.5 shadow-xl shadow-black/40"
             >
               {children(close)}
             </div>,
@@ -252,7 +258,7 @@ export function MenuItem({
       disabled={disabled}
       title={disabled ? hint : undefined}
       onClick={onSelect}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-50 ${
         active
           ? 'bg-hover text-foreground'
           : 'text-foreground/85 hover:bg-hover hover:text-foreground'
@@ -271,7 +277,7 @@ export function MenuItem({
 }
 
 const MENU_LIST_EXPAND_TOGGLE_CLASS =
-  'flex w-full items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground'
+  'flex w-full items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-ui-sm text-tier-tertiary transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60'
 
 /** Expand a truncated menu list to show all rows, or collapse back to the first page. */
 export function MenuListExpandToggle({
@@ -322,9 +328,9 @@ export function MenuListExpandToggle({
  * Separate from {@link MenuItem} because the toggle has to be a real button
  * beside the row rather than inside it — nesting buttons is invalid, and the
  * two need different click targets so hiding an item never selects it. The
- * selected tick, hide toggle, and submenu chevron share one right-hand slot —
- * only one is visible at a time, always centered in the same place. The hide
- * toggle appears only when the pointer is over that trailing icon, not the row.
+ * The main action and visibility action are separate buttons. Keeping the eye
+ * visible makes model curation discoverable on touch and keyboard as well as
+ * with a pointer; submenu and selected indicators no longer overlap it.
  */
 function HideableMenuItem({
   label,
@@ -360,7 +366,9 @@ function HideableMenuItem({
   return (
     <div
       ref={rowRef}
-      className="group/model relative flex items-center"
+      className={`group/item flex items-center gap-0.5 rounded-lg ${
+        active || submenuOpen ? 'bg-hover' : ''
+      }`}
       onMouseEnter={onPointerEnter}
       onMouseLeave={onPointerLeave}
     >
@@ -370,63 +378,40 @@ function HideableMenuItem({
         {...(hasSubmenu ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': submenuOpen } : {})}
         onFocus={onPointerEnter}
         onClick={onSelect}
-        className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2 pr-9 pl-2.5 text-left text-ui-base transition-colors ${
-          active || submenuOpen
-            ? 'bg-hover text-foreground'
-            : 'text-foreground/85 hover:bg-hover hover:text-foreground'
-        } ${hidden ? 'opacity-50' : ''}`}
+        className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-ui-base transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 ${
+          active || submenuOpen ? 'text-foreground' : 'text-foreground/85 hover:text-foreground'
+        } ${hidden ? 'opacity-55' : ''}`}
       >
-        {leading ? <span className="shrink-0 text-tier-secondary">{leading}</span> : null}
+        {leading ? (
+          <span className="grid size-5 shrink-0 place-items-center">{leading}</span>
+        ) : null}
         <span className="min-w-0 flex-1">
           <span className="block truncate">{label}</span>
           {hint ? (
             <span className="block truncate text-ui-sm text-tier-quaternary">{hint}</span>
           ) : null}
         </span>
-      </button>
-      <span className="absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center">
+        {active ? (
+          <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-tier-secondary" />
+        ) : null}
         {hasSubmenu ? (
-          <span className="group/arrow col-start-1 row-start-1 grid size-7 place-items-center">
-            <ChevronRight
-              aria-hidden="true"
-              className="pointer-events-none col-start-1 row-start-1 h-3.5 w-3.5 text-tier-quaternary transition-opacity group-hover/arrow:opacity-0"
-            />
-            {active ? (
-              <Check
-                aria-hidden="true"
-                className="pointer-events-none col-start-1 row-start-1 h-3.5 w-3.5 text-tier-secondary transition-opacity group-hover/arrow:opacity-0"
-              />
-            ) : null}
-            <button
-              type="button"
-              title={hidden ? showTitle : hideTitle}
-              aria-label={hidden ? showTitle : hideTitle}
-              onClick={onToggleHidden}
-              className="col-start-1 row-start-1 flex size-7 items-center justify-center rounded-md text-tier-quaternary opacity-0 transition-opacity group-hover/arrow:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
-            >
-              {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-            </button>
-          </span>
+          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-tier-quaternary" />
+        ) : null}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        title={hidden ? showTitle : hideTitle}
+        aria-label={hidden ? showTitle : hideTitle}
+        onClick={onToggleHidden}
+        className="mr-0.5 flex size-8 shrink-0 items-center justify-center rounded-md text-tier-quaternary opacity-60 transition-[color,background-color,opacity] hover:bg-hover hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        {hidden ? (
+          <Eye aria-hidden="true" className="h-3.5 w-3.5" />
         ) : (
-          <span className="group/trailing col-start-1 row-start-1 grid size-7 place-items-center">
-            {active ? (
-              <Check
-                aria-hidden="true"
-                className="pointer-events-none col-start-1 row-start-1 h-3.5 w-3.5 text-tier-secondary transition-opacity group-hover/trailing:opacity-0"
-              />
-            ) : null}
-            <button
-              type="button"
-              title={hidden ? showTitle : hideTitle}
-              aria-label={hidden ? showTitle : hideTitle}
-              onClick={onToggleHidden}
-              className="col-start-1 row-start-1 flex size-7 items-center justify-center rounded-md text-tier-quaternary opacity-0 transition-opacity group-hover/trailing:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100"
-            >
-              {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-            </button>
-          </span>
+          <EyeOff aria-hidden="true" className="h-3.5 w-3.5" />
         )}
-      </span>
+      </button>
     </div>
   )
 }
@@ -477,6 +462,9 @@ export function ModelPicker({
   const selected = findModel(models, model) ?? models[0]!
   const shown = visibleModels(models, prefs.hiddenModels, selected.slug)
   const hidden = hiddenModelsIn(models, prefs.hiddenModels, selected.slug)
+  const explicitlyHidden = new Set(
+    materializeHiddenModels(models, prefs.hiddenModels, selected.slug),
+  )
   const toggleHidden = (slug: string) =>
     remember({
       hiddenModels: toggleHiddenModel(
@@ -490,7 +478,7 @@ export function ModelPicker({
       label={selected.shortName}
       title={selected.name}
       disabled={disabled}
-      leading={<ProviderIcon kind={selected.provider} className="h-3.5 w-3.5 shrink-0" />}
+      leading={<ProviderIcon kind={selected.provider} className="size-4 shrink-0" />}
     >
       {(close) => (
         <>
@@ -499,7 +487,7 @@ export function ModelPicker({
               key={m.slug}
               model={m}
               active={m.slug === selected.slug}
-              hidden={hidden.some((h) => h.slug === m.slug)}
+              hidden={explicitlyHidden.has(m.slug)}
               onSelect={() => {
                 onChange(m.slug)
                 close()
@@ -510,10 +498,15 @@ export function ModelPicker({
           {hidden.length > 0 ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => setShowHidden((v) => !v)}
-              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2 pb-1 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary"
+              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2.5 pb-1.5 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             >
-              {showHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {showHidden ? (
+                <EyeOff aria-hidden="true" className="h-3 w-3" />
+              ) : (
+                <Eye aria-hidden="true" className="h-3 w-3" />
+              )}
               {showHidden ? 'Hide hidden models' : `${hidden.length} hidden`}
             </button>
           ) : null}
@@ -1137,6 +1130,7 @@ export function RuntimePicker({
   const present = installedRuntimes(runtimes, selected.id)
   const shown = visibleRuntimes(present, prefs.hiddenRuntimes, selected.id)
   const hidden = hiddenRuntimesIn(present, prefs.hiddenRuntimes, selected.id)
+  const explicitlyHidden = new Set(prefs.hiddenRuntimes ?? [])
   const toggleHidden = (id: string) =>
     remember({ hiddenRuntimes: toggleHiddenRuntime(prefs.hiddenRuntimes, id) })
 
@@ -1158,9 +1152,7 @@ export function RuntimePicker({
       keepOpen={keepOpen}
       outsideRefs={[submenuRef]}
       onOpen={() => void sessions?.onOpen?.()}
-      leading={
-        <ProviderIcon kind={modelKindForBin(selected.bin)} className="h-3.5 w-3.5 shrink-0" />
-      }
+      leading={<ProviderIcon kind={runtimeIconKind(selected)} className="size-4 shrink-0" />}
     >
       {(close) => (
         <>
@@ -1171,11 +1163,9 @@ export function RuntimePicker({
                 key={r.id}
                 label={r.label}
                 hint={r.bin}
-                leading={
-                  <ProviderIcon kind={modelKindForBin(r.bin)} className="h-3.5 w-3.5 shrink-0" />
-                }
+                leading={<ProviderIcon kind={runtimeIconKind(r)} className="size-4 shrink-0" />}
                 active={r.id === selected.id}
-                hidden={hidden.some((h) => h.id === r.id)}
+                hidden={explicitlyHidden.has(r.id)}
                 hideTitle={`Hide ${r.label} from this list`}
                 showTitle={`Show ${r.label} again`}
                 rowRef={(el) => {
@@ -1200,10 +1190,15 @@ export function RuntimePicker({
           {hidden.length > 0 ? (
             <button
               type="button"
+              role="menuitem"
               onClick={() => setShowHidden((v) => !v)}
-              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2 pb-1 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary"
+              className="mt-1 flex w-full items-center gap-2 border-t border-border px-2.5 pt-2.5 pb-1.5 text-left text-ui-sm text-tier-quaternary transition-colors hover:text-tier-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             >
-              {showHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {showHidden ? (
+                <EyeOff aria-hidden="true" className="h-3 w-3" />
+              ) : (
+                <Eye aria-hidden="true" className="h-3 w-3" />
+              )}
               {showHidden ? 'Hide hidden runtimes' : `${hidden.length} hidden`}
             </button>
           ) : null}
@@ -1253,7 +1248,7 @@ export function ComposerModelControls({
   onEffortChange: (effort: string) => void
 }) {
   return (
-    <div className="-m-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {models.length > 0 ? (
         <>
           <ModelPicker models={models} model={model} disabled={disabled} onChange={onModelChange} />
