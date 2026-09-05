@@ -18,6 +18,20 @@ export type ThreadLensGroup = {
   runs: ThreadLensRun[]
 }
 
+/**
+ * A navigation result is an index, not an event feed: one run must result in
+ * one selectable conversation. Keep the newest copy in case a cache update
+ * briefly joins an older result with a newer one.
+ */
+export function uniqueThreadLensRuns(runs: ThreadLensRun[]): ThreadLensRun[] {
+  const byId = new Map<string, ThreadLensRun>()
+  for (const run of runs) {
+    const existing = byId.get(run.id)
+    if (!existing || run.startedAt > existing.startedAt) byId.set(run.id, run)
+  }
+  return [...byId.values()]
+}
+
 export function threadNavigationIndex(runs: ThreadLensRun[]): {
   unreadWorkspaceIds: Set<string>
   latestRunIdByWorkspace: Map<string, string>
@@ -26,7 +40,7 @@ export function threadNavigationIndex(runs: ThreadLensRun[]): {
   const unreadWorkspaceIds = new Set<string>()
   const latestRunIdByWorkspace = new Map<string, string>()
   const latestRunIdByProject = new Map<string, string>()
-  for (const run of [...runs].sort((a, b) => b.startedAt - a.startedAt)) {
+  for (const run of uniqueThreadLensRuns(runs).sort((a, b) => b.startedAt - a.startedAt)) {
     if (run.unread && run.workspaceId) unreadWorkspaceIds.add(run.workspaceId)
     if (run.workspaceId && !latestRunIdByWorkspace.has(run.workspaceId)) {
       latestRunIdByWorkspace.set(run.workspaceId, run.id)
@@ -44,7 +58,7 @@ export function adjacentThreadId(
   runId: string,
   direction: -1 | 1,
 ): string | null {
-  const threads = runs
+  const threads = uniqueThreadLensRuns(runs)
     .filter((run) => run.workspaceId === workspaceId)
     .sort((a, b) => b.startedAt - a.startedAt)
   if (threads.length < 2) return null
@@ -63,7 +77,8 @@ export function groupThreadLensRuns(
   query = '',
 ): ThreadLensGroup[] {
   const needle = query.trim().toLocaleLowerCase()
-  const scoped = needle ? runs : runs.filter((run) => run.workspaceId === current.workspaceId)
+  const unique = uniqueThreadLensRuns(runs)
+  const scoped = needle ? unique : unique.filter((run) => run.workspaceId === current.workspaceId)
   const matching = needle
     ? scoped.filter((run) =>
         [run.chatTitle, run.runtimeLabel, run.workspaceBranch, run.projectName].some((value) =>

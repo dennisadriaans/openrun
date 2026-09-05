@@ -279,6 +279,22 @@ export const OPERATIONS = [
     summary: 'Upload a composer image; `data` is raw base64 without the data-URL prefix.',
   },
 
+  // --- code ----------------------------------------------------------------
+  {
+    id: 'code.highlight',
+    fn: 'highlightCodeBlock',
+    method: 'POST',
+    path: '/api/v1/code/highlight',
+    core: 'highlightCodeBlock',
+    args: 'payload',
+    input: { code: 'string', language: 'string?', path: 'string?' },
+    capability: 'code.highlight',
+    clients: ['desktop'],
+    inputType: '{ code: string; language?: string; path?: string }',
+    summary:
+      'Tokenize a snippet with the app\'s own highlighter; answers class names, not colours.',
+  },
+
   // --- git -----------------------------------------------------------------
   {
     id: 'git.getFileDiff',

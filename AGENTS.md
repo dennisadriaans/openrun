@@ -212,6 +212,7 @@ Neither hook may open an `EventSource` of its own.
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |
 | Undoing a run — files vs. the commits it made | `lib/undoRun.ts` (the rule), `git.runCommits` / `git.resetRunCommits`, `core.discardChanges`; the dialog lives in `routes/runs.$runId.tsx` |
 | How a diff line looks (git panel **and** chat edit hunks) | `components/DiffRows.tsx`; tokens from `lib/highlight.ts`; agent-supplied hunks via `lib/lineDiff.ts` |
+| Syntax colour: which grammar, and colouring for a non-TypeScript client | `lib/languageSupport.ts` (extension → grammar), `lib/highlight.ts` (`highlightSnippet`, the caps); served to native clients by the `code.highlight` operation, which answers `hl-*` class names, never colours |
 | Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
 | Webhooks (relayed from the control plane) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx` |
 | Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationConnect.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
