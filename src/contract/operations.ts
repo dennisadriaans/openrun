@@ -291,8 +291,7 @@ export const OPERATIONS = [
     capability: 'code.highlight',
     clients: ['desktop'],
     inputType: '{ code: string; language?: string; path?: string }',
-    summary:
-      'Tokenize a snippet with the app\'s own highlighter; answers class names, not colours.',
+    summary: "Tokenize a snippet with the app's own highlighter; answers class names, not colours.",
   },
 
   // --- git -----------------------------------------------------------------
