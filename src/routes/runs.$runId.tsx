@@ -5,7 +5,7 @@
  * Panel chrome adapted from t3code ChatView (MIT, T3 Tools Inc.).
  */
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowLeft, Ban, MoreHorizontal, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Ban, MoreHorizontal, Plus, RotateCcw, Terminal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import * as fns from '../fns'
@@ -453,6 +453,21 @@ function RunDetail() {
               />
 
               <div className="flex shrink-0 items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => patchLayout({ terminalOpen: !layout.terminalOpen })}
+                  disabled={!workspace?.id}
+                  aria-label="Toggle terminal"
+                  aria-pressed={layout.terminalOpen}
+                  title={workspace?.id ? 'Toggle terminal' : 'This run has no active workspace'}
+                  className={`inline-flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${
+                    layout.terminalOpen
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  }`}
+                >
+                  <Terminal className="size-3.5" />
+                </button>
                 {run?.status === 'running' ? (
                   <button
                     type="button"
@@ -798,9 +813,8 @@ function RunDetail() {
         open={layout.terminalOpen}
         height={layout.terminalHeight}
         onHeightChange={(terminalHeight) => patchLayout({ terminalHeight })}
-        command={run?.command ?? ''}
-        stdout={run?.stdout ?? ''}
-        stderr={run?.stderr ?? ''}
+        onClose={() => patchLayout({ terminalOpen: false })}
+        workspaceId={workspace?.id ?? run?.workspaceId}
       />
 
       {confirmDelete && run ? (

@@ -33,6 +33,7 @@ import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
 import { Route as ApiMobilePairRouteImport } from './routes/api/mobile/pair'
 import { Route as ApiMobileStartOptionsRouteImport } from './routes/api/mobile/start-options'
 import { Route as ApiMobileUnpairRouteImport } from './routes/api/mobile/unpair'
+import { Route as ApiTerminalsIndexRouteImport } from './routes/api/terminals/index'
 import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
 import { Route as ApiMcpOauthCallbackRouteImport } from './routes/api/mcp/oauth/callback'
 import { Route as ApiMobileActivityStreamRouteImport } from './routes/api/mobile/activity.stream'
@@ -42,6 +43,10 @@ import { Route as ApiMobileTasksIndexRouteImport } from './routes/api/mobile/tas
 import { Route as ApiRunsRunIdAttachmentRouteImport } from './routes/api/runs/$runId/attachment'
 import { Route as ApiRunsRunIdStreamRouteImport } from './routes/api/runs/$runId/stream'
 import { Route as ApiRunsRunIdUiStreamRouteImport } from './routes/api/runs/$runId/ui-stream'
+import { Route as ApiTerminalsSessionIdIndexRouteImport } from './routes/api/terminals/$sessionId/index'
+import { Route as ApiTerminalsSessionIdInputRouteImport } from './routes/api/terminals/$sessionId/input'
+import { Route as ApiTerminalsSessionIdResizeRouteImport } from './routes/api/terminals/$sessionId/resize'
+import { Route as ApiTerminalsSessionIdStreamRouteImport } from './routes/api/terminals/$sessionId/stream'
 import { Route as ApiMobileRunsRunIdIndexRouteImport } from './routes/api/mobile/runs/$runId/index'
 import { Route as ApiMobileRunsRunIdApprovalsRouteImport } from './routes/api/mobile/runs/$runId/approvals'
 import { Route as ApiMobileRunsRunIdCancelRouteImport } from './routes/api/mobile/runs/$runId/cancel'
@@ -174,6 +179,11 @@ const ApiMobileUnpairRoute = ApiMobileUnpairRouteImport.update({
   path: '/api/mobile/unpair',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTerminalsIndexRoute = ApiTerminalsIndexRouteImport.update({
+  id: '/api/terminals/',
+  path: '/api/terminals/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1SplatRoute = ApiV1SplatRouteImport.update({
   id: '/api/v1/$',
   path: '/api/v1/$',
@@ -219,6 +229,30 @@ const ApiRunsRunIdUiStreamRoute = ApiRunsRunIdUiStreamRouteImport.update({
   path: '/api/runs/$runId/ui-stream',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTerminalsSessionIdIndexRoute =
+  ApiTerminalsSessionIdIndexRouteImport.update({
+    id: '/api/terminals/$sessionId/',
+    path: '/api/terminals/$sessionId/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiTerminalsSessionIdInputRoute =
+  ApiTerminalsSessionIdInputRouteImport.update({
+    id: '/api/terminals/$sessionId/input',
+    path: '/api/terminals/$sessionId/input',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiTerminalsSessionIdResizeRoute =
+  ApiTerminalsSessionIdResizeRouteImport.update({
+    id: '/api/terminals/$sessionId/resize',
+    path: '/api/terminals/$sessionId/resize',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiTerminalsSessionIdStreamRoute =
+  ApiTerminalsSessionIdStreamRouteImport.update({
+    id: '/api/terminals/$sessionId/stream',
+    path: '/api/terminals/$sessionId/stream',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiMobileRunsRunIdIndexRoute = ApiMobileRunsRunIdIndexRouteImport.update({
   id: '/api/mobile/runs/$runId/',
   path: '/api/mobile/runs/$runId/',
@@ -308,14 +342,19 @@ export interface FileRoutesByFullPath {
   '/api/mobile/start-options': typeof ApiMobileStartOptionsRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
   '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/terminals/': typeof ApiTerminalsIndexRoute
   '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
   '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
+  '/api/terminals/$sessionId/input': typeof ApiTerminalsSessionIdInputRoute
+  '/api/terminals/$sessionId/resize': typeof ApiTerminalsSessionIdResizeRoute
+  '/api/terminals/$sessionId/stream': typeof ApiTerminalsSessionIdStreamRoute
   '/api/mobile/runs/': typeof ApiMobileRunsIndexRoute
   '/api/mobile/tasks/': typeof ApiMobileTasksIndexRoute
+  '/api/terminals/$sessionId/': typeof ApiTerminalsSessionIdIndexRoute
   '/api/mobile/runs/$runId/approvals': typeof ApiMobileRunsRunIdApprovalsRoute
   '/api/mobile/runs/$runId/cancel': typeof ApiMobileRunsRunIdCancelRoute
   '/api/mobile/runs/$runId/diff': typeof ApiMobileRunsRunIdDiffRouteWithChildren
@@ -353,14 +392,19 @@ export interface FileRoutesByTo {
   '/api/mobile/start-options': typeof ApiMobileStartOptionsRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
   '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/terminals': typeof ApiTerminalsIndexRoute
   '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
   '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
+  '/api/terminals/$sessionId/input': typeof ApiTerminalsSessionIdInputRoute
+  '/api/terminals/$sessionId/resize': typeof ApiTerminalsSessionIdResizeRoute
+  '/api/terminals/$sessionId/stream': typeof ApiTerminalsSessionIdStreamRoute
   '/api/mobile/runs': typeof ApiMobileRunsIndexRoute
   '/api/mobile/tasks': typeof ApiMobileTasksIndexRoute
+  '/api/terminals/$sessionId': typeof ApiTerminalsSessionIdIndexRoute
   '/api/mobile/runs/$runId/approvals': typeof ApiMobileRunsRunIdApprovalsRoute
   '/api/mobile/runs/$runId/cancel': typeof ApiMobileRunsRunIdCancelRoute
   '/api/mobile/runs/$runId/diff': typeof ApiMobileRunsRunIdDiffRouteWithChildren
@@ -400,14 +444,19 @@ export interface FileRoutesById {
   '/api/mobile/start-options': typeof ApiMobileStartOptionsRoute
   '/api/mobile/unpair': typeof ApiMobileUnpairRoute
   '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/terminals/': typeof ApiTerminalsIndexRoute
   '/api/mcp/oauth/callback': typeof ApiMcpOauthCallbackRoute
   '/api/mobile/activity/stream': typeof ApiMobileActivityStreamRoute
   '/api/mobile/push/register': typeof ApiMobilePushRegisterRoute
   '/api/runs/$runId/attachment': typeof ApiRunsRunIdAttachmentRoute
   '/api/runs/$runId/stream': typeof ApiRunsRunIdStreamRoute
   '/api/runs/$runId/ui-stream': typeof ApiRunsRunIdUiStreamRoute
+  '/api/terminals/$sessionId/input': typeof ApiTerminalsSessionIdInputRoute
+  '/api/terminals/$sessionId/resize': typeof ApiTerminalsSessionIdResizeRoute
+  '/api/terminals/$sessionId/stream': typeof ApiTerminalsSessionIdStreamRoute
   '/api/mobile/runs/': typeof ApiMobileRunsIndexRoute
   '/api/mobile/tasks/': typeof ApiMobileTasksIndexRoute
+  '/api/terminals/$sessionId/': typeof ApiTerminalsSessionIdIndexRoute
   '/api/mobile/runs/$runId/approvals': typeof ApiMobileRunsRunIdApprovalsRoute
   '/api/mobile/runs/$runId/cancel': typeof ApiMobileRunsRunIdCancelRoute
   '/api/mobile/runs/$runId/diff': typeof ApiMobileRunsRunIdDiffRouteWithChildren
@@ -448,14 +497,19 @@ export interface FileRouteTypes {
     | '/api/mobile/start-options'
     | '/api/mobile/unpair'
     | '/api/v1/$'
+    | '/api/terminals/'
     | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
     | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
+    | '/api/terminals/$sessionId/input'
+    | '/api/terminals/$sessionId/resize'
+    | '/api/terminals/$sessionId/stream'
     | '/api/mobile/runs/'
     | '/api/mobile/tasks/'
+    | '/api/terminals/$sessionId/'
     | '/api/mobile/runs/$runId/approvals'
     | '/api/mobile/runs/$runId/cancel'
     | '/api/mobile/runs/$runId/diff'
@@ -493,14 +547,19 @@ export interface FileRouteTypes {
     | '/api/mobile/start-options'
     | '/api/mobile/unpair'
     | '/api/v1/$'
+    | '/api/terminals'
     | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
     | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
+    | '/api/terminals/$sessionId/input'
+    | '/api/terminals/$sessionId/resize'
+    | '/api/terminals/$sessionId/stream'
     | '/api/mobile/runs'
     | '/api/mobile/tasks'
+    | '/api/terminals/$sessionId'
     | '/api/mobile/runs/$runId/approvals'
     | '/api/mobile/runs/$runId/cancel'
     | '/api/mobile/runs/$runId/diff'
@@ -539,14 +598,19 @@ export interface FileRouteTypes {
     | '/api/mobile/start-options'
     | '/api/mobile/unpair'
     | '/api/v1/$'
+    | '/api/terminals/'
     | '/api/mcp/oauth/callback'
     | '/api/mobile/activity/stream'
     | '/api/mobile/push/register'
     | '/api/runs/$runId/attachment'
     | '/api/runs/$runId/stream'
     | '/api/runs/$runId/ui-stream'
+    | '/api/terminals/$sessionId/input'
+    | '/api/terminals/$sessionId/resize'
+    | '/api/terminals/$sessionId/stream'
     | '/api/mobile/runs/'
     | '/api/mobile/tasks/'
+    | '/api/terminals/$sessionId/'
     | '/api/mobile/runs/$runId/approvals'
     | '/api/mobile/runs/$runId/cancel'
     | '/api/mobile/runs/$runId/diff'
@@ -584,14 +648,19 @@ export interface RootRouteChildren {
   ApiMobileStartOptionsRoute: typeof ApiMobileStartOptionsRoute
   ApiMobileUnpairRoute: typeof ApiMobileUnpairRoute
   ApiV1SplatRoute: typeof ApiV1SplatRoute
+  ApiTerminalsIndexRoute: typeof ApiTerminalsIndexRoute
   ApiMcpOauthCallbackRoute: typeof ApiMcpOauthCallbackRoute
   ApiMobileActivityStreamRoute: typeof ApiMobileActivityStreamRoute
   ApiMobilePushRegisterRoute: typeof ApiMobilePushRegisterRoute
   ApiRunsRunIdAttachmentRoute: typeof ApiRunsRunIdAttachmentRoute
   ApiRunsRunIdStreamRoute: typeof ApiRunsRunIdStreamRoute
   ApiRunsRunIdUiStreamRoute: typeof ApiRunsRunIdUiStreamRoute
+  ApiTerminalsSessionIdInputRoute: typeof ApiTerminalsSessionIdInputRoute
+  ApiTerminalsSessionIdResizeRoute: typeof ApiTerminalsSessionIdResizeRoute
+  ApiTerminalsSessionIdStreamRoute: typeof ApiTerminalsSessionIdStreamRoute
   ApiMobileRunsIndexRoute: typeof ApiMobileRunsIndexRoute
   ApiMobileTasksIndexRoute: typeof ApiMobileTasksIndexRoute
+  ApiTerminalsSessionIdIndexRoute: typeof ApiTerminalsSessionIdIndexRoute
   ApiMobileRunsRunIdApprovalsRoute: typeof ApiMobileRunsRunIdApprovalsRoute
   ApiMobileRunsRunIdCancelRoute: typeof ApiMobileRunsRunIdCancelRoute
   ApiMobileRunsRunIdDiffRoute: typeof ApiMobileRunsRunIdDiffRouteWithChildren
@@ -773,6 +842,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileUnpairRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/terminals/': {
+      id: '/api/terminals/'
+      path: '/api/terminals'
+      fullPath: '/api/terminals/'
+      preLoaderRoute: typeof ApiTerminalsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/$': {
       id: '/api/v1/$'
       path: '/api/v1/$'
@@ -834,6 +910,34 @@ declare module '@tanstack/react-router' {
       path: '/api/runs/$runId/ui-stream'
       fullPath: '/api/runs/$runId/ui-stream'
       preLoaderRoute: typeof ApiRunsRunIdUiStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/terminals/$sessionId/': {
+      id: '/api/terminals/$sessionId/'
+      path: '/api/terminals/$sessionId'
+      fullPath: '/api/terminals/$sessionId/'
+      preLoaderRoute: typeof ApiTerminalsSessionIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/terminals/$sessionId/input': {
+      id: '/api/terminals/$sessionId/input'
+      path: '/api/terminals/$sessionId/input'
+      fullPath: '/api/terminals/$sessionId/input'
+      preLoaderRoute: typeof ApiTerminalsSessionIdInputRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/terminals/$sessionId/resize': {
+      id: '/api/terminals/$sessionId/resize'
+      path: '/api/terminals/$sessionId/resize'
+      fullPath: '/api/terminals/$sessionId/resize'
+      preLoaderRoute: typeof ApiTerminalsSessionIdResizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/terminals/$sessionId/stream': {
+      id: '/api/terminals/$sessionId/stream'
+      path: '/api/terminals/$sessionId/stream'
+      fullPath: '/api/terminals/$sessionId/stream'
+      preLoaderRoute: typeof ApiTerminalsSessionIdStreamRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/mobile/runs/$runId/': {
@@ -982,14 +1086,19 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileStartOptionsRoute: ApiMobileStartOptionsRoute,
   ApiMobileUnpairRoute: ApiMobileUnpairRoute,
   ApiV1SplatRoute: ApiV1SplatRoute,
+  ApiTerminalsIndexRoute: ApiTerminalsIndexRoute,
   ApiMcpOauthCallbackRoute: ApiMcpOauthCallbackRoute,
   ApiMobileActivityStreamRoute: ApiMobileActivityStreamRoute,
   ApiMobilePushRegisterRoute: ApiMobilePushRegisterRoute,
   ApiRunsRunIdAttachmentRoute: ApiRunsRunIdAttachmentRoute,
   ApiRunsRunIdStreamRoute: ApiRunsRunIdStreamRoute,
   ApiRunsRunIdUiStreamRoute: ApiRunsRunIdUiStreamRoute,
+  ApiTerminalsSessionIdInputRoute: ApiTerminalsSessionIdInputRoute,
+  ApiTerminalsSessionIdResizeRoute: ApiTerminalsSessionIdResizeRoute,
+  ApiTerminalsSessionIdStreamRoute: ApiTerminalsSessionIdStreamRoute,
   ApiMobileRunsIndexRoute: ApiMobileRunsIndexRoute,
   ApiMobileTasksIndexRoute: ApiMobileTasksIndexRoute,
+  ApiTerminalsSessionIdIndexRoute: ApiTerminalsSessionIdIndexRoute,
   ApiMobileRunsRunIdApprovalsRoute: ApiMobileRunsRunIdApprovalsRoute,
   ApiMobileRunsRunIdCancelRoute: ApiMobileRunsRunIdCancelRoute,
   ApiMobileRunsRunIdDiffRoute: ApiMobileRunsRunIdDiffRouteWithChildren,
