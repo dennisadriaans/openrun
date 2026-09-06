@@ -76,30 +76,34 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
       : 'Ready to Run'
 
   return (
-    <section>
+    <div className="contents">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Button
-          type="button"
-          variant="ghost"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          {blocked ? (
-            <AlertTriangle className="h-3.5 w-3.5 text-danger" />
-          ) : (
-            <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-          )}
-          {title}
-        </Button>
-        {!open ? (
+        {blocked && !open ? (
           <span className="text-ui-sm text-tier-quaternary">
             {readinessSummary(task, blockers)}
           </span>
         ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          aria-expanded={open}
+          aria-label={title}
+          title={title}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {blocked ? (
+            <>
+              <AlertTriangle className="h-3.5 w-3.5 text-danger" />
+              {title}
+            </>
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+          )}
+        </Button>
       </div>
 
       {!open ? null : (
-        <Card className="mt-2 p-4">
+        <Card className="mt-2 w-full basis-full p-4">
           {blocked ? (
             <ul className="mb-3 space-y-1 text-ui-sm leading-relaxed text-tier-secondary">
               {blockers.map((blocker, index) => (
@@ -244,7 +248,7 @@ export function WorkspaceReadiness({ task }: { task: TaskWithMeta }) {
           </div>
         </Card>
       )}
-    </section>
+    </div>
   )
 }
 

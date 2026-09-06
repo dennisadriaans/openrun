@@ -99,7 +99,6 @@ function TaskDetail() {
         readiness={demo ? undefined : <WorkspaceReadiness task={task} />}
         workspaceChangeBlockedReason={taskWorkspaceChangeBlockedReason(task)}
         demoPreview={demo}
-        onCancel={() => navigate({ to: '/tasks' })}
         onSaved={() => {
           if (demo) return
           qc.invalidateQueries({ queryKey: ['task', taskId] })
