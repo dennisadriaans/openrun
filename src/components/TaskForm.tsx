@@ -1337,9 +1337,6 @@ export function TaskForm({
             {workspaceError}
           </p>
         ) : null}
-        <p className="mt-2 text-ui-sm text-tier-tertiary">
-          Each run starts from the locally known base revision in its own clean checkout.
-        </p>
         {v.resumeSessionId ? (
           <button
             type="button"
