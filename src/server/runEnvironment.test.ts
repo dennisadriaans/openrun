@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { createServer } from 'vite'
-import type { RunRow } from './db.ts'
+import type { RunRow, RuntimeRow } from './db.ts'
 
 const appRoot = process.cwd()
 const root = mkdtempSync(join(tmpdir(), 'openrun-executions-'))
@@ -91,6 +91,36 @@ async function terminal(runId: string) {
   throw new Error(`Run did not finish: ${runId}`)
 }
 
+function webhookRun(f: Awaited<ReturnType<typeof fixture>>): string {
+  const runtime = db.prepare('SELECT * FROM runtimes WHERE id = ?').get(f.runtimeId) as RuntimeRow
+  return executor.runTask(f.task, runtime, 'webhook')
+}
+
+test('structured successful diagnostics stay successful while failed GitHub commands fail the run', async () => {
+  for (const exitCode of [0, 1]) {
+    const output = JSON.stringify({
+      type: 'item.completed',
+      item: {
+        id: 'diagnostic',
+        type: 'command_execution',
+        status: 'completed',
+        aggregated_output: 'You are not logged into any GitHub hosts.',
+        exit_code: exitCode,
+      },
+    })
+    const f = await fixture(`console.log(${JSON.stringify(output)})`)
+    const bin = join(root, `runtime-${sequence}`, 'codex')
+    mkdirSync(join(root, `runtime-${sequence}`))
+    writeFileSync(bin, `#!${process.execPath}\nconsole.log(${JSON.stringify(output)})\n`)
+    chmodSync(bin, 0o755)
+    db.prepare('UPDATE runtimes SET bin = ? WHERE id = ?').run(bin, f.runtimeId)
+    const runId = core.runTaskNow(f.task.id).runId
+    const run = await terminal(runId)
+    assert.equal(run.status, exitCode === 0 ? 'success' : 'error', run.stderr)
+    assert.ok(executor.listTurnEventsForRun(runId).some((event) => event.kind === 'tool_result'))
+  }
+})
+
 after(async () => {
   executor.cancelAllLiveRuns()
   const timer = (globalThis as { __openrunMcpTokenTimer?: NodeJS.Timeout }).__openrunMcpTokenTimer
@@ -131,11 +161,15 @@ test('two automation invocations run independently from the same clean base whil
   )
   writeFileSync(join(f.repo, 'source.txt'), 'editor changes')
   writeFileSync(join(f.repo, 'local-only.txt'), 'private local work')
-  const one = core.runTaskNow(f.task.id).runId
-  const two = core.runTaskNow(f.task.id).runId
+  const one = webhookRun(f)
+  const two = webhookRun(f)
   const e1 = environments.getRunEnvironment(one)!
   const e2 = environments.getRunEnvironment(two)!
   assert.notEqual(e1.path, e2.path)
+  assert.deepEqual(
+    workspaces.listWorkspaces(f.project.id).map((w) => w.id),
+    [f.workspace.id],
+  )
   assert.notEqual(e1.branch, e2.branch)
   assert.equal(e1.baseCommit, f.base)
   assert.equal(e2.baseCommit, f.base)
@@ -154,7 +188,7 @@ test('two automation invocations run independently from the same clean base whil
 
 test('successful results, diffs and files survive cleanup and browsing does not recreate directories', async () => {
   const f = await fixture("require('fs').writeFileSync('result.txt', 'saved result\\n')")
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   await terminal(runId)
   const env = environments.getRunEnvironment(runId)!
   assert.equal(env.state, 'released')
@@ -191,7 +225,7 @@ test('a follow-up restores the saved result and releases the execution directory
     '[]',
     f.runtimeId,
   )
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   await terminal(runId)
   const env = environments.getRunEnvironment(runId)!
   assert.equal(env.state, 'released')
@@ -209,7 +243,7 @@ test('a follow-up restores the saved result and releases the execution directory
 
 test('repeat uses the original base in a new directory after the automation is deleted', async () => {
   const f = await fixture()
-  const first = core.runTaskNow(f.task.id).runId
+  const first = webhookRun(f)
   await terminal(first)
   writeFileSync(join(f.repo, 'source.txt'), 'new base')
   git(f.repo, 'commit', '-qam', 'advance base')
@@ -227,11 +261,11 @@ test('failure preserves partial output without contaminating the next invocation
   const f = await fixture(
     "require('fs').writeFileSync('partial.txt', 'recover me'); process.exit(2)",
   )
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   assert.equal((await terminal(runId)).status, 'error')
   const result = environments.getRunEnvironment(runId)!
   assert.equal(git(f.repo, 'show', `${result.resultCommit}:partial.txt`), 'recover me')
-  const retry = core.runTaskNow(f.task.id).runId
+  const retry = webhookRun(f)
   assert.equal(environments.getRunEnvironment(retry)!.baseCommit, f.base)
   await terminal(retry)
 })
@@ -240,7 +274,7 @@ test('cancellation retains uncommitted output until an explicit discard', async 
   const f = await fixture(
     "require('fs').writeFileSync('partial.txt', 'recover me'); setTimeout(() => {}, 30000)",
   )
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   const env = environments.getRunEnvironment(runId)!
   const deadline = Date.now() + 5000
   while (!existsSync(join(env.path, 'partial.txt')) && Date.now() < deadline)
@@ -257,14 +291,14 @@ test('cancellation retains uncommitted output until an explicit discard', async 
 
 test('setup failure and cancellation are recorded as part of the run', async () => {
   const f = await fixture('process.exit(0)', `${process.execPath} -e "process.exit(2)"`)
-  const failed = core.runTaskNow(f.task.id).runId
+  const failed = webhookRun(f)
   assert.equal((await terminal(failed)).status, 'error')
   assert.match(core.getRun(failed)!.stderr, /setup failed/)
   workspaces.updateProject({
     id: f.project.id,
     setupCommand: `${process.execPath} -e "setTimeout(() => {}, 30000)"`,
   })
-  const cancelled = core.runTaskNow(f.task.id).runId
+  const cancelled = webhookRun(f)
   executor.cancelRun(cancelled)
   assert.equal((await terminal(cancelled)).status, 'cancelled')
   assert.equal(
@@ -285,7 +319,7 @@ test('setup artifacts are recorded and retained when the agent changes them', as
     setupCommand: `${process.execPath} -e "require('fs').mkdirSync('node_modules'); require('fs').writeFileSync('node_modules/setup.txt', 'from setup')"`,
   })
 
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   await terminal(runId)
   const env = environments.getRunEnvironment(runId)!
   assert.match(env.setupArtifacts, /node_modules/)
@@ -295,7 +329,7 @@ test('setup artifacts are recorded and retained when the agent changes them', as
 
 test('cleanup respects leases, worktree locks, ignored user files and external processes', async () => {
   const f = await fixture()
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   await terminal(runId)
   environments.ensureRunEnvironment(runId)
   const env = environments.getRunEnvironment(runId)!
@@ -331,7 +365,7 @@ test('cleanup respects leases, worktree locks, ignored user files and external p
 
 test('restart reconciles orphan runs and safely collects journaled clean resources', async () => {
   const f = await fixture()
-  const runId = core.runTaskNow(f.task.id).runId
+  const runId = webhookRun(f)
   await terminal(runId)
   environments.ensureRunEnvironment(runId)
   const env = environments.getRunEnvironment(runId)!
@@ -350,7 +384,7 @@ test('restart reconciles orphan runs and safely collects journaled clean resourc
   assert.equal(existsSync(uncertain.path), true)
 })
 
-test('legacy migration preserves directories and known bases without importing external worktrees', async () => {
+test('legacy migration preserves directories and discovers external worktrees without owning them', async () => {
   const f = await fixture()
   const legacy = await workspaces.createWorkspace({ projectId: f.project.id, branch: 'legacy-run' })
   writeFileSync(join(legacy.path, 'user-work.txt'), 'preserve me')
@@ -368,8 +402,7 @@ test('legacy migration preserves directories and known bases without importing e
   assert.equal(core.getTask(f.task.id)!.baseRef, legacy.baseCommit)
   const external = join(root, 'external')
   git(f.repo, 'worktree', 'add', '-qb', 'external', external)
-  assert.equal(
-    workspaces.listWorkspaces(f.project.id).some((w) => w.path === external),
-    false,
-  )
+  const discovered = workspaces.listWorkspaces(f.project.id).find((w) => w.kind === 'external')
+  assert.equal(discovered?.kind, 'external')
+  assert.throws(() => workspaces.archiveWorkspace(discovered!.id, true), /does not own/)
 })

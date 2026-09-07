@@ -93,7 +93,7 @@ export function useNewRunDraft(
 
   const project = projects?.find((row) => row.id === projectId)
   const workspaces = useMemo(
-    () => (allWorkspaces ?? []).filter((w) => w.kind === 'main' && w.status !== 'archived'),
+    () => (allWorkspaces ?? []).filter((w) => w.status !== 'archived'),
     [allWorkspaces],
   )
 

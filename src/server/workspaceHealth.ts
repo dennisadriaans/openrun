@@ -45,7 +45,7 @@ function canonical(p: string): string {
  * `git.isRepo` alone are therefore not a safe restore target.
  */
 export function isRegisteredWorktree(workspace: WorkspaceRow): boolean {
-  if (workspace.kind !== 'worktree') return false
+  if (workspace.kind !== 'worktree' && workspace.kind !== 'external') return false
   const project = getProject(workspace.projectId)
   if (!project) return false
   const wanted = canonical(workspace.path)
@@ -81,7 +81,10 @@ export function inspectWorkspaceHealth(workspace: WorkspaceRow): WorkspaceHealth
   // directory that is a repo but no longer a worktree of this project (someone
   // ran `git worktree remove` and re-created the folder, or the project moved)
   // would have the agent committing into a checkout nothing else tracks.
-  if (workspace.kind === 'worktree' && !isRegisteredWorktree(workspace)) {
+  if (
+    (workspace.kind === 'worktree' || workspace.kind === 'external') &&
+    !isRegisteredWorktree(workspace)
+  ) {
     return at(workspace, 'not-a-worktree')
   }
 
@@ -247,15 +250,14 @@ export type RestoreResult = {
  * Put an app-managed worktree back on its configured branch with a clean tree
  * and lift its quarantine.
  *
- * Never touches a `kind='main'` workspace: that is the user's own checkout,
- * and a hard reset there would delete work this app did not create.
+ * Only app-managed worktrees may be restored; external checkouts are user-owned too.
  */
 export function restoreWorkspace(workspaceId: string): RestoreResult {
   const workspace = getWorkspace(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
-  if (workspace.kind === 'main') {
+  if (workspace.kind !== 'worktree') {
     throw new Error(
-      'Cannot restore the main checkout — it is your own working copy. Commit or discard its changes yourself.',
+      'Cannot restore this checkout because Open Run does not own it. Commit or discard its changes yourself.',
     )
   }
   const active = getDb()

@@ -274,7 +274,11 @@ export function drainWorkspace(workspaceId: string): void {
     // This is deliberately the final gate before runTask. It re-reads the
     // exact task.workspaceId represented by the entry and checks lifecycle,
     // PATH, prompt, resume session, health, policy, and ownership together.
-    const unattended = unattendedRefusal(task, runtime)
+    const unattended = unattendedRefusal(
+      task,
+      runtime,
+      entry.trigger === 'webhook' ? 'webhook' : 'schedule',
+    )
     if (unattended) {
       removeEntry(entry.id)
       publishDepth(workspaceId)

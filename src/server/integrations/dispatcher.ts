@@ -111,7 +111,7 @@ function webhookRefusal(task: TaskRow): string | null {
   // Queue that explicit busy condition before health inspection; all other
   // failures are permanent delivery failures and must not be hidden in the
   // queue.
-  return unattendedRefusal(task, runtime)
+  return unattendedRefusal(task, runtime, 'webhook')
 }
 
 function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
@@ -137,8 +137,6 @@ function fireTask(task: TaskRow, event: CanonicalWebhookEvent): string {
     model: task.model,
     effort: task.effort,
     timeoutMs: task.timeoutMs,
-    resumeSessionId: task.resumeSessionId,
-    resumeSessionLabel: task.resumeSessionLabel,
     ...(source ? { source } : {}),
   })
 }

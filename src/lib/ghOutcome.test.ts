@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { detectGhFailure } from './ghOutcome.ts'
+import { detectGhFailure, detectGhFailureInEvents } from './ghOutcome.ts'
 
 test('detects unauthenticated gh', () => {
   const out = detectGhFailure(
@@ -29,4 +29,26 @@ test('clean success output is not flagged', () => {
 
 test('empty output is not flagged', () => {
   assert.equal(detectGhFailure('').failed, false)
+})
+
+test('authentication instructions alone are not a failure', () => {
+  assert.equal(detectGhFailure('Use gh auth login to connect your account.').failed, false)
+})
+
+test('successful diagnostic output and quoted old failures do not fail the turn', () => {
+  const content = 'You are not logged into any GitHub hosts. Run gh auth login to authenticate.'
+  for (const kind of ['assistant', 'tool_start', 'tool_result'] as const) {
+    assert.equal(
+      detectGhFailureInEvents([{ kind, payload: JSON.stringify({ status: 'completed', content }) }])
+        .failed,
+      false,
+    )
+  }
+  assert.equal(
+    detectGhFailureInEvents([
+      { kind: 'tool_result', payload: JSON.stringify({ status: 'failed', content }) },
+    ]).failed,
+    true,
+  )
+  assert.equal(detectGhFailureInEvents([{ kind: 'tool_result', payload: '{}' }]).failed, false)
 })

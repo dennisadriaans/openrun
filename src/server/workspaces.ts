@@ -1,6 +1,6 @@
 /** Project checkouts and legacy workspace compatibility metadata.
  * New automation execution directories belong to runs (runEnvironment.ts).
- * Never discover ownership from a Git worktree name or import the inventory.
+ * Git's inventory discovers external worktrees, while `kind` records ownership.
  */
 import { spawnSync } from 'node:child_process'
 import { runCommand } from './command.ts'
@@ -126,6 +126,10 @@ export function reconcileWorkspaces(projectId?: string): void {
     `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
      VALUES (@id, @projectId, 'main checkout', @branch, @path, 'main', 'ready', '', NULL, '', '', 0, @baseCommit, @createdAt, NULL)`,
   )
+  const insertExternal = db.prepare(
+    `INSERT INTO workspaces (id, projectId, name, branch, path, kind, status, setupLog, setupExitCode, blockedKind, blockedReason, blockedAt, baseCommit, createdAt, archivedAt)
+     VALUES (@id, @projectId, @name, @branch, @path, 'external', 'ready', '', NULL, '', '', 0, @baseCommit, @createdAt, NULL)`,
+  )
   const refreshMain = db.prepare(
     `UPDATE workspaces
      SET branch = ?, path = ?, status = 'ready', setupLog = '', setupExitCode = NULL,
@@ -139,10 +143,18 @@ export function reconcileWorkspaces(projectId?: string): void {
     if (!inventory.ok) continue
 
     const primaryPath = canonicalPath(project.path)
+    const executionPaths = new Set(
+      (
+        db.prepare('SELECT path FROM run_environments WHERE projectId = ?').all(project.id) as {
+          path: string
+        }[]
+      ).map((row) => canonicalPath(row.path)),
+    )
     const primaryBranch = git.currentBranch(project.path)
     const registered = inventory.entries.filter(
       (entry) =>
         !entry.bare &&
+        !executionPaths.has(canonicalPath(entry.path)) &&
         canonicalPath(entry.path) !== primaryPath &&
         // Some repository layouts (notably submodules with core.worktree)
         // report the primary entry using the common Git-directory path. The
@@ -152,8 +164,23 @@ export function reconcileWorkspaces(projectId?: string): void {
     )
     const registeredPaths = new Set(registered.map((entry) => canonicalPath(entry.path)))
     const recorded = db
-      .prepare("SELECT * FROM workspaces WHERE projectId = ? AND kind = 'worktree'")
+      .prepare("SELECT * FROM workspaces WHERE projectId = ? AND kind IN ('worktree', 'external')")
       .all(project.id) as WorkspaceRow[]
+    const recordedPaths = new Set(recorded.map((workspace) => canonicalPath(workspace.path)))
+
+    for (const entry of registered) {
+      const entryPath = canonicalPath(entry.path)
+      if (recordedPaths.has(entryPath)) continue
+      insertExternal.run({
+        id: id('ws'),
+        projectId: project.id,
+        name: path.basename(entryPath),
+        branch: entry.branch || 'HEAD',
+        path: entryPath,
+        baseCommit: entry.head || git.resolveCommit(entryPath, 'HEAD'),
+        createdAt: Date.now(),
+      })
+    }
 
     // Interactive chats may deliberately share the checkout open in the
     // user's editor. Keep one stable row for it, but never treat it as an
@@ -738,8 +765,8 @@ export function archiveWorkspace(
   // The 'main' workspace is the user's own checkout, shared with their
   // editor — archiving (and removing the worktree of) it would delete work
   // the app never created and doesn't own.
-  if (workspace.kind === 'main') {
-    throw new Error('Cannot archive the main checkout — this is your own working copy')
+  if (workspace.kind === 'main' || workspace.kind === 'external') {
+    throw new Error('Cannot archive a checkout that Open Run does not own')
   }
 
   const project = getProject(workspace.projectId)
@@ -769,7 +796,7 @@ export function resolveWorkspacePath(workspaceId: string): string {
   const workspace = getWorkspace(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
   const project = getProject(workspace.projectId)
-  if (workspace.kind !== 'worktree' && workspace.kind !== 'main') {
+  if (workspace.kind !== 'worktree' && workspace.kind !== 'main' && workspace.kind !== 'external') {
     throw new Error('Unsupported workspace kind')
   }
   // Chat already refused non-ready workspaces; automations used to only check
@@ -786,7 +813,11 @@ export function resolveWorkspacePath(workspaceId: string): string {
       .run(message, workspace.id)
     throw new Error(message)
   }
-  if (workspace.kind === 'worktree' && project && git.isRepo(project.path)) {
+  if (
+    (workspace.kind === 'worktree' || workspace.kind === 'external') &&
+    project &&
+    git.isRepo(project.path)
+  ) {
     const inventory = git.inspectWorktrees(project.path)
     const registered = inventory.entries.some(
       (entry) => !entry.bare && canonicalPath(entry.path) === canonicalPath(workspace.path),

@@ -283,7 +283,7 @@ describe('AFK safety core boundaries', () => {
     )
   })
 
-  it('commits what a scheduled run left behind so the next fire is not refused', async () => {
+  it('keeps a scheduled run in its selected workspace', async () => {
     const db = getDb()
     // A runtime that actually writes a file, the way a real agent would.
     db.prepare("UPDATE runtimes SET argsTemplate = ? WHERE id = 'afk-runtime'").run(
@@ -304,30 +304,16 @@ describe('AFK safety core boundaries', () => {
     const firstId = executor.runTask(row, runtime, 'schedule')
     assert.equal(await waitForTerminal(firstId), 'success')
 
-    // The agent's file is committed on the worktree branch, not left dirty.
+    // The agent's file remains in the selected checkout for the user to review.
     const status = execFileSync('git', ['status', '--porcelain'], {
       cwd: worktree,
       encoding: 'utf8',
     }).trim()
-    assert.equal(status, '', `expected a clean worktree, got:\n${status}`)
-    const subject = execFileSync(
-      'git',
-      ['log', '-1', '--format=%s', core.getRun(firstId)!.headBranch],
-      {
-        cwd: worktree,
-        encoding: 'utf8',
-      },
-    ).trim()
-    assert.match(subject, /Nightly output \(verified\)/)
-
-    // …which is what lets the *next* scheduled fire through. Before this, the
-    // dirty tree refused it with "the workspace has uncommitted changes".
-    assert.equal(unattendedRefusal(row, runtime), null)
-    const secondId = executor.runTask(row, runtime, 'schedule')
-    assert.equal(await waitForTerminal(secondId), 'success')
+    assert.match(status, /agent-output\.txt/)
+    assert.equal(core.getRun(firstId)!.cwd, worktree)
   })
 
-  it('leaves the project checkout unchanged for every scheduled entry point', async () => {
+  it('runs scheduled entry points in the selected project checkout', async () => {
     // `upsertTask` refuses the primary checkout outright, so drive the
     // unattended path directly: the guard has to hold for any scheduled run,
     // not only the ones the task form can produce.
@@ -358,7 +344,8 @@ describe('AFK safety core boundaries', () => {
       cwd: repo,
       encoding: 'utf8',
     }).trim()
-    assert.equal(status, '')
+    assert.match(status, /main-output\.txt/)
+    assert.equal(core.getRun(runId)!.cwd, repo)
   })
 
   it('accepts a project checkout as an automation target', () => {

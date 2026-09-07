@@ -43,7 +43,7 @@ after(async () => {
 })
 
 describe('Git worktree reconciliation', () => {
-  it('keeps a stable project checkout without importing external worktrees', async () => {
+  it('keeps the primary checkout stable and registers external worktrees as user-owned', async () => {
     const project = await workspaces.addProject({ mode: 'register', path: repo })
     const [main] = workspaces.listWorkspaces(project.id)
     assert.equal(main?.kind, 'main')
@@ -66,8 +66,11 @@ describe('Git worktree reconciliation', () => {
       cwd: repo,
     })
     const imported = workspaces.listWorkspaces(project.id)
-    assert.equal(imported.length, 1)
-    assert.equal(imported[0]?.id, main!.id)
+    assert.equal(imported.length, 2)
+    const external = imported.find((workspace) => workspace.kind === 'external')
+    assert.equal(external?.path, realpathSync(manualWorktree))
+    assert.equal(external?.branch, 'feature/manual')
+    assert.throws(() => workspaces.archiveWorkspace(external!.id, true), /does not own/)
 
     execFileSync('git', ['worktree', 'remove', manualWorktree], { cwd: repo })
     assert.deepEqual(

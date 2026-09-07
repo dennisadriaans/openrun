@@ -832,16 +832,15 @@ function decorate(
     requireGhAuth: task.requireGhAuth === 1,
   })
   const unattendedOwner = workspace ? getUnattendedWorkspaceOwner(workspace.id, task.id) : undefined
-  const baseBlocked = task.resumeSessionId
-    ? 'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.'
-    : automationBaseRefusal(task.workspaceId, task.baseRef)
+  const baseBlocked = automationBaseRefusal(task.workspaceId, task.baseRef)
   const unattendedBlocked =
     baseBlocked ||
     (unattendedOwner
       ? workspaceOwnerMessage(unattendedOwner.name)
       : workspace
         ? unattendedBlockedReason({
-            freshExecution: true,
+            freshExecution: Boolean(task.webhookIntegrationId.trim()),
+            resumeSessionId: task.resumeSessionId,
             workspaceKind: workspace.kind,
             requireIsolation: task.requireIsolation === 1,
             health,
@@ -1129,6 +1128,14 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
   }
 
   const baseRef = input.baseRef?.trim() ?? existingRow?.baseRef ?? ''
+  const resumeSessionId =
+    input.resumeSessionId !== undefined
+      ? input.resumeSessionId.trim()
+      : (existingRow?.resumeSessionId ?? '')
+  const resumeSessionLabel =
+    input.resumeSessionLabel !== undefined
+      ? input.resumeSessionLabel.trim()
+      : (existingRow?.resumeSessionLabel ?? '')
   const baseRefusal = automationBaseRefusal(workspaceId, baseRef)
   if (baseRefusal) throw new Error(baseRefusal)
 
@@ -1187,19 +1194,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
       ? assertRunTimeoutMinutes(input.timeoutMinutes)
       : (existingRow?.timeoutMs ?? 0)
 
-  const resumeSessionId =
-    input.resumeSessionId !== undefined
-      ? input.resumeSessionId.trim()
-      : (existingRow?.resumeSessionId ?? '')
-  const resumeSessionLabel =
-    input.resumeSessionLabel !== undefined
-      ? input.resumeSessionLabel.trim()
-      : (existingRow?.resumeSessionLabel ?? '')
-  if (resumeSessionId)
-    throw new Error(
-      'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.',
-    )
-  const requireIsolation = 1
+  const requireIsolation = 0
   const requireGhAuth =
     input.requireGhAuth !== undefined
       ? input.requireGhAuth
@@ -1236,7 +1231,8 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     const runtime = getRuntime(input.runtimeId)
     if (checked && runtime) {
       const refused = unattendedRefusalFor({
-        task: { requireIsolation, requireGhAuth, baseRef },
+        task: { requireIsolation, requireGhAuth, baseRef, resumeSessionId },
+        trigger: webhookIntegrationId ? 'webhook' : 'schedule',
         runtime,
         workspace: checked.workspace,
         health: checked.health,
@@ -1376,6 +1372,7 @@ export function setTaskEnabled(taskId: string, enabled: boolean) {
       const refused = runtime
         ? unattendedRefusalFor({
             task,
+            trigger: task.webhookIntegrationId.trim() ? 'webhook' : 'schedule',
             runtime,
             workspace: checked.workspace,
             health: checked.health,
@@ -1622,7 +1619,7 @@ export type StartRunWorkspaceOption = {
   projectName: string
   name: string
   branch: string
-  kind: 'main' | 'worktree'
+  kind: 'main' | 'worktree' | 'external'
   status: 'creating' | 'ready' | 'error' | 'archived'
   /** Set while another run holds this worktree. */
   activeRunId: string | null
@@ -1647,7 +1644,7 @@ export function startRunOptions(): {
   runtimes: StartRunRuntimeOption[]
 } {
   const workspaces = listWorkspaces()
-    .filter((workspace) => workspace.kind === 'main' && workspace.status !== 'archived')
+    .filter((workspace) => workspace.status !== 'archived')
     .map((workspace) => {
       // Read, never repair: `decorate` documents why drawing a list must not
       // demote a row, and the same holds here.

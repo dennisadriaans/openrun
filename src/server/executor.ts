@@ -66,6 +66,7 @@ import {
   unattendedCommitFailedMessage,
   unattendedCommitMessage,
 } from '../lib/unattendedCommit.ts'
+import { resumesSavedSession, usesFreshExecution } from '../lib/executionWorkspace.ts'
 import { isMessageId } from '../lib/messageId.ts'
 import { DEFAULT_RUNTIME_MODE, parseRuntimeMode, type RuntimeMode } from '../lib/runtimeMode'
 import type { TurnEventPayload } from '../lib/turnEvents'
@@ -87,7 +88,7 @@ import { buildHandoffPrompt, handoffSystemNote, type HandoffMessage } from '../l
 import { isRuntimeSwitch, resolveSwitchMode, resolveSwitchModel } from '../lib/runtimeSwitch.ts'
 import { cachedModelsForBin } from './modelCatalog.ts'
 import { describeEffectiveTurnSettings } from '../lib/runSettingsDebug.ts'
-import { detectGhFailure } from '../lib/ghOutcome'
+import { detectGhFailure, detectGhFailureInEvents } from '../lib/ghOutcome'
 import { assertRuntimeOnPath } from './runtimePath'
 import { nativeSessionExists } from './nativeSessions'
 import { importNativeTranscript } from './nativeImport'
@@ -116,6 +117,7 @@ import {
   type FailedCheckSummary,
   type RunVerdict,
 } from '../lib/verdict'
+import { holdWakeLock, type WakeLock } from './wakeLock'
 import {
   agentSpawnOptions,
   isPidAlive,
@@ -338,11 +340,7 @@ export function startRun(input: StartRunInput): string {
   // the old cwd-or-process.cwd() fallback untouched. Planner stores a target
   // workspaceId for install cards but does not lock or chdir into it.
   const isolated =
-    (input.isolated === true ||
-      Boolean(input.taskId) ||
-      input.trigger === 'schedule' ||
-      input.trigger === 'webhook') &&
-    input.trigger !== 'planner'
+    (input.isolated === true || usesFreshExecution(input.trigger)) && input.trigger !== 'planner'
   const lockWorkspace = input.lockWorkspace !== false && !isolated
   let cwd: string
   if (input.workspaceId && input.workspaceId.trim().length > 0 && lockWorkspace) {
@@ -361,10 +359,6 @@ export function startRun(input: StartRunInput): string {
   const kind = runtimeKind(input.runtime.bin)
   const resumeSessionId = input.resumeSessionId?.trim() ?? ''
   const resumeKind = nativeResumeKindFor(input.runtime)
-  if (isolated && resumeSessionId)
-    throw new Error(
-      'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.',
-    )
   if (resumeSessionId) {
     if (!resumeKind) {
       throw new Error(nativeResumeNotSupportedMessage())
@@ -1044,6 +1038,7 @@ function spawnTurn(input: {
 
   liveMap().set(runId, { child })
   db.prepare('UPDATE runs SET pid = ? WHERE id = ?').run(child.pid ?? null, runId)
+  const wakeLock = holdWakeLock(child.pid, timeoutMs)
 
   const appendRunStdout = db.prepare('UPDATE runs SET stdout = stdout || ? WHERE id = ?')
   const appendRunStderr = db.prepare('UPDATE runs SET stderr = stderr || ? WHERE id = ?')
@@ -1109,6 +1104,7 @@ function spawnTurn(input: {
     stallTimer = null
     if (lingerTimer) clearTimeout(lingerTimer)
     lingerTimer = null
+    wakeLock.release()
   }
 
   const kind = eventKindFor(runtimeKind(runtime.bin))
@@ -1465,7 +1461,9 @@ function spawnTurn(input: {
     // agent-opened PR flow can't look green when no PR was created.
     if (status === 'success') {
       const combined = `${row?.stdout ?? ''}\n${row?.stderr ?? ''}`
-      const gh = detectGhFailure(combined)
+      const gh = structuredEvents
+        ? detectGhFailureInEvents(listTurnEventsForMessage(assistantMsgId))
+        : detectGhFailure(combined)
       if (gh.failed) {
         const note = `\n[executor] gh/git reported a failure but the turn exited 0: ${gh.reason}\n`
         appendRunStderr.run(note, runId)
@@ -1588,6 +1586,7 @@ function spawnAcpTurn(input: {
   let stallNotes = 0
   let stallTimer: ReturnType<typeof setInterval> | null = null
   let lingerTimer: ReturnType<typeof setTimeout> | null = null
+  let wakeLock: WakeLock = { release: () => {} }
 
   const appendLog = (stream: 'stdout' | 'stderr', chunk: string) => {
     lastOutputAt = Date.now()
@@ -1779,6 +1778,7 @@ function spawnAcpTurn(input: {
         stallTimer = null
         if (lingerTimer) clearTimeout(lingerTimer)
         lingerTimer = null
+        wakeLock.release()
         persistEvents(coalescer.flush())
         for (const timer of approvalTimers.values()) clearTimeout(timer)
         approvalTimers.clear()
@@ -1813,6 +1813,7 @@ function spawnAcpTurn(input: {
 
   liveMap().set(runId, { child: handle.child, requestStop: () => handle.cancelTurn() })
   db.prepare('UPDATE runs SET pid = ? WHERE id = ?').run(handle.child.pid ?? null, runId)
+  wakeLock = holdWakeLock(handle.child.pid, timeoutMs)
   approvalsMap().set(runId, {
     answer: (rid, answer) => resolveApproval(rid, answer),
     hasPending: () => approvalTimers.size > 0,
@@ -2755,8 +2756,8 @@ export function runTask(
     model: task.model,
     effort: task.effort,
     timeoutMs: task.timeoutMs,
-    resumeSessionId: task.resumeSessionId,
-    resumeSessionLabel: task.resumeSessionLabel,
+    resumeSessionId: resumesSavedSession(trigger) ? task.resumeSessionId : '',
+    resumeSessionLabel: resumesSavedSession(trigger) ? task.resumeSessionLabel : '',
     ...(source ? { source } : {}),
   })
 }
