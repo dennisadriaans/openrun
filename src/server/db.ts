@@ -395,7 +395,7 @@ export type WorkspaceRow = {
   /** Absolute path to the worktree (or the repo root itself when kind='main'). */
   path: string
   /** 'main' = the project's primary checkout (registered projects only); 'worktree' = an app-managed worktree. */
-  kind: 'main' | 'worktree'
+  kind: 'main' | 'worktree' | 'external'
   status: 'creating' | 'ready' | 'error' | 'archived'
   setupLog: string
   setupExitCode: number | null

@@ -7,10 +7,9 @@
  * are what separate an AFK-safe automation from one that merely started on
  * time:
  *
- * 1. **Isolation** — unattended coding happens in an app-managed worktree on
- *    its own branch, never in the checkout the user's editor is sitting in.
- *    Sharing that checkout is what lets one automation's branch switch and
- *    broken build leak into every later automation.
+ * 1. **Serialization** — scheduled runs reuse their selected checkout and the
+ *    workspace queue keeps one writer there at a time. Webhooks receive a
+ *    fresh execution worktree.
  * 2. **Health** — the worktree must physically exist, be the right worktree,
  *    be on its configured branch, and be clean (see `workspaceHealth.ts`).
  * 3. **Capability preflight** — an automation that is going to reach for
@@ -26,6 +25,7 @@ import { workspaceHealthBlockedReason, type WorkspaceHealth } from './workspaceH
 export type UnattendedGateInput = {
   /** The executor creates a fresh checkout from a resolved commit. */
   freshExecution?: boolean
+  resumeSessionId?: string
   /** 'main' is the user's own checkout; 'worktree' is app-managed and disposable. */
   workspaceKind: string
   /** Task opt-out. False lets an automation deliberately run in the main checkout. */
@@ -38,7 +38,7 @@ export type UnattendedGateInput = {
   ghAuthenticated: boolean
 }
 
-/** Developer-facing error when an unattended run targets the shared checkout. */
+/** Legacy wording retained for old clients that may still display the action. */
 export function sharedCheckoutMessage(): string {
   return "Unattended runs are not allowed in the main checkout — it is shared with your editor and with every other automation, so one run's branch switch and leftover edits become the next run's starting point. Give this automation its own worktree, or turn off workspace isolation for it."
 }
@@ -66,13 +66,16 @@ export function requiresGhAuth(input: { canOpenPrs: boolean; requireGhAuth: bool
 
 /**
  * Reason an unattended fire would be unsafe, or `null` when it may proceed.
- * Isolation first: a shared checkout makes every other signal untrustworthy.
+ * Webhook isolation is represented by `freshExecution`; scheduled runs are
+ * serialized by the workspace queue before reaching this gate.
  */
 export function unattendedBlockedReason(input: UnattendedGateInput): string | null {
-  if (!input.freshExecution && input.requireIsolation && input.workspaceKind === 'main') {
-    return sharedCheckoutMessage()
-  }
-  const health = workspaceHealthBlockedReason(input.health, { unattended: !input.freshExecution })
+  const continuing = !input.freshExecution && Boolean(input.resumeSessionId?.trim())
+  const inspected =
+    continuing && input.health && ['dirty', 'branch-drift', 'detached'].includes(input.health.code)
+      ? { ...input.health, code: 'ok' as const }
+      : input.health
+  const health = workspaceHealthBlockedReason(inspected, { unattended: !input.freshExecution })
   if (health) return health
   if (input.requiresGh && !(input.ghInstalled && input.ghAuthenticated)) {
     return ghPreflightMessage(input.ghInstalled)

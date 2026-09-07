@@ -7,10 +7,11 @@
  * `changelog.d/05-github-tool-calls-spike.md`; core behavior in
  * `changelog.d/05-github-tool-calls-core.md`.
  *
- * This is a best-effort, browser-safe string scan over combined stdout+stderr.
- * It only matches phrases `gh`/`git` emit on real failures, so a passing run
- * that merely mentions "gh auth login" in prose is unlikely to trip it.
+ * Structured transcripts scan failed tool results only. Combined stdout and
+ * stderr remain a best-effort fallback for runtimes without structured events.
  */
+
+import type { TurnEventRow } from './turnEvents.ts'
 
 export type GhFailure = {
   failed: boolean
@@ -23,7 +24,7 @@ const SIGNATURES: Array<{ pattern: RegExp; reason: string }> = [
     reason: 'gh is not authenticated (run: gh auth login)',
   },
   {
-    pattern: /gh auth login|To authenticate, please run/i,
+    pattern: /To authenticate, please run/i,
     reason: 'gh asked the user to authenticate (gh auth login)',
   },
   {
@@ -44,6 +45,24 @@ export function detectGhFailure(text: string): GhFailure {
   if (!text) return { failed: false }
   for (const { pattern, reason } of SIGNATURES) {
     if (pattern.test(text)) return { failed: true, reason }
+  }
+  return { failed: false }
+}
+
+/** Inspect failed commands only; source files and old logs are not outcomes. */
+export function detectGhFailureInEvents(
+  events: Pick<TurnEventRow, 'kind' | 'payload'>[],
+): GhFailure {
+  for (const event of events) {
+    if (event.kind !== 'tool_result') continue
+    try {
+      const payload = JSON.parse(event.payload)
+      if (payload.status !== 'failed') continue
+      const failure = detectGhFailure(payload.content ?? payload.result ?? '')
+      if (failure.failed) return failure
+    } catch {
+      // Historical or malformed payloads do not establish a command failure.
+    }
   }
   return { failed: false }
 }

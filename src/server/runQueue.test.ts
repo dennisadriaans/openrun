@@ -170,8 +170,7 @@ describe('server pending-run queue', () => {
       .get() as { cwd: string; workspaceId: string; trigger: string } | undefined
     assert.equal(run?.workspaceId, 'workspace-new')
     assert.equal(run?.trigger, 'schedule')
-    assert.notEqual(run?.cwd, newRepo)
-    assert.match(run!.cwd, /executions\/run_/)
+    assert.equal(run?.cwd, newRepo)
 
     const deadline = Date.now() + 2000
     while (Date.now() < deadline) {

@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 import {
   canRunUnattended,
   requiresGhAuth,
-  sharedCheckoutMessage,
   unattendedBlockedReason,
   workspaceOwnerMessage,
   type UnattendedGateInput,
@@ -32,27 +31,42 @@ function input(over: Partial<UnattendedGateInput> = {}): UnattendedGateInput {
 }
 
 describe('unattendedGate', () => {
+  it('a saved conversation may retain edits but cannot bypass quarantine or a missing directory', () => {
+    for (const code of ['dirty', 'branch-drift', 'detached'] as const) {
+      assert.equal(
+        unattendedBlockedReason(input({ resumeSessionId: 'saved', health: { ...healthy, code } })),
+        null,
+      )
+    }
+    for (const code of ['blocked', 'missing', 'not-a-worktree'] as const) {
+      assert.ok(
+        unattendedBlockedReason(input({ resumeSessionId: 'saved', health: { ...healthy, code } })),
+      )
+    }
+  })
   it('a clean isolated worktree may fire', () => {
     assert.equal(unattendedBlockedReason(input()), null)
     assert.equal(canRunUnattended(input()), true)
   })
 
-  it('the shared main checkout is refused, and named as the reason', () => {
-    assert.equal(unattendedBlockedReason(input({ workspaceKind: 'main' })), sharedCheckoutMessage())
+  it('a scheduled run may use the shared main checkout', () => {
+    assert.equal(unattendedBlockedReason(input({ workspaceKind: 'main' })), null)
   })
 
-  it('isolation is an opt-out, not a law', () => {
-    assert.equal(
-      unattendedBlockedReason(input({ workspaceKind: 'main', requireIsolation: false })),
-      null,
-    )
-  })
-
-  it('isolation outranks health — a shared checkout makes health meaningless', () => {
+  it('a dirty shared checkout is refused for a scheduled run', () => {
     const reason = unattendedBlockedReason(
       input({ workspaceKind: 'main', health: { ...healthy, code: 'dirty', dirty: true } }),
     )
-    assert.equal(reason, sharedCheckoutMessage())
+    assert.match(reason ?? '', /uncommitted changes/i)
+  })
+
+  it('a webhook execution ignores source-checkout contamination', () => {
+    assert.equal(
+      unattendedBlockedReason(
+        input({ freshExecution: true, health: { ...healthy, code: 'dirty', dirty: true } }),
+      ),
+      null,
+    )
   })
 
   it('a contaminated worktree is refused even when isolated', () => {

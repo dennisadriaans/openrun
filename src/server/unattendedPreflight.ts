@@ -11,6 +11,7 @@
  * the lookups those rules need.
  */
 import { automationBaseRefusal } from './runEnvironment.ts'
+import { usesFreshExecution } from '../lib/executionWorkspace.ts'
 import {
   requiresGhAuth,
   unattendedBlockedReason,
@@ -43,7 +44,9 @@ export function unattendedVerificationRefusal(input: {
 }
 
 /** The two automation columns the AFK rules read. */
-export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth' | 'baseRef'>
+export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth' | 'baseRef'> & {
+  resumeSessionId?: string
+}
 
 /** Reason an unattended fire is unsafe, given an already-inspected workspace. */
 export function unattendedRefusalFor(input: {
@@ -51,15 +54,20 @@ export function unattendedRefusalFor(input: {
   runtime: RuntimeRow
   workspace: WorkspaceRow
   health: WorkspaceHealth
+  trigger?: 'schedule' | 'webhook'
 }): string | null {
-  const baseRefusal = automationBaseRefusal(input.workspace.id, input.task.baseRef)
-  if (baseRefusal) return baseRefusal
+  const webhook = usesFreshExecution(input.trigger ?? 'schedule')
+  if (webhook) {
+    const baseRefusal = automationBaseRefusal(input.workspace.id, input.task.baseRef)
+    if (baseRefusal) return baseRefusal
+  }
   const gh = ghStatus()
   return unattendedBlockedReason({
-    freshExecution: true,
+    freshExecution: webhook,
     workspaceKind: input.workspace.kind,
     requireIsolation: input.task.requireIsolation === 1,
     health: input.health,
+    resumeSessionId: input.task.resumeSessionId,
     requiresGh: requiresGhAuth({
       canOpenPrs: input.runtime.canOpenPrs === 1,
       requireGhAuth: input.task.requireGhAuth === 1,
@@ -74,9 +82,11 @@ export function unattendedRefusalFor(input: {
  * callers that do not already hold a health result. Returns the reason to
  * refuse, or `null` to proceed.
  */
-export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | null {
-  if (task.resumeSessionId?.trim())
-    return 'Automations start a fresh conversation in an isolated checkout. Clear the saved chat before running.'
+export function unattendedRefusal(
+  task: TaskRow,
+  runtime: RuntimeRow,
+  trigger: 'schedule' | 'webhook' = 'schedule',
+): string | null {
   if (!hasWorkspaceId(task.workspaceId)) return `Task ${task.id} has no workspace`
   const verificationRefusal = unattendedVerificationRefusal({
     workspaceId: task.workspaceId,
@@ -89,7 +99,7 @@ export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | 
   if (!checkRuntimeInstalled(runtime.bin).installed) return 'Automation runtime is not on PATH.'
   if (!hasTaskPrompt(task.prompt)) return 'Automation has empty agent instructions.'
 
-  const sessionId = task.resumeSessionId.trim()
+  const sessionId = usesFreshExecution(trigger) ? '' : task.resumeSessionId.trim()
   if (sessionId) {
     const kind = nativeResumeKindFor(runtime)
     if (!kind) return 'The selected runtime does not support resuming a conversation.'
@@ -106,5 +116,6 @@ export function unattendedRefusal(task: TaskRow, runtime: RuntimeRow): string | 
     runtime,
     workspace: checked.workspace,
     health: checked.health,
+    trigger,
   })
 }

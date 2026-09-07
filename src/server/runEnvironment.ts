@@ -85,7 +85,12 @@ export function getRunEnvironment(runId: string): RunEnvironment | undefined {
     | undefined
 }
 
-export function automationBase(workspaceId: string, requested?: string) {
+function projectForWorkspace(workspaceId: string): {
+  id: string
+  path: string
+  defaultBranch: string
+  setupCommand: string
+} {
   const project = getDb()
     .prepare(`SELECT p.* FROM projects p JOIN workspaces w ON w.projectId = p.id WHERE w.id = ?`)
     .get(workspaceId) as
@@ -94,6 +99,11 @@ export function automationBase(workspaceId: string, requested?: string) {
   if (!project || !existsSync(project.path) || !git.isRepo(project.path)) {
     throw new Error('The project repository is unavailable. Check its folder in Projects.')
   }
+  return project
+}
+
+export function automationBase(workspaceId: string, requested?: string) {
+  const project = projectForWorkspace(workspaceId)
   const baseRef = requested?.trim() || project.defaultBranch
   if (!baseRef || baseRef.startsWith('-') || baseRef.includes('\0'))
     throw new Error('Choose a valid automation base branch or revision.')

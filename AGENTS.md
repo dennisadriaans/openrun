@@ -193,7 +193,7 @@ Neither hook may open an `EventSource` of its own.
 | An Apple client (iOS, macOS) | `clients/apple/OpenRunKit/` — `Generated.swift` is generated, everything else is hand-written |
 | Run/turn lifecycle, spawning a CLI, streaming stdout | `server/executor.ts` |
 | Per-CLI differences: headless invocation, session id, resume, model/effort flags | `server/resume.ts`, `lib/models.ts` |
-| Adopting a chat started in the CLI itself | `lib/nativeSessions.ts` + `server/nativeSessions.ts` (find them), `lib/nativeTranscript.ts` + `server/nativeTranscript.ts` (read one in full), `server/nativeImport.ts` (write it into a run), `executor.adoptNativeChat` (adopt without prompting); picker in `components/NativeSessionMenu.tsx` |
+| Adopting a chat started in the CLI itself | `lib/nativeSessions.ts` + `server/nativeSessions.ts` (find them), `lib/nativeTranscript.ts` + `server/nativeTranscript.ts` (read one in full), `server/nativeImport.ts` (write it into a run), `executor.adoptNativeChat` (adopt without prompting); picker in `components/ComposerControls.tsx`. Automations resume saved chats in their existing workspace. |
 | Continuing a chat on another runtime (Claude ⇄ Codex handoff) | `lib/runtimeSwitch.ts` (the rules), `lib/handoffPrompt.ts` (what the new agent is told), `executor.sendFollowUp` (the switch); picker + one-time note in `components/Chat.tsx` |
 | Which models a picker offers | `server/modelCatalog.ts` (cache + refresh), `lib/modelDiscovery.ts` (per-CLI parsers); `lib/models.ts` is only the fallback seed |
 | Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `lib/models.ts`; stored as `hiddenModels` in `lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |
@@ -206,7 +206,7 @@ Neither hook may open an `EventSource` of its own.
 | AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
 | Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts` |
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
-| Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; `/runs/new` offers the primary checkout only for interactive chats, while automations remain worktree-only |
+| Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; externally-created Git worktrees are registered as user-owned workspaces and are never reset or removed by Open Run. |
 | Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `lib/workspaceHealth.ts` (the codes + wording), `server/workspaceHealth.ts` (inspection, quarantine, restore) |
 | Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `lib/unattendedGate.ts` (the rules), `server/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
 | Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |

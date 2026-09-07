@@ -18,10 +18,9 @@ export function WorkspacePicker({
   const [managing, setManaging] = useState(false)
   useEffect(() => {
     if (!projectId || !workspaces) return
-    const main = workspaces.find(
-      (w) => w.projectId === projectId && w.kind === 'main' && w.status === 'ready',
-    )
-    if (main && workspaceId !== main.id) onChange({ projectId, workspaceId: main.id })
+    if (workspaces.some((workspace) => workspace.id === workspaceId)) return
+    const selected = workspaces.find((w) => w.projectId === projectId && w.status === 'ready')
+    if (selected) onChange({ projectId, workspaceId: selected.id })
   }, [projectId, workspaceId, workspaces, onChange])
   return (
     <div>
@@ -40,7 +39,7 @@ export function WorkspacePicker({
         </select>
       </Field>
       <p className="mt-2 text-ui-sm text-tier-tertiary">
-        Automations get a clean checkout for each run, based on the project's default branch.
+        Scheduled runs use this checkout. Webhook deliveries get a fresh worktree from the base.
       </p>
       <button
         type="button"

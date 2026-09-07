@@ -19,7 +19,12 @@ import { useClickOutside } from '../hooks/useClickOutside'
 import { createPortal } from 'react-dom'
 import { toast } from './toast'
 import { invalidCronMessage, isValidCron } from '../lib/cron'
-import { nativeResumeKindFor } from '../lib/nativeSessions'
+import {
+  nativeResumeKindFor,
+  NATIVE_RESUME_DEFAULT_PROMPT,
+  type NativeSession,
+  type NativeSessionGroup,
+} from '../lib/nativeSessions'
 import { DEFAULT_RUN_TIMEOUT_MS } from '../lib/runBudget'
 import { MAX_REPAIR_ATTEMPTS } from '../lib/verdict'
 import {
@@ -41,6 +46,7 @@ import {
   useProjectBranches,
   usePlugins,
   useSlashCommands,
+  useNativeSessions,
 } from '../lib/queries'
 import {
   applyPluginMention,
@@ -968,6 +974,7 @@ export function TaskForm({
   const { data: allWorkspaces } = useWorkspaces()
   const { data: projectWorkspaces } = useWorkspaces(projectId || undefined)
   const { data: gitBranches } = useProjectBranches(projectId || undefined)
+  const nativeQuery = useNativeSessions({ allWorkspaces: true }, { enabled: true })
 
   useEffect(() => {
     if (!v.workspaceId || projectId) return
@@ -1087,6 +1094,25 @@ export function TaskForm({
     })
     remember({ runtimeId: id })
   }
+  const pickNativeSession = (session: NativeSession, group: NativeSessionGroup) => {
+    seededRuntimeRef.current = null
+    setDirty(true)
+    setNativeError(null)
+    if (session.projectId) setProjectId(session.projectId)
+    setV((prev) => ({
+      ...prev,
+      workspaceId: session.workspaceId ?? prev.workspaceId,
+      runtimeId: group.runtimeId,
+      resumeSessionId: session.sessionId,
+      resumeSessionLabel: session.title,
+      prompt: prev.prompt.trim() ? prev.prompt : NATIVE_RESUME_DEFAULT_PROMPT,
+    }))
+    remember({ runtimeId: group.runtimeId })
+  }
+  const clearResume = () => {
+    set('resumeSessionId', '')
+    set('resumeSessionLabel', '')
+  }
   const changeModel = (slug: string) => {
     setDirty(true)
     setModel(slug)
@@ -1119,6 +1145,18 @@ export function TaskForm({
     promptRef.current?.focus()
   }
 
+  const runtimeSessions = v.workspaceId
+    ? {
+        workspaceId: v.workspaceId,
+        groups: nativeQuery.data?.groups ?? [],
+        resumeSessionId: v.resumeSessionId ?? '',
+        resumeSessionLabel: v.resumeSessionLabel ?? '',
+        onOpen: () => void nativeQuery.refetch(),
+        onSelectNew: clearResume,
+        onSelect: pickNativeSession,
+      }
+    : undefined
+
   const selectProject = (pid: string) => {
     setProjectId(pid)
     set('baseRef', '')
@@ -1127,18 +1165,14 @@ export function TaskForm({
       set('workspaceId', '')
       return
     }
-    const eligible = (allWorkspaces ?? []).filter(
-      (workspace) => workspace.projectId === pid && workspace.kind === 'main',
-    )
+    const eligible = (allWorkspaces ?? []).filter((workspace) => workspace.projectId === pid)
     set('workspaceId', pickDefaultWorkspace(eligible)?.id ?? '')
   }
 
   const selectedProject = projects?.find((project) => project.id === projectId)
   useEffect(() => {
     if (!projectId || v.workspaceId) return
-    const picked = pickDefaultWorkspace(
-      (projectWorkspaces ?? []).filter((workspace) => workspace.kind === 'main'),
-    )
+    const picked = pickDefaultWorkspace(projectWorkspaces ?? [])
     if (picked) {
       setV((prev) => ({ ...prev, workspaceId: picked.id }))
     }
@@ -1225,7 +1259,9 @@ export function TaskForm({
   const workspaceChanged = Boolean(
     initial?.id && v.workspaceId && v.workspaceId !== initial.workspaceId,
   )
-  const selectedBranch = v.baseRef || selectedProject?.defaultBranch
+  const selectedBranch = v.webhookIntegrationId
+    ? v.baseRef || selectedProject?.defaultBranch
+    : selectedWorkspace?.branch
   // Checks live on the project, so how many exist depends on which repository
   // the automation targets — worth saying out loud here, because with none the
   // "verified" outcome is unreachable no matter what this form is set to.
@@ -1314,18 +1350,40 @@ export function TaskForm({
             |
           </span>
 
-          <BaseRefPicker
-            branches={gitBranches ?? []}
-            value={v.baseRef ?? ''}
-            disabled={!projectId || Boolean(workspaceChangeBlockedReason)}
-            {...(workspaceChangeBlockedReason
-              ? { disabledReason: workspaceChangeBlockedReason }
-              : {})}
-            {...(selectedProject?.defaultBranch
-              ? { defaultBranch: selectedProject.defaultBranch }
-              : {})}
-            onChange={(ref) => set('baseRef', ref)}
-          />
+          {v.webhookIntegrationId ? (
+            <BaseRefPicker
+              branches={gitBranches ?? []}
+              value={v.baseRef ?? ''}
+              disabled={!projectId || Boolean(workspaceChangeBlockedReason)}
+              {...(workspaceChangeBlockedReason
+                ? { disabledReason: workspaceChangeBlockedReason }
+                : {})}
+              {...(selectedProject?.defaultBranch
+                ? { defaultBranch: selectedProject.defaultBranch }
+                : {})}
+              onChange={(ref) => set('baseRef', ref)}
+            />
+          ) : (
+            <select
+              aria-label="Workspace"
+              className={inputClass}
+              value={v.workspaceId}
+              disabled={!projectId || Boolean(workspaceChangeBlockedReason)}
+              onChange={(event) => {
+                set('workspaceId', event.target.value)
+                clearResume()
+              }}
+            >
+              <option value="">Choose a workspace…</option>
+              {(projectWorkspaces ?? [])
+                .filter((workspace) => workspace.status !== 'archived')
+                .map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name} · {workspace.branch}
+                  </option>
+                ))}
+            </select>
+          )}
         </div>
         {nativeError ? <p className="mt-2 text-[12px] text-rose-300">{nativeError}</p> : null}
         {workspaceError ? (
@@ -1338,15 +1396,8 @@ export function TaskForm({
           </p>
         ) : null}
         {v.resumeSessionId ? (
-          <button
-            type="button"
-            className="mt-2 text-ui-sm text-warn"
-            onClick={() => {
-              set('resumeSessionId', '')
-              set('resumeSessionLabel', '')
-            }}
-          >
-            Clear saved chat to use isolated runs
+          <button type="button" className="mt-2 text-ui-sm text-warn" onClick={clearResume}>
+            Use a new conversation
           </button>
         ) : null}
       </header>
@@ -1463,24 +1514,16 @@ export function TaskForm({
                     onChange={changeEffort}
                   />
                 </>
-              ) : runtimes && runtimes.length > 0 ? (
-                <RuntimePicker
-                  runtimes={runtimes}
-                  runtimeId={v.runtimeId}
-                  align="start"
-                  initiallyOpen={demoPreview}
-                  keepOpen={demoPreview}
-                  onChange={changeRuntimeId}
-                />
               ) : null}
-              {runtimes && runtimes.length > 1 && models.length > 0 ? (
-                <div className="ml-auto">
+              {runtimes && runtimes.length > 0 ? (
+                <div className={models.length > 0 ? 'ml-auto' : undefined}>
                   <RuntimePicker
                     runtimes={runtimes}
                     runtimeId={v.runtimeId}
-                    align="end"
+                    align={models.length > 0 ? 'end' : 'start'}
                     initiallyOpen={demoPreview}
                     keepOpen={demoPreview}
+                    {...(runtimeSessions ? { sessions: runtimeSessions } : {})}
                     onChange={changeRuntimeId}
                   />
                 </div>
@@ -1825,7 +1868,8 @@ function VerificationSection({
 
       <div className="border-t border-[var(--border-quaternary)] pt-3">
         <p className="text-ui-sm text-tier-tertiary">
-          Every automation run is isolated from your project checkout and other runs.
+          Scheduled and manual runs continue in the selected workspace. Webhook deliveries start
+          from the configured base in a fresh worktree.
         </p>
 
         <label className="mt-3 flex cursor-pointer items-center gap-2">
