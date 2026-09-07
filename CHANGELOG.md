@@ -6,6 +6,155 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## v0.2.0 — 2026-09-07
+
+- You no longer pick an access mode before a chat. The composer, the New chat dialog, and `/mode` are gone — every run the app starts now runs with full access, so nothing pauses waiting for an approval you have to answer.
+- Adding a project, preparing a worktree, pushing a branch and opening a pull request no longer freeze the whole app while they run. They used to block the server outright — a `pnpm install` in a fresh worktree stalled every other page and dropped every live stream — and a command that hung waited forever. Each now runs in the background with a time limit, and says so if it runs out.
+- You no longer type an automation's base branch into a plain text field. The form now offers the same searchable branch menu as the composer, and you can pick a tag or commit when it is not listed.
+
+  - Workspace readiness no longer sits above the automation steps. It collapses below them, opens automatically when something blocks a run, and shows a one-line summary when folded.
+- You can now open the featured automation in demo mode, change its configuration interactively, and apply those changes to the page-local preview without saving or running anything.
+- The automation form no longer shows a Cancel button at the top; use the Automations breadcrumb to leave without saving.
+
+  - Workspace readiness now sits on the same row as the verification toggle when everything is saved, and the ready state is a compact icon instead of a full label.
+- Saving an automation against your main checkout no longer warns you and then fails on save. The Save button is disabled with the reason it would have thrown: automations need an isolated worktree.
+- The Automations list no longer loads every run's turn events just to draw the in-progress dot. It asks for the live task ids and nothing else.
+- You no longer see distracting conversation content through the composer area while writing a follow-up.
+- You no longer have to scan mismatched composer strips when a run has queued messages, changed files, or pull-request controls — they now stack with consistent spacing, borders, labels, and actions across chat and run views.
+- Diffs for a run file no longer follow a path out of the workspace. An untracked-file compare that used `git diff --no-index` could previously be pointed at any file the OS user can read.
+- A second Open Run client no longer means writing the API out a second time. Every capability is now described once, in one list, and the server functions the web app calls, a versioned `/api/v1` surface any client can reach, an OpenAPI document and a Swift package for the iOS and macOS apps are all built from that one description. They used to be separate hand-written surfaces that could disagree with each other, and only the web one was ever complete. - Buttons that are disabled now explain themselves to every client, not just the web one. The rules that decide whether you can run an automation or arm its schedule already lived in one place; their answers now travel with the automation itself, so a phone or a Mac shows the same reason the browser does instead of guessing or staying silent.
+- You no longer need to leave a run to use its checkout: the workspace now includes an interactive terminal for switching branches and running commands, with clean resize and close controls.
+- Antigravity (`agy`) runs no longer finish with an empty response and no visible tool calls — `agy` streams its own `init`/`step_update`/`result` envelopes rather than Claude Code's, so Open Run reads them with a dedicated adapter and the transcript shows the agent's prose, its tool calls and their failures. - An Antigravity answer no longer appears twice, or arrives split across blank lines — its streamed text chunks are joined into one reply instead of being repeated by the closing result.
+- Antigravity (`agy`) runs no longer die with a usage dump reading `flags provided but not defined: -verbose -include-partial-messages` — those flags are Claude Code's, and Open Run stopped adding them to a CLI that shares Claude's output format but not its flag set.
+- Antigravity (`agy`) runs no longer fail immediately with `-p took "--output-format" as its prompt` — the CLI takes the prompt on argv, so Open Run now puts output-format and permission flags before `-p` and passes the prompt as its argument instead of on stdin.
+- Clone URLs, branch names, and worktree refs that start with `-` are refused instead of being passed to git as options.
+- Switching git worktree or clone no longer starts you from an empty app. Runs, automations, and projects live in `~/.openrun` with the rest of Open Run's machine state, so every checkout on the same account sees the same local data. A leftover `data/openrun.db` in a repo is moved there on first boot.
+- You no longer have to guess which project and branch a chat started from the home page will use. The selected workspace is shown above the composer, where you can switch projects or branches before sending the first message.
+- Connecting an integration no longer drops you into an empty automation form. The provider page now finishes the job: pick a starting point — implement flagged tickets, start work when something moves to In Progress, triage new tickets, or act on a comment — pick a workspace and runtime, and the trigger, prompt and name are filled in. The Create button explains what is missing instead of failing after the click.
+- You no longer need the legacy `agentops://` pairing scheme or `AGENTOPS_APNS_*` names: iOS pairing accepts validated `openrun://pair` URLs and APNs also reads `OPENRUN_APNS_*` settings.
+- Jira automations no longer offer worklog triggers that could never fire. Atlassian refuses to register them for a hosted connection, so an automation bound to one looked armed and silently never ran.
+- A message that the server refuses no longer vanishes from the composer. When a send fails — the workspace directory is gone, the branch already has a run — the text and any attached images come back in the box, so you can fix the cause and press send again instead of retyping what you just wrote. - The branch picker no longer keeps offering a branch whose directory Open Run just discovered was deleted. The refusal that demotes the branch now refreshes the list too, so the next attempt does not fail the same way.
+- Linear comment automations now work. A comment delivery carries the issue one level down, which Open Run read as the issue itself — so comment automations received a blank ticket and no comment text, and the "act on a comment" starting point was withheld from Linear entirely.
+- A recurring automation that came due while Open Run was not running no longer vanishes without a trace. On start-up Open Run counts what it missed: a fire from the last fifteen minutes is run, and anything older is recorded as a visible missed fire on the automation instead of quietly waiting for tomorrow.
+- The mobile companion no longer works only against a development server. `pnpm start` now binds so a paired phone can reach `/api/mobile/**`, and an access token no longer locks the phone out of the app it was paired with — the device's own scoped token is what answers there. Everything else still refuses callers from other machines outright.
+- Your phone is no longer stuck waiting for work someone else started. A paired phone can now open a new run against any worktree the desktop already has, picking the runtime and model the same way the desktop composer does, so an idea away from the keyboard does not have to keep until you are back at it. Workspaces that are busy, quarantined or missing, and runtimes that are not on PATH, are greyed out with the reason the server would have thrown rather than failing after the tap. - Starting a run is a new permission, so a phone paired before this release keeps exactly what it was paired with. Devices shows which ones those are and what pairing them again would add.
+- Creating a pull request from a run no longer means writing the title and body yourself, then remembering to commit and push first. One click now hands the diff to the run's own runtime and model, which groups it into Conventional Commits by feature; the branch is committed, pushed, and the pull request is opened for you. The old title/description dialog is still there as "Write the pull request myself".
+- A pull request whose CI has gone red is no longer a dead end. The run that opened it now offers "Fix failing checks", which hands the failing check names back to the agent as a repair turn — the same loop the local checks panel already had, sourced from the pull request instead of the worktree.
+- You no longer open the model picker on models your account cannot run. Claude Code ships its whole model registry in the binary, so families you have no access to were listed alongside the ones you use. Every picker now opens on the three models starting from the one the CLI itself defaults to, and a new chat preselects that model instead of one above it. The rest — older generations included — are one click away behind the menu's "hidden" toggle, and models you had already hidden or unhidden yourself are untouched.
+- A scheduled automation that is refused before it starts — a dirty worktree, a logged-out `gh`, a runtime that left your PATH — no longer fails in silence. Your notifiers hear about it the first time it happens and again when the reason changes, instead of only ever hearing about runs that got as far as starting.
+- You no longer need to publish a prepared release manually after its automated pull request merges, or find a green publish job that skipped a squash commit carrying its pull request number.
+- You no longer get a failed release because GitHub Actions lacked the identity required to create its annotated tag.
+- The run header no longer shows a context-window meter for any runtime.
+- You no longer see Gemini CLI or Gemini CLI (ACP) in the built-in runtime list. Automations that used them fall back to Claude Code on the next boot.
+- You no longer receive selectively reconstructed pull-request changes in place of the original reviewed changes.
+- Open Run no longer serves its pages without a content policy. Every response now carries a Content-Security-Policy, `nosniff`, `no-referrer` and `X-Frame-Options`, so a missed escape in the transcript — assistant prose, command output, a pull request title — cannot reach another host with your code or frame the app.
+- Open Run's server functions no longer trust whatever JSON arrives. Their validators were type annotations, which vanish at build time, so a handler that resolves a working directory or writes a workspace file could be handed a value of any shape. Every one now checks its payload's types at runtime and rejects prototype-polluting fields.
+- You no longer get a second automatic release later on Monday, or a release pipeline that cannot recover after creating only its branch, pull request, tag, or GitHub Release.
+- Opening Open Run no longer drops you on the automations list. The home screen is now a start page: the same composer the run detail uses, the project and branch pickers, and the resume dropdown that lists the chats each CLI already has in that branch — so a message, a resumed Claude or Codex session, and a scheduled automation all begin in one place. Six automation shortcuts (review open pull requests, fix failing checks, update dependencies, triage new issues, cover untested logic, refresh the docs) open the automation form already filled in and switched off, ready to review.
+- A run whose work landed inside a git submodule no longer shows nothing to review. The changed-files strip, the right panel and the diff viewer used to report the submodule as a single entry with no line counts and no diff, so the chat showed edits you could not open. They now list the files that actually changed inside it. Undoing a submodule file is refused with a reason rather than silently doing nothing.
+- "Send test event" no longer reports "0 automations matched" against a working connection. It sends the event your automations actually watch — comment, status change, label — with an issue that satisfies their filters, and names the event it sent.
+- You no longer have to return to run history to move between conversations or discover which background chat finished: the run header opens chats in the current worktree, and search reaches sibling worktrees and other projects. The project crumb reuses the same repository picker as a new chat, and jumps to that project's latest run.
+- A recurring automation no longer runs once and then refuses every later fire with "the workspace has uncommitted changes". A scheduled or webhook run now commits what it left in its own worktree, so the next fire starts from a clean tree. Undo still reverses it from the run, and your primary checkout is never committed to.
+- You no longer see pasted Markdown tables, code fences, and emphasis as raw punctuation after submitting a message. Your prompts now render as Markdown in the conversation.
+- You no longer lose unsaved file edits when the browser refreshes workspace data or when an earlier save finishes. Saving also refreshes the workspace diff.
+
+  You no longer need to reload when a live connection stalls before opening, and continuous activity no longer postpones list updates indefinitely.
+
+  You no longer install unused React devtools and the standalone router CLI. Setup now specifies Node 22.12+, route generation uses the same Vite build as CI, and development flags work after pnpm's `--` separator.
+- You no longer have to read a change through a three-line keyhole. The diff viewer used to show only the hunks git emits, so a one-line edit arrived with no sense of the function it sits in. Each file card now has a toggle that expands the diff to the whole file with the changes marked in place, and the toolbar toggles every file at once. Per-hunk Undo steps aside while a file is expanded, since there is only one hunk to undo there — Undo file still works.
+- Automations now target a project and optional base revision instead of a persistent workspace. Every invocation gets a separate execution directory pinned to its resolved base commit; results remain reviewable after safe cleanup and are restored for follow-ups.
+
+  You can now start an interactive chat on the primary checkout when you want Open Run to work alongside your editor, including its current branch and uncommitted changes.
+
+  You can now open a saved Codex chat with its existing conversation already visible instead of waiting for the next message to populate the run.
+
+  You can now open saved Grok and Antigravity chats with their existing history, and plain pull-request mentions such as `PR #41` link to that project's GitHub pull request.
+
+  Saved CLI chats now import every available turn without a history cap, keep all assistant commentary visible, and preserve text-based tool output from each CLI.
+- You no longer lose the changed-files strip above the composer, or the diff overlay's file list, when the right panel is closed. Those surfaces now load workspace changes on every run view, not only when the panel is open.
+
+### 🚀 Features
+
+- **terminal:** add interactive workspace shell ([#125](https://github.com/dennisadriaans/openrun/pull/125))
+- **tasks:** add base ref picker to automation form ([#122](https://github.com/dennisadriaans/openrun/pull/122))
+- **workspace:** isolate automation runs per invocation ([#120](https://github.com/dennisadriaans/openrun/pull/120))
+- **git:** ship a run as a pull request ([#116](https://github.com/dennisadriaans/openrun/pull/116))
+- **runs:** show workspace picker on start page ([#117](https://github.com/dennisadriaans/openrun/pull/117))
+- **runs:** add unified start page ([#113](https://github.com/dennisadriaans/openrun/pull/113))
+- **contract:** generate clients from one API ([#115](https://github.com/dennisadriaans/openrun/pull/115))
+- **mobile:** start a run from a paired phone ([#114](https://github.com/dennisadriaans/openrun/pull/114))
+- **integrations:** finish setup right after connecting ([#101](https://github.com/dennisadriaans/openrun/pull/101))
+- **runs:** repair a red pull request check from the run ([#106](https://github.com/dennisadriaans/openrun/pull/106))
+- **tasks:** notify when a scheduled fire is refused ([#100](https://github.com/dennisadriaans/openrun/pull/100))
+- **security:** send hardening headers on every response ([#104](https://github.com/dennisadriaans/openrun/pull/104))
+- **tasks:** make the demo automation detail interactive ([#97](https://github.com/dennisadriaans/openrun/pull/97))
+- **chat:** organize conversation navigation ([#57](https://github.com/dennisadriaans/openrun/pull/57))
+- **chat:** import native conversation history ([#56](https://github.com/dennisadriaans/openrun/pull/56))
+- **workspace:** copy branch names from picker ([#88](https://github.com/dennisadriaans/openrun/pull/88))
+- **chat:** import native conversation history ([#86](https://github.com/dennisadriaans/openrun/pull/86))
+- **chat:** finalize conversation navigation ([#84](https://github.com/dennisadriaans/openrun/pull/84))
+- **workspace:** support interactive main checkout chats ([#82](https://github.com/dennisadriaans/openrun/pull/82))
+- **mobile:** accept openrun:// pairing urls ([#49](https://github.com/dennisadriaans/openrun/pull/49))
+
+### 🩹 Fixes
+
+- **web:** preserve edits and recover live streams ([#119](https://github.com/dennisadriaans/openrun/pull/119))
+- **scheduler:** recover recurring fires missed while down ([#102](https://github.com/dennisadriaans/openrun/pull/102))
+- **security:** validate server function input at runtime ([#105](https://github.com/dennisadriaans/openrun/pull/105))
+- **mobile:** serve the mobile api from a production build ([#107](https://github.com/dennisadriaans/openrun/pull/107))
+- **tasks:** commit what an unattended run leaves behind ([#99](https://github.com/dennisadriaans/openrun/pull/99))
+- **chat:** hide transcript behind composer ([#94](https://github.com/dennisadriaans/openrun/pull/94))
+- **chat:** render markdown tables correctly ([#58](https://github.com/dennisadriaans/openrun/pull/58))
+- **security:** refuse git args that start with a dash ([#50](https://github.com/dennisadriaans/openrun/pull/50))
+- **ui:** unify stacked composer strips and controls ([#60](https://github.com/dennisadriaans/openrun/pull/60))
+- **security:** harden git argument handling ([#92](https://github.com/dennisadriaans/openrun/pull/92))
+- keep pre-push lint checks read-only ([#91](https://github.com/dennisadriaans/openrun/pull/91))
+- **mobile:** validate pairing URLs ([#83](https://github.com/dennisadriaans/openrun/pull/83))
+- **ui:** unify stacked composer strips and controls ([#79](https://github.com/dennisadriaans/openrun/pull/79))
+- **chat:** render markdown tables correctly ([#78](https://github.com/dennisadriaans/openrun/pull/78))
+- **security:** confine file diffs to the workspace ([#51](https://github.com/dennisadriaans/openrun/pull/51))
+- **release:** enforce one weekly release ([#68](https://github.com/dennisadriaans/openrun/pull/68))
+- **release:** configure tag author ([#65](https://github.com/dennisadriaans/openrun/pull/65))
+- **release:** publish bot-merged releases ([#64](https://github.com/dennisadriaans/openrun/pull/64))
+
+### ⚡ Performance
+
+- **workspace:** stop blocking the server on slow commands ([#103](https://github.com/dennisadriaans/openrun/pull/103))
+- **tasks:** fetch running task ids, not every run ([#52](https://github.com/dennisadriaans/openrun/pull/52))
+
+### ⏪ Reverts
+
+- restore original pull request changes ([#93](https://github.com/dennisadriaans/openrun/pull/93))
+
+### 💅 Refactors
+
+- **tasks:** inline readiness and drop cancel ([#124](https://github.com/dennisadriaans/openrun/pull/124))
+- **runtimes:** drop the run context meter ([#95](https://github.com/dennisadriaans/openrun/pull/95))
+- **live:** share one sse heartbeat period ([#53](https://github.com/dennisadriaans/openrun/pull/53))
+- **chat:** extract Composer out of Chat.tsx
+- **ui:** share one useClickOutside hook ([#54](https://github.com/dennisadriaans/openrun/pull/54))
+
+### 📖 Documentation
+
+- add service templates for running openrun ([#108](https://github.com/dennisadriaans/openrun/pull/108))
+
+### 📦 Build
+
+- **deps:** update minor and patch dependencies ([#98](https://github.com/dennisadriaans/openrun/pull/98))
+
+### 🤖 CI
+
+- remove CLA check ([#69](https://github.com/dennisadriaans/openrun/pull/69))
+
+### 🏡 Chore
+
+- integrate approved PR #55 ([#75](https://github.com/dennisadriaans/openrun/pull/75))
+- integrate approved PR #54 ([#73](https://github.com/dennisadriaans/openrun/pull/73))
+- integrate approved PR #53 ([#71](https://github.com/dennisadriaans/openrun/pull/71))
+- integrate approved PR #52 ([#70](https://github.com/dennisadriaans/openrun/pull/70))
+
+**Full changelog**: [`v0.1.0...v0.2.0`](https://github.com/dennisadriaans/openrun/compare/v0.1.0...v0.2.0)
+
 ## v0.1.0 — 2026-08-31
 
 > **2 breaking changes.** Read the entries below before upgrading.
