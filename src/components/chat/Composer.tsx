@@ -2,7 +2,6 @@
  * Chat / new-run prompt box: slash commands, plugin mentions, attachments, send.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Square } from 'lucide-react'
 import { ComposerModelControls } from '../ComposerControls'
 import { PluginMentionMenu } from '../PluginMentionMenu'
 import { SlashCommandMenu } from '../SlashCommandMenu'
@@ -89,6 +88,7 @@ export function Composer({
    * usually something they fix and then retry with the same words.
    */
   onSend: (text: string) => unknown
+  /** Cancel the active run with Escape while composing. */
   onStop?: () => void
   className?: string
   /** Slash commands to offer, app commands included. */
@@ -303,6 +303,14 @@ export function Composer({
                 files.addFiles(images)
               }}
               onKeyDown={(e) => {
+                // The composer used to expose a separate stop button. Escape
+                // keeps that interruption close to where the user is typing,
+                // including when a slash-command or plugin menu is open.
+                if (e.key === 'Escape' && running && onStop) {
+                  e.preventDefault()
+                  onStop()
+                  return
+                }
                 if (pluginMenuOpen && pluginMatches.length > 0) {
                   if (e.key === 'ArrowDown') {
                     e.preventDefault()
@@ -452,17 +460,6 @@ export function Composer({
                   disabled={!canAttach || files.full}
                   onFiles={(picked) => files.addFiles(picked)}
                 />
-              ) : null}
-              {running && onStop ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  aria-label="Stop"
-                  title="Stop"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-warn/90 text-white transition-colors hover:bg-warn focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-                >
-                  <Square className="size-3.5 fill-current" />
-                </button>
               ) : null}
             </div>
           </div>

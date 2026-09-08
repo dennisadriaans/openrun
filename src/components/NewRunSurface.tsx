@@ -6,11 +6,18 @@
  * copied into both routes.
  */
 import { AddProjectModal } from './AddProjectModal'
+import { useLocation, useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { Composer } from './chat/Composer'
 import { WorkingIndicator } from './chat/WorkingIndicator'
 import { RuntimePicker } from './ComposerControls'
 import { WorkspaceBreadcrumb } from './workspace/WorkspaceBreadcrumb'
 import type { NewRunDraft } from '../hooks/useNewRunDraft'
+import {
+  markRunReadOptimistically,
+  prefetchConversation,
+  useConversationNavigationRuns,
+} from '../lib/queries'
 
 export function NewRunBreadcrumb({
   draft,
@@ -41,6 +48,33 @@ export function NewRunComposer({
   /** Overrides the docked width/padding — the start page renders it inline. */
   className?: string
 }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const openedFromHome = useLocation({ select: (location) => location.pathname === '/' })
+  const { data: conversationRuns = [] } = useConversationNavigationRuns()
+
+  const openConversation = (runId: string) => {
+    const navigation = navigate({
+      to: '/runs/$runId',
+      params: { runId },
+      search: openedFromHome
+        ? {
+            from: 'home',
+            projectId: draft.projectId,
+            workspaceId: draft.workspaceId,
+            runtimeId: draft.runtimeId,
+            model: draft.model,
+            effort: draft.effort,
+          }
+        : {},
+    })
+
+    // The run detail marks itself read once it mounts. Do the visual half now
+    // so selecting a conversation never flashes a misleading unread dot.
+    void markRunReadOptimistically(queryClient, runId).catch(() => {})
+    return navigation
+  }
+
   return (
     <Composer
       {...(className ? { className } : {})}
@@ -61,16 +95,20 @@ export function NewRunComposer({
             align="start"
             sessions={{
               workspaceId: draft.workspaceId,
-              allWorkspaces: draft.allNativeSessions,
-              groups:
-                draft.workspaceId || draft.allNativeSessions
-                  ? (draft.nativeQuery.data?.groups ?? [])
-                  : [],
+              groups: draft.workspaceId ? (draft.nativeQuery.data?.groups ?? []) : [],
               resumeSessionId: draft.resumeSessionId,
               resumeSessionLabel: draft.resumeSessionLabel,
               onOpen: () => draft.nativeQuery.refetch(),
               onSelectNew: draft.clearResume,
               onSelect: draft.pickNativeSession,
+            }}
+            conversations={{
+              runs: conversationRuns.filter((run) => run.projectId === draft.projectId),
+              currentRunId: '',
+              workspaceId: draft.workspaceId,
+              projectId: draft.projectId,
+              onIntent: (runId) => void prefetchConversation(queryClient, runId),
+              onSelect: openConversation,
             }}
             onChange={draft.selectRuntime}
           />

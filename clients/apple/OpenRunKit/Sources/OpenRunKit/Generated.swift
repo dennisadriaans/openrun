@@ -35,6 +35,8 @@ public enum Operation: String, CaseIterable, Sendable {
     case filesRestoreWorkspace = "files.restoreWorkspace"
     /// Upload a composer image; `data` is raw base64 without the data-URL prefix.
     case filesSaveAttachment = "files.saveAttachment"
+    /// Tokenize a snippet with the app's own highlighter; answers class names, not colours.
+    case codeHighlight = "code.highlight"
     case gitGetFileDiff = "git.getFileDiff"
     case gitCommitChanges = "git.commitChanges"
     case gitPushChanges = "git.pushChanges"
@@ -167,6 +169,7 @@ public enum Operation: String, CaseIterable, Sendable {
         case .filesWriteWorkspace: return Route(method: "POST", path: "/api/v1/files/write-workspace", capability: "files.writeWorkspace", clients: ["web", "desktop"])
         case .filesRestoreWorkspace: return Route(method: "POST", path: "/api/v1/files/restore-workspace", capability: "files.restoreWorkspace", clients: ["web", "desktop"])
         case .filesSaveAttachment: return Route(method: "POST", path: "/api/v1/files/save-attachment", capability: "files.saveAttachment", clients: ["web", "desktop"])
+        case .codeHighlight: return Route(method: "POST", path: "/api/v1/code/highlight", capability: "code.highlight", clients: ["desktop"])
         case .gitGetFileDiff: return Route(method: "GET", path: "/api/v1/git/get-file-diff", capability: "runs.diff", clients: ["web", "desktop", "mobile"])
         case .gitCommitChanges: return Route(method: "POST", path: "/api/v1/git/commit-changes", capability: "git.commitChanges", clients: ["web", "desktop"])
         case .gitPushChanges: return Route(method: "POST", path: "/api/v1/git/push-changes", capability: "git.pushChanges", clients: ["web", "desktop"])
@@ -422,6 +425,19 @@ public struct FilesSaveAttachmentRequest: Encodable, Sendable {
         self.name = name
         self.mimeType = mimeType
         self.data = data
+    }
+}
+
+/// Tokenize a snippet with the app's own highlighter; answers class names, not colours.
+public struct CodeHighlightRequest: Encodable, Sendable {
+    public var code: String
+    public var language: String?
+    public var path: String?
+
+    public init(code: String, language: String? = nil, path: String? = nil) {
+        self.code = code
+        self.language = language
+        self.path = path
     }
 }
 

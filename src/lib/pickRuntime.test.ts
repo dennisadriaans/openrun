@@ -70,6 +70,13 @@ describe('visibleRuntimes', () => {
     )
   })
 
+  it('always keeps Codex visible, even with a stale hidden preference', () => {
+    assert.deepEqual(
+      visibleRuntimes(catalog, ['codex']).map((r) => r.id),
+      ['claude', 'codex', 'grok', 'gemini'],
+    )
+  })
+
   it('falls back to the full catalog rather than an empty menu', () => {
     const all = catalog.map((r) => r.id)
     assert.deepEqual(
@@ -95,6 +102,13 @@ describe('hiddenRuntimesIn', () => {
     assert.deepEqual(hiddenRuntimesIn(catalog, undefined), [])
   })
 
+  it('does not list Codex as hidden', () => {
+    assert.deepEqual(
+      hiddenRuntimesIn(catalog, ['codex']).map((r) => r.id),
+      [],
+    )
+  })
+
   it('does not also list a hidden runtime kept as the selection', () => {
     assert.deepEqual(
       hiddenRuntimesIn(catalog, ['grok', 'gemini'], 'grok').map((r) => r.id),
@@ -108,5 +122,10 @@ describe('toggleHiddenRuntime', () => {
     assert.deepEqual(toggleHiddenRuntime(undefined, 'grok'), ['grok'])
     assert.deepEqual(toggleHiddenRuntime(['grok'], 'gemini'), ['grok', 'gemini'])
     assert.deepEqual(toggleHiddenRuntime(['grok', 'gemini'], 'grok'), ['gemini'])
+  })
+
+  it('removes a stale Codex hidden preference instead of saving it', () => {
+    assert.deepEqual(toggleHiddenRuntime(['codex', 'grok'], 'codex'), ['grok'])
+    assert.deepEqual(toggleHiddenRuntime(['grok'], 'codex'), ['grok'])
   })
 })

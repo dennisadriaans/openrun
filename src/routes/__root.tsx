@@ -32,6 +32,7 @@ import {
 } from '../components/AppChrome'
 import { ChatThemeProvider } from '../components/chat/ChatThemeProvider'
 import { DevLiveStatus } from '../components/DevLiveStatus'
+import { InstallBanner } from '../components/InstallBanner'
 import { Toaster } from '../components/toast'
 import { CHAT_THEME_BOOT_SCRIPT } from '../lib/chatTheme'
 import { TERMINAL_PALETTE_BOOT_SCRIPT } from '../lib/terminalPalette'
@@ -45,6 +46,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+      { name: 'theme-color', content: '#141414' },
       { title: 'Open Run' },
     ],
     links: [
@@ -286,6 +288,7 @@ function RootDocument({ children }: { children: ReactNode }) {
             <ActivityLiveProvider>
               {children}
               <Toaster />
+              <InstallBanner />
               <DevLiveStatus />
             </ActivityLiveProvider>
           </ChatThemeProvider>

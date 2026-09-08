@@ -393,6 +393,18 @@ export function useMarkRunRead() {
   })
 }
 
+/** Clear navigation dots immediately and persist the read before route mount. */
+export function markRunReadOptimistically(qc: QueryClient, id: string) {
+  qc.setQueryData<Array<{ id: string; unread?: boolean }>>(
+    ['runs', 'conversation-navigation'],
+    (runs) => runs?.map((run) => (run.id === id ? { ...run, unread: false } : run)),
+  )
+  if (isDemoDetailRun(id)) return Promise.resolve()
+  return fns.markRunRead({ data: { id } }).then(() => {
+    void qc.invalidateQueries({ queryKey: ['runs', 'conversation-navigation'] })
+  })
+}
+
 export function conversationQueryOptions(runId: string) {
   const demo = isDemoMode() && isDemoDetailRun(runId)
   return {
