@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## v0.2.1 — 2026-09-15
+
+- You no longer need another worktree to continue a saved CLI chat. Interactive, manual, and scheduled runs use the chat's existing workspace, while webhook deliveries still start clean in their own worktree.
+- Scheduled runs no longer die at their timeout because the Mac went back to sleep. Open Run holds a wake assertion for as long as an agent is running, so a 30-minute budget buys 30 minutes of work instead of a handful of dark-wake seconds.
+- Weekly releases no longer stall: the release commit is now signed and attributed, so branch protection stops holding the release pull request for an approval that the automation could never give. - A release pull request that has not merged yet no longer fails the scheduled job — it stays queued and the next run publishes it once it lands.
+- You no longer see a successful run marked failed because it read an old GitHub authentication error from a log or source file. - Temporary webhook checkouts no longer appear as user-owned workspaces, and scheduled automation readiness now reflects the same checks used when it fires.
+
+### 🩹 Fixes
+
+- **release:** fetch the API-written commit before reset ([#132](https://github.com/dennisadriaans/openrun/pull/132))
+- **release:** sign the release commit so auto-merge lands ([#131](https://github.com/dennisadriaans/openrun/pull/131))
+- **runs:** preserve chat workspaces and accurate outcomes ([#128](https://github.com/dennisadriaans/openrun/pull/128))
+
+**Full changelog**: [`v0.2.0...v0.2.1`](https://github.com/dennisadriaans/openrun/compare/v0.2.0...v0.2.1)
+
 ## v0.2.0 — 2026-09-07
 
 - You no longer pick an access mode before a chat. The composer, the New chat dialog, and `/mode` are gone — every run the app starts now runs with full access, so nothing pauses waiting for an approval you have to answer.
