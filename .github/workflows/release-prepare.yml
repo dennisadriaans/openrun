@@ -90,14 +90,23 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           REASON: ${{ steps.release.outputs.reason }}
         run: |
-          url=$(gh pr list --head "$BRANCH" --state all --limit 1 --json url --jq '.[0].url // ""')
-          if [[ -n "$url" ]]; then
-            state=$(gh pr view "$url" --json state,mergedAt --jq 'if .mergedAt then "MERGED" else .state end')
-            if [[ "$state" == "CLOSED" ]]; then
-              gh pr reopen "$url"
+          # Resume an open PR, and report a merged one so the caller can publish
+          # it. A *closed* PR is deliberately not reopened: it was superseded —
+          # typically its branch was deleted and rebuilt to replace a bad commit
+          # — and GitHub refuses to reopen a PR whose head has been recreated.
+          # Leave it closed and open a fresh PR for the current branch below.
+          url=$(gh pr list --head "$BRANCH" --state open --limit 1 --json url --jq '.[0].url // ""')
+          if [[ -z "$url" ]]; then
+            merged_url=$(gh pr list --head "$BRANCH" --state merged --limit 1 --json url --jq '.[0].url // ""')
+            if [[ -n "$merged_url" ]]; then
+              echo "url=$merged_url" >> "$GITHUB_OUTPUT"
+              echo "merged=true" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
+          fi
+          if [[ -n "$url" ]]; then
             echo "url=$url" >> "$GITHUB_OUTPUT"
-            echo "merged=$([[ "$state" == "MERGED" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "merged=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
