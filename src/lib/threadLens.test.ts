@@ -26,6 +26,18 @@ const run = (
 })
 
 describe('groupThreadLensRuns', () => {
+  it('keeps one selectable row when the navigation result repeats a run', () => {
+    const duplicated = run('one', 'ws-a', 'project-a', 2)
+    const groups = groupThreadLensRuns(
+      [duplicated, { ...duplicated }, { ...duplicated }, { ...duplicated }],
+      { workspaceId: 'ws-a', projectId: 'project-a' },
+    )
+    assert.deepEqual(
+      groups[0]?.runs.map((item) => item.id),
+      ['one'],
+    )
+  })
+
   it('lists only the current worktree until you search', () => {
     const groups = groupThreadLensRuns(
       [

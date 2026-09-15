@@ -1,6 +1,7 @@
 import { highlightCode, tagHighlighter, tags as t } from '@lezer/highlight'
 import type { DiffHunk, DiffLine } from './diff'
-import { languageSupportForPath } from './editorTheme'
+import { languageSupportForPath } from './languageSupport.ts'
+import { syntheticPathForLanguage } from './codeLanguage.ts'
 
 export type HighlightToken = {
   text: string
@@ -79,4 +80,40 @@ export function highlightDiffLines(
   })
 
   return map
+}
+
+/**
+ * Caps borrowed from t3code's mobile highlighter: past these sizes tokenizing
+ * costs more than the colour is worth, and a pathological line can pin the
+ * parser. Over either cap the snippet comes back plain.
+ */
+export const MAX_HIGHLIGHT_CHARS = 200_000
+export const MAX_HIGHLIGHT_LINE_CHARS = 1_000
+
+export type HighlightedSnippet = {
+  lines: HighlightToken[][]
+  /** False when the caps or a missing grammar left the tokens plain. */
+  highlighted: boolean
+}
+
+/**
+ * Tokenize a fenced snippet for a client that has no highlighter of its own.
+ *
+ * `path` wins when both are given — a fence title names the real file, which
+ * resolves more grammars than a bare language id does.
+ */
+export function highlightSnippet(input: {
+  code: string
+  language?: string
+  path?: string
+}): HighlightedSnippet {
+  const code = input.code
+  const path = input.path || syntheticPathForLanguage(input.language ?? '')
+  const tooLong =
+    code.length > MAX_HIGHLIGHT_CHARS ||
+    code.split('\n').some((line) => line.length > MAX_HIGHLIGHT_LINE_CHARS)
+  if (tooLong || !languageSupportForPath(path)) {
+    return { lines: plainLines(code), highlighted: false }
+  }
+  return { lines: highlightLines(code, path), highlighted: true }
 }

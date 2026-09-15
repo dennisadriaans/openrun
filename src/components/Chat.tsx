@@ -35,6 +35,7 @@ import {
   usePlugins,
   useRestoreFile,
   useSlashCommands,
+  useConversationNavigationRuns,
 } from '../lib/queries'
 import * as fns from '../fns'
 import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '../lib/runtimeMode'
@@ -800,6 +801,7 @@ export function Chat({
   onNewChat,
   pullRequest,
   repositoryUrl,
+  returnToHome = false,
 }: {
   messages: ChatMessage[]
   /** Pulse the transcript scroller while conversation is still in flight. */
@@ -880,6 +882,8 @@ export function Chat({
   pullRequest?: RunPullRequest | null
   /** Repository remote used to resolve plain `PR #123` mentions. */
   repositoryUrl?: string
+  /** Preserve the page that opened this conversation when navigating between runs. */
+  returnToHome?: boolean
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -905,6 +909,7 @@ export function Chat({
   const queuedMessages = queued ?? []
 
   const runtimeCatalog = useMemo(() => runtimes ?? [], [runtimes])
+  const { data: navigationRuns = [] } = useConversationNavigationRuns()
   // A handoff is only pending until the turn is sent; once the run row moves,
   // `runtimeId` comes back as the new runtime and this is false again.
   const switching = isRuntimeSwitch(runtimeId, selectedRuntimeId)
@@ -1277,15 +1282,32 @@ export function Chat({
                     }
                   : {})}
                 {...(phase ? { runningLabel: `${phase.label}…` } : {})}
-                {...(canSwitchRuntime && runtimeCatalog.length > 0 && selectedRuntimeId
+                {...((canSwitchRuntime || navigationRuns.length > 0) &&
+                runtimeCatalog.length > 0 &&
+                selectedRuntimeId
                   ? {
                       leading: (
                         <div className="flex min-w-0 shrink items-center gap-0.5">
                           <RuntimePicker
                             runtimes={runtimeCatalog}
                             runtimeId={selectedRuntimeId}
-                            disabled={pending || running}
+                            disabled={pending}
+                            disableRuntimeSelection={!canSwitchRuntime}
                             align="start"
+                            conversations={{
+                              runs: navigationRuns.filter(
+                                (run) => run.projectId === installProjectId,
+                              ),
+                              currentRunId: runId,
+                              workspaceId: workspaceId ?? '',
+                              projectId: installProjectId ?? '',
+                              onSelect: (nextRunId) =>
+                                navigate({
+                                  to: '/runs/$runId',
+                                  params: { runId: nextRunId },
+                                  search: returnToHome ? { from: 'home' } : {},
+                                }),
+                            }}
                             onChange={handleRuntimePick}
                           />
                         </div>

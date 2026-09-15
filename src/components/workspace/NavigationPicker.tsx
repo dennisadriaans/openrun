@@ -119,9 +119,13 @@ export function NavigationItem({
   disabled,
   unread,
   reserveTrailing,
+  showActiveIndicator = true,
   meta,
   onSelect,
   onClick,
+  onPointerDown,
+  onPointerEnter,
+  onFocus,
 }: {
   label: string
   hint?: string
@@ -134,10 +138,15 @@ export function NavigationItem({
    * check itself, so the tick and a hover action can share one fixed position.
    */
   reserveTrailing?: boolean
+  showActiveIndicator?: boolean
   /** Right-aligned secondary text, before the unread dot and the check. */
   meta?: ReactNode
   onSelect: () => void
   onClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void
+  /** Start latency-sensitive work on press, before the click is dispatched. */
+  onPointerDown?: () => void
+  onPointerEnter?: () => void
+  onFocus?: () => void
 }) {
   return (
     <button
@@ -146,6 +155,9 @@ export function NavigationItem({
       disabled={disabled}
       title={hint ?? label}
       onClick={onClick ?? onSelect}
+      onPointerDown={onPointerDown}
+      onPointerEnter={onPointerEnter}
+      onFocus={onFocus}
       className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${reserveTrailing ? 'pr-8' : ''} ${
         active ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-secondary/70'
       }`}
@@ -167,7 +179,7 @@ export function NavigationItem({
           className="size-1.5 shrink-0 rounded-full bg-accent"
         />
       ) : null}
-      {active && !reserveTrailing ? (
+      {active && !reserveTrailing && showActiveIndicator ? (
         <Check className="size-3.5 shrink-0" aria-hidden="true" />
       ) : null}
     </button>

@@ -139,6 +139,17 @@ export const listHostedConnections = createServerFn({ method: 'GET' }).handler(
   async () => run('cloud.listHostedConnections') as Promise<CoreResult<'listHostedConnections'>>,
 )
 
+// --- code --------------------------------------------------------------------
+
+/** Tokenize a snippet with the app's own highlighter; answers class names, not colours. */
+export const highlightCodeBlock = createServerFn({ method: 'POST' })
+  .validator((d: { code: string; language?: string; path?: string }) =>
+    shape(d, { code: 'string', language: 'string?', path: 'string?' }),
+  )
+  .handler(
+    async ({ data }) => run('code.highlight', data) as Promise<CoreResult<'highlightCodeBlock'>>,
+  )
+
 // --- dashboard ---------------------------------------------------------------
 
 export const dashboard = createServerFn({ method: 'GET' }).handler(

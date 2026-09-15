@@ -31,7 +31,7 @@ export const Route = createFileRoute('/')({
 })
 
 function StartPage() {
-  const draft = useNewRunDraft(Route.useSearch(), { allNativeSessions: true })
+  const draft = useNewRunDraft(Route.useSearch())
   const noProjects = draft.projects?.length === 0
 
   return (
