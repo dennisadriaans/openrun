@@ -254,6 +254,9 @@ function commitRelease(branch: string, message: string): void {
 
   // Move the local branch onto the commit GitHub just wrote, so the later
   // `git push` of the branch is a no-op instead of a conflicting force-push.
+  // The mutation created that commit server-side, so this clone has never seen
+  // the object — fetch it before asking git to resolve it.
+  git('fetch', '--no-tags', 'origin', oid)
   git('reset', '--hard', oid)
 }
 
