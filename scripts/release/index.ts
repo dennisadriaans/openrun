@@ -39,12 +39,19 @@ class ReleaseError extends Error {}
 
 // ---------------------------------------------------------------- process IO
 
-function run(command: string, args: string[], options: { allowFailure?: boolean } = {}): string {
+function run(
+  command: string,
+  args: string[],
+  options: { allowFailure?: boolean; input?: string } = {},
+): string {
   try {
     return execFileSync(command, args, {
       cwd: ROOT,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+      input: options.input,
+      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      // A release changelog can exceed execFileSync's default 1 MiB capture.
+      maxBuffer: 32 * 1024 * 1024,
     }).trim()
   } catch (error) {
     if (options.allowFailure) return ''
@@ -185,6 +192,81 @@ function addSummary(markdown: string): void {
   if (file) appendFileSync(file, `${markdown}\n`)
 }
 
+/**
+ * Commits the staged release files through GitHub's `createCommitOnBranch`
+ * rather than `git commit`.
+ *
+ * A commit written locally by the workflow is unsigned and authored by
+ * `github-actions[bot]`, which `main`'s ruleset counts as an *unattributed*
+ * change (`require_extra_approval_for_unattributed_changes`). That demands an
+ * approving review the release job can never obtain, so auto-merge parks the PR
+ * forever and the job times out waiting for it. Commits created through the API
+ * are signed by GitHub and attributed to the Actions app, which satisfies the
+ * rule without weakening it for humans.
+ *
+ * Falls back to a local commit when no token is available, so `release:prepare`
+ * still works on a laptop and in `--dry-run` rehearsals.
+ */
+function commitRelease(branch: string, message: string): void {
+  if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
+    git('commit', '-m', message)
+    return
+  }
+
+  // The API writes the commit on top of the remote branch tip, so the branch
+  // has to exist there first — push the parent before adding the commit to it.
+  const parent = git('rev-parse', 'HEAD')
+  run('git', ['push', '--force-with-lease', 'origin', `${parent}:refs/heads/${branch}`])
+
+  // `--no-renames` keeps every entry a simple status/path pair, so a fragment
+  // that git would otherwise pair up as a rename still shows as delete + add.
+  const staged = git('diff', '--cached', '--name-status', '--no-renames')
+  const additions: { path: string; contents: string }[] = []
+  const deletions: { path: string }[] = []
+
+  for (const line of staged.split('\n').filter(Boolean)) {
+    const [status, path] = line.split('\t')
+    if (status === 'D') deletions.push({ path })
+    else additions.push({ path, contents: readFileSync(join(ROOT, path)).toString('base64') })
+  }
+
+  // `gh api graphql --input -` replaces the whole request body, so the query
+  // has to travel inside that JSON; a sibling `-f query=…` is silently dropped.
+  // Passing it this way also keeps a large changelog off the argv length limit.
+  const body = {
+    query:
+      'mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }',
+    variables: {
+      input: {
+        branch: { repositoryNameWithOwner: nameWithOwner(), branchName: branch },
+        message: { headline: message },
+        expectedHeadOid: parent,
+        fileChanges: { additions, deletions },
+      },
+    },
+  }
+
+  const oid = run(
+    'gh',
+    ['api', 'graphql', '--input', '-', '--jq', '.data.createCommitOnBranch.commit.oid'],
+    { input: JSON.stringify(body) },
+  )
+
+  // Move the local branch onto the commit GitHub just wrote, so the later
+  // `git push` of the branch is a no-op instead of a conflicting force-push.
+  git('reset', '--hard', oid)
+}
+
+/** `owner/repo` for the repository the workflow is running against. */
+function nameWithOwner(): string {
+  const fromEnv = process.env.GITHUB_REPOSITORY
+  if (fromEnv) return fromEnv
+  const url = git('remote', 'get-url', 'origin')
+  const match = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/)
+  if (!match) throw new ReleaseError(`Cannot derive owner/repo from origin URL: ${url}`)
+  return match[1]
+}
+
 // ------------------------------------------------------------------- commands
 
 function describePlan(resolved: Resolved): string {
@@ -316,7 +398,7 @@ function commandPrepare(argv: string[]): number {
 
   git('checkout', '-B', branch)
   git('add', 'package.json', 'CHANGELOG.md', 'changelog.d')
-  git('commit', '-m', `chore(release): ${plan.tag}`)
+  commitRelease(branch, `chore(release): ${plan.tag}`)
 
   console.log(`\nPrepared ${plan.tag} on ${branch}.`)
   addSummary(

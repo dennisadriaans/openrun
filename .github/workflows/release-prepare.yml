@@ -71,6 +71,10 @@ jobs:
           fi
           pnpm release:prepare -- "${args[@]}"
 
+      # `prepare` writes the release commit through the GitHub API so it is
+      # signed and attributed, which means the branch is already on the remote
+      # at the right commit. This push is the no-op that proves the local and
+      # remote tips agree, and the fallback when prepare committed locally.
       - name: Push release branch
         if: steps.release.outputs.prepared == 'true'
         env:
@@ -134,31 +138,47 @@ jobs:
 
       # A merge performed with GITHUB_TOKEN does not emit another workflow run,
       # so the push trigger in release-publish.yml cannot observe this merge.
+      # A PR still waiting on auto-merge is a normal state, not a failure: the
+      # next scheduled run reconciles it via `release:publish`. So a timeout
+      # here leaves the job green and simply skips publishing this time round —
+      # only a PR that was *closed unmerged* is a real error worth failing on.
       - name: Wait for release PR to merge
         if: steps.release.outputs.prepared != 'false'
         id: merge
-        timeout-minutes: 45
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ steps.pr.outputs.url }}
+          WAIT_MINUTES: '20'
         run: |
-          while true; do
-            merged_at=$(gh pr view "$PR_URL" --json mergedAt --jq '.mergedAt // ""')
-            state=$(gh pr view "$PR_URL" --json state --jq .state)
-            if [[ -n "$merged_at" ]]; then
+          deadline=$(( SECONDS + WAIT_MINUTES * 60 ))
+          while (( SECONDS < deadline )); do
+            read -r merged_at state < <(
+              gh pr view "$PR_URL" --json mergedAt,state --jq '"\(.mergedAt // "-") \(.state)"'
+            )
+            if [[ "$merged_at" != "-" ]]; then
               sha=$(gh pr view "$PR_URL" --json mergeCommit --jq '.mergeCommit.oid')
               echo "sha=$sha" >> "$GITHUB_OUTPUT"
-              break
+              echo "merged=true" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
             if [[ "$state" == "CLOSED" ]]; then
-              echo "Release PR closed without merging."
+              echo "::error::Release PR $PR_URL was closed without merging."
               exit 1
             fi
             sleep 10
           done
 
+          echo "merged=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::$PR_URL has not merged yet; the next scheduled run will publish it."
+          {
+            echo "### Release PR still open"
+            echo ""
+            echo "$PR_URL did not merge within ${WAIT_MINUTES} minutes."
+            echo "It stays queued — the next scheduled run publishes it once it lands."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish and verify merged release
-        if: steps.release.outputs.prepared != 'false'
+        if: steps.merge.outputs.merged == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_SHA: ${{ steps.merge.outputs.sha }}
@@ -169,7 +189,7 @@ jobs:
           pnpm release:publish -- --expect="$TAG"
 
       - name: Remove release branch
-        if: steps.release.outputs.prepared != 'false'
+        if: steps.merge.outputs.merged == 'true'
         env:
           BRANCH: ${{ steps.release.outputs.branch }}
         run: git push origin --delete "$BRANCH" || true
