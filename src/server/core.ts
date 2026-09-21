@@ -1,3 +1,4 @@
+import { bootLocalRuntime } from './localRuntime.ts'
 import {
   automationBaseRefusal,
   getRunEnvironment,
@@ -210,6 +211,7 @@ import { deleteRunsInTransaction } from './runDeletion.ts'
 // boot path: arming cron or reaping orphans on a machine that should not be
 // serving is worse than failing loudly.
 assertServerAccess()
+bootLocalRuntime()
 
 const bootSafety = globalThis as unknown as { __agentopsSafetyBooted?: boolean }
 if (!bootSafety.__agentopsSafetyBooted) {

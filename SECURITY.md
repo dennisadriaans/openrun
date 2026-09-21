@@ -128,3 +128,17 @@ with a pointer here.
 5. Use supervised mode for anything touching a repository you care about.
 6. Review `~/.openrun` permissions if you have ever copied the directory
    between machines.
+
+### Standalone CLI
+
+The local worker exposes a loopback-only TCP IPC listener on an ephemeral port,
+not an HTTP application server. Each request requires a random per-process
+credential, stored in `OPENRUN_HOME/ipc/runtime.json` with mode 0600 inside a
+0700 directory. The CLI reads it as the same OS user. The listener limits request
+size and idle time and dispatches through the existing desktop contract scope.
+Local processes running as the same user are inside this trust boundary, just
+as they can already read the database and execute the user's agent binaries.
+
+The CLI's OAuth browser callback is temporary, loopback-only, GET-only, and
+accepts only `/cloud/callback` with the exact pending state. PKCE exchange and
+credential storage remain in the existing core. No provider token is printed.

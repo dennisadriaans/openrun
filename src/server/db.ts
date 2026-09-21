@@ -11,9 +11,9 @@
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, renameSync } from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
-import { openrunEnv } from '../lib/openrunEnv.ts'
+import { openrunHome } from './paths.ts'
+export { openrunHome } from './paths.ts'
 import { RUNTIME_PRESETS } from '../lib/runtimePresets.ts'
 import { ensureProcessPathAugmented } from './userPath.ts'
 
@@ -428,24 +428,6 @@ export type WorkspaceRow = {
  * removing a workspace never risks touching files the user didn't ask us to
  * manage.
  */
-export function openrunHome(): string {
-  const fromEnv = openrunEnv('HOME')
-  if (fromEnv) return fromEnv
-  const next = path.join(os.homedir(), '.openrun')
-  const legacy = path.join(os.homedir(), '.agentops')
-  // Move rather than read-through: a fallback that only *reads* the old path
-  // dies the instant anything creates the new one, and the user silently loses
-  // their session. See `adoptLegacyDatabase` for the same reasoning.
-  if (!existsSync(next) && existsSync(legacy)) {
-    try {
-      renameSync(legacy, next)
-    } catch {
-      // Cross-device or permissions — keep serving the old path.
-      return legacy
-    }
-  }
-  return next
-}
 
 export function openrunDbPath(): string {
   return path.join(openrunHome(), 'openrun.db')

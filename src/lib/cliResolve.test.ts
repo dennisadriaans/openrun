@@ -152,8 +152,8 @@ describe('resolveWorkspace', () => {
 })
 
 describe('workspaceScheduleWarning', () => {
-  it('warns that a main checkout cannot take a schedule', () => {
-    assert.match(workspaceScheduleWarning(WORKSPACES[0]!)!, /main checkout/)
+  it('accepts the main checkout as the base for a fresh execution worktree', () => {
+    assert.equal(workspaceScheduleWarning(WORKSPACES[0]!), null)
   })
 
   it('passes a ready worktree', () => {

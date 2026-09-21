@@ -62,27 +62,100 @@ Open <http://localhost:3000>.
 
 ## Command line
 
-Everything the Automations page does, without leaving the terminal. The CLI is a
-client of the same local server — an automation it creates shows up in the web UI
-immediately, armed on the same scheduler.
+The CLI runs the application locally, without `pnpm dev`, `pnpm start`, a web
+build, or an Open Run account. After installing dependencies, link it once:
 
 ```bash
-pnpm cli schedule for claude at 16:40 "create new homepage with contactform" push and open a pull request
-pnpm cli schedule every weekday at 8:30 "sweep the dependency updates"
-pnpm cli run "why is the checkout test flaky?" for codex
-pnpm cli ls                  # automations and when they next fire
-pnpm cli now nightly-sweep   # fire one immediately
-pnpm cli --help
+pnpm link --global
+cd /path/to/your/repository
+openrun init --check "pnpm test"
+openrun runtimes
+openrun schedule every weekday at 8:30 "sweep dependency updates" for claude
+openrun run "why is the checkout test flaky?" for codex
+openrun automations list
+openrun runs --limit 20
+openrun show <run-id>
+openrun cancel <run-id>
+openrun now <automation-id-or-name>
+openrun disable <automation-id-or-name>
 ```
 
-The workspace defaults to the checkout you are standing in; `in <project>` or
-`in <path>` overrides it. A bare time (`at 16:40`, `in 20 minutes`, `tomorrow at
-9`) fires once and then pauses, while `every day at 9`, `every 15 minutes` and
-`cron "0 9 * * 1-5"` recur. Asking for a push or a pull request also makes the
-automation refuse to arm unless `gh` is authenticated. Add `--dry-run` to see
-what would be created before anything is written.
+`pnpm cli …` works too. `init` registers an existing Git repository; it detects
+project checks and accepts repeatable `--check` options to replace them. Running
+`init` again reuses the project. Unattended runs keep the application's existing
+verification and Git preflight requirements. Each scheduled invocation gets a
+fresh execution directory; you do not need to create worktrees yourself.
 
-Link it as a global `openrun` with `pnpm link --global`.
+The first command starts a small background worker automatically. It owns the
+same scheduler, executor, integration relay and SQLite database as the web app.
+Closing the terminal leaves it running. Runs, transcripts, automations and
+connections stay in `~/.openrun/openrun.db`; `OPENRUN_HOME` selects another home.
+No HTTP application server starts. CLI requests use an authenticated loopback
+IPC connection whose credential is kept in an owner-only directory.
+
+```bash
+openrun worker status       # no startup side effect
+openrun worker start
+openrun worker logs
+openrun worker stop         # waits for shutdown; cancels active runs
+```
+
+Keep the machine awake and the worker running for schedules to fire. This does
+not install a login/startup service: after reboot, run `openrun worker start`
+(or any local application command). The shared scheduler records missed fires
+and applies its existing catch-up rules. Only one process may own a data home:
+if the web app already owns it, the CLI connects to that process automatically.
+To switch from a headless worker to the web app, stop the worker first. Neither
+process can reap the other's runs or arm duplicate schedules.
+
+The workspace defaults to your current checkout; `in <project>` or `in <path>`
+overrides it. A bare time (`at 16:40`, `in 20 minutes`, `tomorrow at 9`) fires
+once and then pauses. `every day at 9`, `every 15 minutes` and
+`cron "0 9 * * 1-5"` recur in the worker machine's timezone. Add `--dry-run` to
+`schedule` or `run` to preview without creating an automation or run. Local
+previews can initialize the worker and database. `--json` emits structured
+results, with diagnostics and prompts on stderr.
+
+### Integrations from the terminal
+
+```bash
+openrun integrations providers
+openrun integrations connect             # choose a provider interactively
+openrun integrations connect github      # explicit provider
+openrun integrations list
+openrun integrations configure          # choose connection, runtime, workspace, event
+openrun integrations disable <connection-id>
+openrun integrations enable <connection-id>
+openrun integrations disconnect <connection-id>
+```
+
+Connect prints the authorization URL and waits for a temporary loopback browser
+callback. It signs in first if necessary; the web application is not needed.
+Configure binds that connection to a working automation. For scripts, supply all
+choices explicitly (missing choices fail rather than hanging on a prompt):
+
+```bash
+openrun integrations configure <connection-id> \
+  --runtime claude --in /path/to/repo \
+  --event issues.opened --prompt "Implement {{issue.title}}" --name issue-worker
+```
+
+Provider authorization and webhook delivery still use Open Run Cloud's existing
+relay. Local scheduling, execution and history work without it, including with
+`OPENRUN_CLOUD_URL=off`. This CLI does not introduce a second token store or
+pretend external provider events are available offline.
+
+### Advanced and remote use
+
+`openrun api` lists the complete application contract and required fields.
+`openrun api <operation> '<JSON>'` exposes operations such as runtime editing,
+MCP configuration, follow-up messages, approvals and trigger filters using the
+same validation and business rules as the UI. `--dry-run` previews an API call.
+
+Use `--url http://host:3000` (or `OPENRUN_URL`) only to target a server explicitly;
+`--token` / `OPENRUN_ACCESS_TOKEN` authenticate that HTTP connection. A remote
+failure never silently switches to local storage. `openrun --help` lists the
+commands.
 
 ## Features
 

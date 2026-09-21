@@ -67,7 +67,11 @@ export function resolveRuntime(
   // Nothing to match against beats every other message, hint or no hint —
   // "no runtime called claude" would send the user hunting for a typo.
   if (enabled.length === 0) {
-    return { ok: false, error: 'No runtimes are enabled. Add one on the Runtimes page first.' }
+    return {
+      ok: false,
+      error:
+        'No runtimes are enabled. List them with "openrun runtimes"; configure with "openrun api runtimes.save".',
+    }
   }
 
   if (!fold(hint)) {
@@ -137,7 +141,7 @@ export function resolveWorkspace(
 ): Resolved<WorkspaceChoice> {
   const live = workspaces.filter((w) => w.status !== 'archived')
   if (live.length === 0) {
-    return { ok: false, error: 'No workspaces yet. Add a project in Open Run first.' }
+    return { ok: false, error: 'No workspaces yet. Run "openrun init" in your repository first.' }
   }
 
   const needle = fold(hint)
@@ -198,9 +202,6 @@ function optionList(workspaces: readonly WorkspaceChoice[]): string {
  * user has typed a long prompt for nothing.
  */
 export function workspaceScheduleWarning(workspace: WorkspaceChoice): string | null {
-  if (workspace.kind === 'main') {
-    return `${label(workspace)} is the project's main checkout. Scheduled automations need an isolated worktree — create one in Open Run and target that.`
-  }
   if (workspace.status && workspace.status !== 'ready') {
     return `${label(workspace)} is "${workspace.status}", not ready.`
   }

@@ -1,26 +1,18 @@
 #!/usr/bin/env -S node --experimental-strip-types
-/**
- * The local CLI: schedule and run coding agents without opening the browser.
- *
- *     openrun schedule task for claude at 16:40 "create new homepage" push and open a PR
- *
- * This is a *client*, not a second copy of the app. Every capability it uses is
- * already described in `src/contract/operations.ts` and reached over
- * `/api/v1/**` with the typed client that contract generates — so the CLI
- * cannot drift from the web UI, and a new automation shows up on the
- * Automations page the moment this exits.
- *
- * Talking HTTP to the running server is also the only thing that *works*. The
- * scheduler is an in-process singleton (`server/scheduler.ts`): a CLI that
- * wrote the `tasks` row straight into SQLite would save an automation that the
- * live server never arms, and the fire would be missed until the next restart.
- *
- * All the judgement lives in `lib/cliSchedule.ts` (what the words mean) and
- * `lib/cliResolve.ts` (which runtime and workspace they name), both pure and
- * unit-tested. This file is argv, HTTP and printing.
- */
+/** CLI over the shared contract: local IPC by default, HTTP only with --url. */
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
+import {
+  ensureLocalRuntime,
+  localStatus,
+  stopLocalRuntime,
+  unavailable,
+  type CliClient,
+} from './cli/local.ts'
+import { integrations, authorize } from './cli/integrations.ts'
+import { openrunHome } from '../src/server/paths.ts'
+import { OPERATIONS } from '../src/contract/operations.ts'
 import { OpenRunClient, OpenRunError } from '../src/contract/generated/client.ts'
 import {
   deriveTaskName,
@@ -45,6 +37,16 @@ import { openrunEnv } from '../src/lib/openrunEnv.ts'
 const USAGE = `openrun — schedule local coding agents from the terminal
 
 Usage
+  openrun init [path] [--check "pnpm test"]               register repository and checks
+  openrun automations list                              list automations (alias: ls)
+  openrun integrations [list|providers|connect|configure|enable|disable|disconnect]
+  openrun runtimes                                      list installed agent CLIs
+  openrun projects                                      list registered projects
+  openrun show <run-id>                                  run details and transcript
+  openrun cancel <run-id>                                cancel a running agent
+  openrun login                                         authorize hosted integrations
+  openrun worker [status|start|stop|logs]                 manage the local worker
+  openrun api [operation] [JSON]                         every application operation
   openrun schedule <what to do> [when] [for <runtime>]   create an automation and arm it
   openrun run <what to do> [for <runtime>]               start a run now, no schedule
   openrun ls                                             automations and when they next fire
@@ -69,7 +71,7 @@ Options
   --name X             automation name (default: derived from the prompt)
   --cron X             raw cron expression
   --limit N            rows for "runs"
-  --url X              server origin (default http://${DEFAULT_HOST}:3000, $OPENRUN_URL)
+  --url X              explicit remote server ($OPENRUN_URL); default: local worker
   --token X            access token ($OPENRUN_ACCESS_TOKEN, else ~/.openrun/access-token)
 
 Anything the parser does not recognise becomes the prompt, so quote the work:
@@ -175,11 +177,16 @@ function readGlobalFlags(argv: readonly string[]): GlobalFlags {
     // `--for` is an alias so the prose form has a flag twin; the parser knows
     // `--runtime`, so rewrite rather than duplicate the handling.
     if (name === '--for') {
-      flags.rest.push('--runtime', inlineValue ?? argv[++i] ?? '')
+      const value = inlineValue ?? argv[++i] ?? ''
+      if (!value || value.startsWith('--')) throw new Error('--for needs a runtime.')
+      flags.rest.push('--runtime', value)
       continue
     }
     if (VALUE_FLAGS.has(name)) {
       const value = inlineValue ?? argv[++i] ?? ''
+      if (!value || value.startsWith('--')) throw new Error(`${name} needs a value.`)
+      if (name === '--limit' && (!Number.isInteger(Number(value)) || Number(value) <= 0))
+        throw new Error('--limit must be a positive integer.')
       if (name === '--url') flags.url = value
       else if (name === '--token') flags.token = value
       else flags.limit = Number(value) || 0
@@ -252,12 +259,12 @@ function warn(message: string | null): void {
 // ---------------------------------------------------------------------------
 
 type Context = {
-  client: OpenRunClient
+  client: CliClient
   flags: GlobalFlags
   url: string
 }
 
-async function listOf<T>(client: OpenRunClient, id: string, input?: unknown): Promise<T[]> {
+async function listOf<T>(client: CliClient, id: string, input?: unknown): Promise<T[]> {
   const rows = await client.call(id, input)
   return Array.isArray(rows) ? (rows as T[]) : []
 }
@@ -346,7 +353,9 @@ async function cmdSchedule(ctx: Context, words: string[]): Promise<number> {
   }
 
   printIntent('Scheduled', saved?.name ?? name, intent, runtime, workspace, prompt)
-  console.log(`\n${BULLET}${ctx.url}/tasks/${saved?.id ?? ''}\n`)
+  console.log(
+    `\n${BULLET}${ctx.url ? `${ctx.url}/tasks/${saved?.id ?? ''}` : `Automation: ${saved?.id ?? ''}`}\n`,
+  )
   return 0
 }
 
@@ -367,6 +376,16 @@ async function cmdRun(ctx: Context, words: string[]): Promise<number> {
   warn(prCapabilityWarning(runtime, intent.openPr, true))
 
   if (ctx.flags.dryRun) {
+    if (ctx.flags.json) {
+      console.log(
+        JSON.stringify(
+          { prompt, runtimeId: runtime.id, workspaceId: workspace.id, model: intent.modelHint },
+          null,
+          2,
+        ),
+      )
+      return 0
+    }
     printIntent('Would run', deriveTaskName(intent.prompt), intent, runtime, workspace, prompt)
     console.log('')
     return 0
@@ -384,7 +403,9 @@ async function cmdRun(ctx: Context, words: string[]): Promise<number> {
     return 0
   }
   console.log(`\nStarted in ${workspaceLabel(workspace)} on ${runtimeLabel(runtime)}`)
-  console.log(`${BULLET}${ctx.url}/runs/${started?.runId ?? ''}\n`)
+  console.log(
+    `${BULLET}${ctx.url ? `${ctx.url}/runs/${started?.runId ?? ''}` : `openrun show ${started?.runId ?? ''}`}\n`,
+  )
   return 0
 }
 
@@ -413,7 +434,7 @@ async function cmdList(ctx: Context): Promise<number> {
     const when = task.fireOnce
       ? (formatScheduledRunLabel(task.scheduledAt ?? 0) ?? '')
       : (formatNextRunLabel(task.cron ?? '') ?? 'manual only')
-    console.log(`${BULLET}${state}  ${task.name.padEnd(40)} ${when}`)
+    console.log(`${BULLET}${task.id}  ${state}  ${task.name.padEnd(40)} ${when}`)
   }
   console.log('')
   return 0
@@ -445,7 +466,7 @@ async function cmdRuns(ctx: Context): Promise<number> {
     const at = run.startedAt || run.createdAt || 0
     const when = at ? new Date(at).toLocaleString() : ''
     console.log(
-      `${BULLET}${(run.status ?? '').padEnd(10)} ${(run.taskName ?? run.id).padEnd(40)} ${when}`,
+      `${BULLET}${run.id}  ${(run.status ?? '').padEnd(10)} ${(run.taskName ?? run.id).padEnd(40)} ${when}`,
     )
   }
   console.log('')
@@ -467,7 +488,11 @@ async function withTask(
     return 1
   }
   await act(found.value)
-  console.log(`${verb}  ${found.value.name}`)
+  console.log(
+    ctx.flags.json
+      ? JSON.stringify({ id: found.value.id, name: found.value.name, action: verb.toLowerCase() })
+      : `${verb}  ${found.value.name}`,
+  )
   return 0
 }
 
@@ -481,7 +506,14 @@ async function cmdWhere(ctx: Context): Promise<number> {
   if (ctx.flags.json) {
     console.log(
       JSON.stringify(
-        { url: ctx.url, cwd: process.cwd(), workspace: here.ok ? here.value : null, runtimes },
+        {
+          mode: ctx.url ? 'remote' : 'local',
+          url: ctx.url || null,
+          home: ctx.url ? null : openrunHome(),
+          cwd: process.cwd(),
+          workspace: here.ok ? here.value : null,
+          runtimes,
+        },
         null,
         2,
       ),
@@ -490,7 +522,7 @@ async function cmdWhere(ctx: Context): Promise<number> {
   }
 
   console.log('')
-  console.log(field('Server', ctx.url))
+  console.log(field('Runtime', ctx.url || `local · ${openrunHome()}`))
   console.log(field('Directory', process.cwd()))
   console.log(
     field('Workspace', here.ok ? `${workspaceLabel(here.value)}   ${here.value.path}` : '—'),
@@ -507,6 +539,111 @@ async function cmdWhere(ctx: Context): Promise<number> {
 
 async function main(command: string, ctx: Context): Promise<number> {
   switch (command) {
+    case 'init': {
+      const args = [...ctx.flags.rest]
+      const directory = resolve(
+        args[0] && !args[0].startsWith('--') ? args.shift()! : process.cwd(),
+      )
+      const checks: { id: string; name: string; command: string }[] = []
+      while (args.length) {
+        if (args.shift() !== '--check' || !args[0])
+          throw new Error('Usage: openrun init [path] [--check "pnpm test"]')
+        const command = args.shift()!
+        checks.push({ id: `cli-check-${checks.length + 1}`, name: command, command })
+      }
+      const path = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: directory,
+        encoding: 'utf8',
+      }).trim()
+      const projects = await listOf<{ id: string; path: string; checks: string }>(
+        ctx.client,
+        'projects.list',
+      )
+      let project = projects.find((p) => p.path === path)
+      project ??= (await ctx.client.call('projects.add', {
+        mode: 'register',
+        path,
+      })) as typeof project
+      if (!project) throw new Error('Project registration failed.')
+      if (checks.length) await ctx.client.call('projects.update', { id: project.id, checks })
+      console.log(
+        ctx.flags.json
+          ? JSON.stringify(
+              { ...project, ...(checks.length ? { checks: JSON.stringify(checks) } : {}) },
+              null,
+              2,
+            )
+          : `Registered ${path}\nNext: openrun schedule every day at 9 "your task" for <runtime>`,
+      )
+      if (!checks.length && project.checks === '[]')
+        console.error(
+          'Before scheduling, add a verification command: openrun init --check "your test command"',
+        )
+      return 0
+    }
+    case 'integrations':
+      await integrations(ctx.client, ctx.flags.rest, ctx.flags.json)
+      return 0
+    case 'login':
+      await authorize(ctx.client)
+      console.log(
+        ctx.flags.json ? '{"signedIn":true}' : 'Signed in. Run: openrun integrations connect',
+      )
+      return 0
+    case 'runtimes':
+    case 'projects': {
+      const rows = await listOf<Record<string, unknown>>(ctx.client, `${command}.list`)
+      if (ctx.flags.json) console.log(JSON.stringify(rows, null, 2))
+      else
+        for (const row of rows)
+          console.log(
+            `${row.id}  ${row.label ?? row.name}  ${row.bin ?? row.path ?? ''}${command === 'runtimes' ? (row.installed ? ' (installed)' : ' (not installed)') : ''}`,
+          )
+      return 0
+    }
+    case 'show':
+    case 'cancel': {
+      const id = ctx.flags.rest[0]
+      if (!id || ctx.flags.rest.length !== 1) throw new Error(`Usage: openrun ${command} <run-id>`)
+      const result = await ctx.client.call(command === 'show' ? 'runs.get' : 'runs.cancel', { id })
+      if (!result) throw new Error(`Run not found: ${id}`)
+      console.log(
+        JSON.stringify(
+          command === 'show'
+            ? {
+                run: result,
+                conversation: await ctx.client.call('runs.getConversation', { runId: id }),
+              }
+            : result,
+          null,
+          2,
+        ),
+      )
+      return 0
+    }
+    case 'api': {
+      const [id, payload] = ctx.flags.rest
+      if (!id) {
+        console.log(
+          OPERATIONS.filter((op) => op.clients.includes('desktop'))
+            .map((op) => `${op.id}  ${JSON.stringify(op.input ?? {})}`)
+            .join('\n'),
+        )
+        return 0
+      }
+      const operation = OPERATIONS.find((op) => op.id === id)
+      if (!operation) throw new Error(`Unknown operation: ${id}`)
+      const input = payload ? JSON.parse(payload) : undefined
+      if (ctx.flags.dryRun) console.log(JSON.stringify({ operation: id, input }, null, 2))
+      else console.log(JSON.stringify(await ctx.client.call(id, input), null, 2))
+      return 0
+    }
+    case 'automations':
+      if (!ctx.flags.rest.length || ['list', 'ls'].includes(ctx.flags.rest[0]!)) return cmdList(ctx)
+      return main(ctx.flags.rest[0]!, {
+        ...ctx,
+        flags: { ...ctx.flags, rest: ctx.flags.rest.slice(1) },
+      })
     case 'schedule':
       return cmdSchedule(ctx, ctx.flags.rest)
     case 'run':
@@ -544,23 +681,76 @@ async function main(command: string, ctx: Context): Promise<number> {
 }
 
 const argv = process.argv.slice(2)
-const command = (argv[0] ?? '').toLowerCase()
-
-if (!command || command === 'help' || command === '--help' || command === '-h') {
+if (!argv.length || argv[0] === 'help' || argv.includes('--help') || argv.includes('-h')) {
   console.log(USAGE)
   // No command at all is a usage error; asking for help is not.
-  process.exitCode = command ? 0 : 1
+  process.exitCode = argv.length ? 0 : 1
 } else {
-  const flags = readGlobalFlags(argv.slice(1))
-  const url = serverUrl(flags.url)
-  const ctx: Context = {
-    client: new OpenRunClient({ baseUrl: url, token: flags.token || storedToken() }),
-    flags,
-    url,
-  }
-
+  let url = ''
   try {
-    process.exitCode = await main(command, ctx)
+    const flags = readGlobalFlags(argv)
+    const command = (flags.rest.shift() ?? '').toLowerCase()
+    if (
+      ![
+        'worker',
+        'init',
+        'integrations',
+        'login',
+        'runtimes',
+        'projects',
+        'show',
+        'cancel',
+        'api',
+        'automations',
+        'schedule',
+        'run',
+        'ls',
+        'list',
+        'runs',
+        'now',
+        'enable',
+        'disable',
+        'rm',
+        'remove',
+        'where',
+        'whoami',
+      ].includes(command)
+    )
+      throw new Error(`Unknown command: ${command}. Run openrun --help.`)
+    url = flags.url || openrunEnv('URL') ? serverUrl(flags.url) : ''
+    if (command === 'worker') {
+      if (url) throw new Error('Worker controls are local. Remove --url / OPENRUN_URL.')
+      const action = flags.rest[0] ?? 'status'
+      if (flags.dryRun) throw new Error('--dry-run is supported by schedule, run and api only.')
+      if (action === 'logs') {
+        try {
+          const logs = readFileSync(join(openrunHome(), 'worker.log'), 'utf8')
+          console.log(flags.json ? JSON.stringify({ logs }) : logs)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          console.log(flags.json ? '{"logs":""}' : 'No worker log yet.')
+        }
+      } else if (action === 'start') {
+        await ensureLocalRuntime()
+        console.log(JSON.stringify(await localStatus(), null, 2))
+      } else if (action === 'status' || action === 'stop') {
+        try {
+          console.log(
+            JSON.stringify(await (action === 'stop' ? stopLocalRuntime() : localStatus()), null, 2),
+          )
+        } catch (error) {
+          if (!unavailable(error)) throw error
+          console.log(flags.json ? '{"running":false}' : 'Local runtime is stopped.')
+        }
+      } else throw new Error(`Unknown worker command: ${action}`)
+    } else {
+      if (flags.dryRun && !['schedule', 'run', 'api'].includes(command))
+        throw new Error('--dry-run is supported by schedule, run and api only.')
+      const client: CliClient = url
+        ? new OpenRunClient({ baseUrl: url, token: flags.token || storedToken() })
+        : await ensureLocalRuntime()
+      process.exitCode = await main(command, { client, flags, url })
+    }
   } catch (err) {
     console.error(explain(err, url))
     process.exitCode = 1
