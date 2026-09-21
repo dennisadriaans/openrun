@@ -27,6 +27,9 @@
   "imports": {
     "#/*": "./src/*"
   },
+  "bin": {
+    "openrun": "scripts/openrun.ts"
+  },
   "scripts": {
     "dev": "node --experimental-strip-types scripts/dev.ts",
     "dev:mobile": "AGENTOPS_MOBILE=1 vite dev --port 3000",
@@ -34,6 +37,7 @@
     "build": "vite build",
     "start": "node --experimental-strip-types scripts/start.ts",
     "token:print": "node --experimental-strip-types scripts/token.ts",
+    "cli": "node --experimental-strip-types scripts/openrun.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "contract:generate": "node --experimental-strip-types scripts/contract/generate.ts",

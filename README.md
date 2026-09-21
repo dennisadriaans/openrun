@@ -19,6 +19,7 @@ no hosted runner, no account. Your repositories never leave your disk.
 
 - [What it is](#what-it-is)
 - [Quick start](#quick-start)
+- [Command line](#command-line)
 - [Features](#features)
 - [Runtimes](#runtimes)
 - [Security](#security)
@@ -58,6 +59,30 @@ Open <http://localhost:3000>.
 - At least one agent CLI logged in: `claude`, `codex`, `grok`, `agy` or `fx`
 - macOS and Linux natively; Windows through WSL2
 - `gh` only if you want pull requests
+
+## Command line
+
+Everything the Automations page does, without leaving the terminal. The CLI is a
+client of the same local server — an automation it creates shows up in the web UI
+immediately, armed on the same scheduler.
+
+```bash
+pnpm cli schedule for claude at 16:40 "create new homepage with contactform" push and open a pull request
+pnpm cli schedule every weekday at 8:30 "sweep the dependency updates"
+pnpm cli run "why is the checkout test flaky?" for codex
+pnpm cli ls                  # automations and when they next fire
+pnpm cli now nightly-sweep   # fire one immediately
+pnpm cli --help
+```
+
+The workspace defaults to the checkout you are standing in; `in <project>` or
+`in <path>` overrides it. A bare time (`at 16:40`, `in 20 minutes`, `tomorrow at
+9`) fires once and then pauses, while `every day at 9`, `every 15 minutes` and
+`cron "0 9 * * 1-5"` recur. Asking for a push or a pull request also makes the
+automation refuse to arm unless `gh` is authenticated. Add `--dry-run` to see
+what would be created before anything is written.
+
+Link it as a global `openrun` with `pnpm link --global`.
 
 ## Features
 

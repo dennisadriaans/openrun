@@ -27,6 +27,7 @@ pnpm lint            # biome check (lint + format); pnpm lint:fix writes
 pnpm build           # production build into dist/
 pnpm start           # serve the build via scripts/start.ts (refuses an unsafe bind)
 pnpm token:print     # print / create the access token (`pnpm token` is pnpm's own npm command)
+pnpm cli <args>      # the local CLI, e.g. pnpm cli schedule at 16:40 "…" for claude
 pnpm preview         # vite preview
 pnpm typecheck       # tsc --noEmit
 pnpm contract:generate # rebuild every transport from src/contract/operations.ts
@@ -206,6 +207,7 @@ Neither hook may open an `EventSource` of its own.
 | AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
 | Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts` |
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
+| The local CLI (`openrun schedule …`) | `scripts/openrun.ts` is argv, HTTP and printing only — it is a *contract client*, reaching the app through `/api/v1/**` with the generated `OpenRunClient`, never through `server/*`. The judgement is pure and tested: `lib/cliSchedule.ts` (what the words mean) and `lib/cliResolve.ts` (which runtime / workspace / automation they name). Going over HTTP is not a style choice — the scheduler is an in-process singleton, so a direct SQLite write would save an automation the running server never arms. |
 | Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; externally-created Git worktrees are registered as user-owned workspaces and are never reset or removed by Open Run. |
 | Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `lib/workspaceHealth.ts` (the codes + wording), `server/workspaceHealth.ts` (inspection, quarantine, restore) |
 | Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `lib/unattendedGate.ts` (the rules), `server/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
