@@ -10,6 +10,7 @@ type ActivityOptions = {
   token?: string
   onChange: () => void
   onHealthy: (healthy: boolean) => void
+  onEvent?: (event: ActivityLiveEvent) => void
 }
 
 /** Authenticated IPC locally, the existing SSE endpoint for --url. */
@@ -30,6 +31,7 @@ export function watchActivity(options: ActivityOptions): () => void {
     if (!event.type) throw new Error('Activity subscriptions are unavailable on this worker.')
     lastFrameAt = Date.now()
     health(true)
+    options.onEvent?.(event)
     if (event.type !== 'ping') options.onChange()
   }
   const failed = () => {

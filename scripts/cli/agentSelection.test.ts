@@ -179,7 +179,13 @@ test('runtime flags apply Grok effort, interactive prompts and opt-in prompt eff
   ])
   assert.deepEqual(
     nativeArgs({ ...base, runtime: 'claude', model: 'claude-future-6', effort: 'ultrathink' }),
-    ['--model', 'claude-future-6', '--', `Ultrathink:\n${base.prompt}`],
+    [
+      '--dangerously-skip-permissions',
+      '--model',
+      'claude-future-6',
+      '--',
+      `Ultrathink:\n${base.prompt}`,
+    ],
   )
 })
 

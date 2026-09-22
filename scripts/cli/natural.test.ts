@@ -46,7 +46,15 @@ test('implicit tasks select the runtime, model and effort without interpretation
         prompt: result.intent.prompt,
         cwd: '/repo',
       }),
-      ['--model', 'claude-sonnet-5', '--effort', 'low', '--', prompt],
+      [
+        '--dangerously-skip-permissions',
+        '--model',
+        'claude-sonnet-5',
+        '--effort',
+        'low',
+        '--',
+        prompt,
+      ],
     )
   }
 })
@@ -538,7 +546,7 @@ test('native argv keeps shell syntax literal and resumes the exact session', () 
   const prompt = '--help; $(touch /tmp/unwanted) `command`'
   assert.deepEqual(
     nativeArgs({ runtime: 'codex', model: 'gpt-5.6-sol', effort: 'medium', prompt, cwd: '/repo' }),
-    ['--model', 'gpt-5.6-sol', '-c', 'model_reasoning_effort="medium"', '--', prompt],
+    ['--yolo', '--model', 'gpt-5.6-sol', '-c', 'model_reasoning_effort="medium"', '--', prompt],
   )
   assert.deepEqual(
     nativeArgs({
@@ -549,7 +557,7 @@ test('native argv keeps shell syntax literal and resumes the exact session', () 
       prompt: '',
       cwd: '/repo',
     }),
-    ['--resume', 'saved-session', '--effort', 'high'],
+    ['--resume', 'saved-session', '--dangerously-skip-permissions', '--effort', 'high'],
   )
 })
 
@@ -564,6 +572,7 @@ test('native resume uses CLI effort values and does not repeat prompt-injected e
   assert.deepEqual(nativeArgs({ ...input, effort: 'ultracode' }), [
     '--resume',
     'saved-session',
+    '--dangerously-skip-permissions',
     '--model',
     'claude-opus-5',
     '--effort',
@@ -572,6 +581,7 @@ test('native resume uses CLI effort values and does not repeat prompt-injected e
   assert.deepEqual(nativeArgs({ ...input, effort: 'ultrathink' }), [
     '--resume',
     'saved-session',
+    '--dangerously-skip-permissions',
     '--model',
     'claude-opus-5',
   ])

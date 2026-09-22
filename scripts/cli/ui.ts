@@ -4,6 +4,7 @@ import type { TerminalSurface } from './terminal.ts'
 import { openrunHome } from '../../src/server/paths.ts'
 import { CommandHistory } from './history.ts'
 import { isImplicitRequest } from './natural.ts'
+import { CliSession, type HomeOverview } from './session.ts'
 
 export type Choice = { value: string; label: string; hint?: string }
 export type ScheduledTaskView = { id: string; prompt: string; when: string }
@@ -108,10 +109,32 @@ export function requestSuggestion(value: string): string {
         ? 'Choose a command'
         : 'Resolve request'
   const hint = `Enter → ${action}`
-  return `${hint}\n${suggestions
-    .slice(0, 4)
-    .map((choice) => choice.label)
-    .join(' · ')}`
+  return hint
+}
+
+/** Completion is an edit. Enter accepts it first; a second Enter submits. */
+export function inputCompletion(
+  value: string,
+  history: readonly string[] = [],
+): string | undefined {
+  if (!value.trim()) return undefined
+  const prefix = /^openrun\s+/i.exec(value)?.[0] || ''
+  const input = value.slice(prefix.length)
+  const exact = homeMatches(input).find(
+    (choice) =>
+      choice.value === input.toLowerCase() || choice.label.toLowerCase() === input.toLowerCase(),
+  )
+  if (exact) return undefined
+  const choice = homeSuggestions(input)[0]
+  if (choice) {
+    const completion = choice.value.toLowerCase().startsWith(input.toLowerCase())
+      ? choice.value
+      : choice.label.toLowerCase().startsWith(input.toLowerCase())
+        ? choice.label
+        : choice.value
+    return prefix + completion
+  }
+  return [...history].reverse().find((entry) => entry.startsWith(value) && entry !== value)
 }
 export class Cancelled extends Error {}
 export class Back extends Error {}
@@ -206,6 +229,8 @@ export class CliUi {
   private terminal?: TerminalSurface
   private commandHistory?: CommandHistory
   private exitMessage = ''
+  private readonly transcript = new CliSession()
+  private statusMessage = ''
 
   constructor(interactive = interactiveTerminal()) {
     this.interactive = interactive
@@ -214,7 +239,8 @@ export class CliUi {
   async start(): Promise<void> {
     if (!this.interactive || this.terminal) return
     const { TerminalSurface } = await import('./terminal.ts')
-    this.terminal = await TerminalSurface.create()
+    this.terminal = await TerminalSurface.create(this.transcript)
+    this.terminal.setStatus(this.statusMessage)
   }
 
   intro(): void {}
@@ -230,7 +256,35 @@ export class CliUi {
   }
 
   scheduledTasks(tasks: ScheduledTaskView[]): void {
-    this.terminal?.scheduledTasks(tasks)
+    this.overview({ tasks })
+  }
+
+  overview(view: HomeOverview): void {
+    this.transcript.updateOverview(view)
+  }
+
+  scheduleSaved(task: ScheduledTaskView): void {
+    if (!this.interactive) return
+    const tasks = this.transcript.overview.tasks || []
+    const exists = tasks.some((row) => row.id === task.id)
+    this.overview({
+      tasks: [...tasks.filter((row) => row.id !== task.id), task],
+      scheduled: (this.transcript.overview.scheduled ?? tasks.length) + (exists ? 0 : 1),
+    })
+  }
+
+  runStarted(id: string, prompt: string): void {
+    if (!this.interactive) return
+    const runs = this.transcript.overview.activeRuns || []
+    if (runs.some((run) => run.id === id)) return
+    this.overview({
+      activeRuns: [...runs, { id, prompt, when: 'Running' }],
+      running: (this.transcript.overview.running ?? 0) + 1,
+    })
+  }
+
+  runChanged(id: string, status: string): void {
+    this.transcript.runChanged(id, status)
   }
 
   done(message: string): void {
@@ -240,14 +294,26 @@ export class CliUi {
   }
 
   status(message: string): void {
+    this.statusMessage = message
     this.terminal?.setStatus(message)
   }
 
-  beginAction(): void {
+  beginAction(request?: string): void {
+    this.transcript.begin(request)
     this.terminal?.beginAction()
   }
 
+  progress(message: string): void {
+    this.transcript.progress(message)
+  }
+
+  finishAction(message?: string): void {
+    this.transcript.finish(message)
+    this.terminal?.endAction()
+  }
+
   async presentOutput(): Promise<void> {
+    if (this.session) return
     if (this.terminal?.hasUnreadOutput)
       await this.select('Ready to continue?', [{ value: 'home', label: 'Back to Home' }])
   }
