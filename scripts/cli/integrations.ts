@@ -1,7 +1,8 @@
 import { createServer } from 'node:http'
-import { Cancelled, CliUi, interactiveTerminal } from './ui.ts'
+import { backTo, browse, Cancelled, CliUi, interactiveTerminal, steps } from './ui.ts'
 import { ensureProjectChecks, selectRuntime, selectWorkspace } from './guided.ts'
 import type { CliClient } from './local.ts'
+import type { RuntimeChoice, WorkspaceChoice } from '../../src/lib/cliResolve.ts'
 
 type Connection = { id: string; name: string; provider: string; enabled: number }
 type Provider = { id: string; label: string; events: { id: string; label: string }[] }
@@ -130,18 +131,49 @@ export async function integrations(
   remote = false,
 ): Promise<void> {
   if (!words.length && ui.interactive) {
-    const action = await ui.select('Integrations', [
-      { value: 'list', label: 'Your connections' },
-      { value: 'connect', label: 'Connect a provider' },
-      { value: 'configure', label: 'Set up an event automation' },
-      { value: 'providers', label: 'Available providers and events' },
-      { value: 'enable', label: 'Enable a connection' },
-      { value: 'disable', label: 'Pause a connection' },
-      { value: 'disconnect', label: 'Disconnect a provider' },
-      { value: 'exit', label: 'Done' },
-    ])
-    if (action === 'exit') return
-    words = [action]
+    await browse(
+      () =>
+        ui.select('Integrations', [
+          {
+            value: 'list',
+            label: 'Your connections',
+            hint: 'See connected providers and their status.',
+          },
+          {
+            value: 'connect',
+            label: 'Connect a provider',
+            hint: 'Link an account to receive events.',
+          },
+          {
+            value: 'configure',
+            label: 'Set up an event automation',
+            hint: 'Run an agent when a provider event arrives.',
+          },
+          {
+            value: 'providers',
+            label: 'Available providers and events',
+            hint: 'Browse providers and the events that can start work.',
+          },
+          {
+            value: 'enable',
+            label: 'Enable a connection',
+            hint: 'Resume events from a paused connection.',
+          },
+          {
+            value: 'disable',
+            label: 'Pause a connection',
+            hint: 'Pause event triggers while keeping the connection.',
+          },
+          {
+            value: 'disconnect',
+            label: 'Disconnect a provider',
+            hint: 'Remove the provider connection.',
+          },
+          { value: ':exit', label: 'Back' },
+        ]),
+      (action) => integrations(client, [action], json, ui, remote),
+    )
+    return
   }
   const [command = 'list', ...args] = words
   let hint: string | undefined
@@ -229,55 +261,84 @@ export async function integrations(
   }
   if (!['configure', 'enable', 'disable', 'disconnect'].includes(command))
     throw new Error(`Unknown integrations command: ${command}`)
-  const connection = await choose(
-    ui,
-    'connection',
-    connections,
-    (row) => row.name,
-    hint,
-    command === 'configure',
-  )
+  let connection!: Connection
   if (command === 'configure') {
-    const runtime = await selectRuntime(client, options['--runtime'] ?? '', ui)
-    const workspace = await selectWorkspace(client, options['--in'] ?? '', ui, { remote })
-    const provider = providers.find((p) => p.id === connection.provider)
-    if (!provider)
-      throw new Error(
-        `Unknown provider: ${connection.provider}. Run "openrun integrations providers".`,
-      )
-    const event = await choose(
-      ui,
-      'event',
-      provider.events,
-      (e) => e.label,
-      options['--event'],
-      true,
-    )
-    if (ui.interactive) {
-      for (;;) {
-        ui.note(
-          `${connection.name} · ${event.label}\nAgent: ${runtime.label}\nProject: ${workspace.projectName || workspace.name}\nPrompt: ${options['--prompt'] || 'provider default'}\nName: ${options['--name'] || 'automatic'}`,
-          'Event automation',
-        )
-        const action = await ui.select('What next?', [
-          { value: 'create', label: 'Enable automation', hint: 'Enter' },
-          { value: 'prompt', label: 'Customize prompt' },
-          { value: 'name', label: 'Change name' },
-          { value: 'cancel', label: 'Cancel' },
-        ])
-        if (action === 'cancel') throw new Cancelled('No automation created.')
-        if (action === 'create') break
-        options[`--${action}`] = await ui.text(
-          action === 'prompt'
-            ? 'Prompt (empty uses the provider default)'
-            : 'Automation name (empty uses the default)',
-          options[`--${action}`] || '',
-          undefined,
+    let runtime!: RuntimeChoice
+    let workspace!: WorkspaceChoice
+    let event!: Provider['events'][number]
+    const setup: (() => Promise<void>)[] = [
+      async () => {
+        connection = await choose(
+          ui,
+          'connection',
+          connections,
+          (row) => row.name,
+          connection ? undefined : hint,
           true,
         )
-      }
-      await ensureProjectChecks(client, workspace, ui)
-    }
+      },
+      async () => {
+        runtime = await selectRuntime(client, runtime?.id || options['--runtime'] || '', ui)
+      },
+      async () => {
+        workspace = await selectWorkspace(client, workspace?.id || options['--in'] || '', ui, {
+          remote,
+          force: Boolean(workspace),
+        })
+      },
+      async () => {
+        const provider = providers.find((p) => p.id === connection.provider)
+        if (!provider)
+          throw new Error(
+            `Unknown provider: ${connection.provider}. Run "openrun integrations providers".`,
+          )
+        event = await choose(
+          ui,
+          'event',
+          provider.events,
+          (e) => e.label,
+          event ? undefined : options['--event'],
+          true,
+        )
+      },
+      async () => {
+        if (ui.interactive) {
+          for (;;) {
+            ui.note(
+              `${connection.name} · ${event.label}\nAgent: ${runtime.label}\nProject: ${workspace.projectName || workspace.name}\nPrompt: ${options['--prompt'] || 'provider default'}\nName: ${options['--name'] || 'automatic'}`,
+              'Event automation',
+            )
+            const action = await ui.select('What next?', [
+              { value: 'create', label: 'Enable automation', hint: 'Enter' },
+              { value: 'prompt', label: 'Customize prompt' },
+              { value: 'name', label: 'Change name' },
+              { value: 'cancel', label: 'Cancel' },
+            ])
+            if (action === 'cancel') throw new Cancelled('No automation created.')
+            if (action === 'create') {
+              const ready = await backTo(async () => {
+                await ensureProjectChecks(client, workspace, ui)
+                return true
+              })
+              if (ready) break
+              continue
+            }
+            const value = await backTo(() =>
+              ui.text(
+                action === 'prompt'
+                  ? 'Prompt (empty uses the provider default)'
+                  : 'Automation name (empty uses the default)',
+                options[`--${action}`] || '',
+                undefined,
+                true,
+              ),
+            )
+            if (value !== undefined) options[`--${action}`] = value
+          }
+        }
+      },
+    ]
+    await steps(setup)
     const result = (await client.call('integrations.createAutomation', {
       integrationId: connection.id,
       workspaceId: workspace.id,
@@ -295,14 +356,26 @@ export async function integrations(
     )
     return
   }
-  if (
-    ui.interactive &&
-    !(await ui.confirm(
-      `${command === 'disconnect' ? 'Disconnect' : command === 'enable' ? 'Enable' : 'Pause'} ${connection.name}?`,
-      command !== 'disconnect',
-    ))
-  )
-    throw new Cancelled('Connection unchanged.')
+  let confirmed = !ui.interactive
+  await steps([
+    async () => {
+      connection = await choose(
+        ui,
+        'connection',
+        connections,
+        (row) => row.name,
+        connection ? undefined : hint,
+      )
+    },
+    async () => {
+      if (ui.interactive)
+        confirmed = await ui.confirm(
+          `${command === 'disconnect' ? 'Disconnect' : command === 'enable' ? 'Enable' : 'Pause'} ${connection.name}?`,
+          command !== 'disconnect',
+        )
+    },
+  ])
+  if (!confirmed) return
   const result = (await client.call(
     command === 'disconnect' ? 'integrations.disconnectHosted' : 'integrations.update',
     command === 'disconnect'

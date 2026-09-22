@@ -131,6 +131,13 @@ export const CLAUDE_MODELS: ModelOption[] = [
     ],
     provider: 'claude',
   },
+  {
+    slug: 'claude-fable-5-1',
+    name: 'Claude Fable 5.1',
+    shortName: 'Fable 5.1',
+    efforts: CLAUDE_EFFORTS_OPUS,
+    provider: 'claude',
+  },
 ]
 
 export const CODEX_MODELS: ModelOption[] = [
@@ -138,6 +145,13 @@ export const CODEX_MODELS: ModelOption[] = [
     slug: 'gpt-5.6-sol',
     name: 'GPT-5.6-Sol',
     shortName: 'Sol',
+    efforts: CODEX_EFFORTS_5_6,
+    provider: 'codex',
+  },
+  {
+    slug: 'gpt-6-astra',
+    name: 'GPT-6-Astra',
+    shortName: 'Astra',
     efforts: CODEX_EFFORTS_5_6,
     provider: 'codex',
   },
@@ -189,6 +203,20 @@ export const CODEX_MODELS: ModelOption[] = [
 
 export const GROK_MODELS: ModelOption[] = [
   {
+    slug: 'grok-4.7',
+    name: 'Grok 4.7',
+    shortName: 'Grok 4.7',
+    efforts: GROK_EFFORTS,
+    provider: 'grok',
+  },
+  {
+    slug: 'grok-4.7-build-fast',
+    name: 'Grok 4.7 Build Fast',
+    shortName: 'Grok 4.7 Build Fast',
+    efforts: GROK_EFFORTS,
+    provider: 'grok',
+  },
+  {
     slug: 'grok-4.6',
     name: 'Grok 4.6',
     shortName: 'Grok 4.6',
@@ -204,25 +232,20 @@ export const GROK_MODELS: ModelOption[] = [
   },
 ]
 
-const GEMINI_EFFORTS: EffortOption[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium', isDefault: true },
-  { value: 'high', label: 'High' },
-]
-
 export const GEMINI_MODELS: ModelOption[] = [
   {
-    slug: 'gemini-3-pro',
-    name: 'Gemini 3 Pro',
-    shortName: 'Gemini 3 Pro',
-    efforts: GEMINI_EFFORTS,
+    slug: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro Preview',
+    shortName: 'Gemini 3.1 Pro',
+    // Gemini CLI has no effort flag; its model settings own thinking behavior.
+    efforts: [],
     provider: 'gemini',
   },
   {
-    slug: 'gemini-3-flash',
-    name: 'Gemini 3 Flash',
+    slug: 'gemini-3-flash-preview',
+    name: 'Gemini 3 Flash Preview',
     shortName: 'Gemini 3 Flash',
-    efforts: GEMINI_EFFORTS,
+    efforts: [],
     provider: 'gemini',
   },
 ]

@@ -17,7 +17,15 @@
  * offline, unparseable bundle, CLI removed — the static catalog simply stays.
  */
 import { spawn } from 'node:child_process'
-import { createReadStream, lstatSync, readFileSync, readlinkSync, statSync } from 'node:fs'
+import {
+  createReadStream,
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import {
@@ -27,6 +35,7 @@ import {
   parseClaudeBundleModels,
   parseCodexModelsCache,
   parseFxModelsOutput,
+  parseGeminiModelsModule,
   parseGrokModelsOutput,
 } from '../lib/modelDiscovery.ts'
 import {
@@ -59,6 +68,30 @@ const PROVIDERS: Partial<Record<RuntimeModelKind, Provider>> = {
   antigravity: { discover: (p) => runAndParse(p, ['models'], parseAgyModelsOutput, 20_000) },
   grok: { discover: (p) => runAndParse(p, ['models'], parseGrokModelsOutput, 10_000) },
   fx: { discover: (p) => runAndParse(p, ['models', '--json'], parseFxModelsOutput, 20_000) },
+  gemini: {
+    discover: async (p) => {
+      const core = createRequire(realpathSync(p)).resolve('@google/gemini-cli-core')
+      return parseGeminiModelsModule(
+        readFileSync(join(dirname(core), 'config', 'models.js'), 'utf8'),
+      )
+    },
+  },
+}
+
+/** Native launching can discover installed models without opening the database. */
+export async function nativeModelsForBin(bin: string): Promise<ModelOption[]> {
+  const kind = modelKindForBin(bin)
+  const provider = PROVIDERS[kind]
+  const { installed, path } = checkRuntimeInstalled(bin)
+  if (provider && installed) {
+    try {
+      const models = catalogFromDiscovered(kind, await provider.discover(path))
+      if (models.length) return models
+    } catch {
+      // Offline or an unfamiliar CLI version: use the same fallback as the app.
+    }
+  }
+  return modelsForKind(kind)
 }
 
 /**
@@ -168,7 +201,7 @@ export async function refreshModelCatalog(bin: string, opts?: { force?: boolean 
 
 /** Warm every known CLI's catalog once at boot, off the critical path. */
 export function warmModelCatalogs(): void {
-  for (const bin of ['claude', 'codex', 'agy', 'grok', 'fx']) {
+  for (const bin of ['claude', 'codex', 'agy', 'grok', 'gemini', 'fx']) {
     void refreshModelCatalog(bin, { force: true })
   }
 }

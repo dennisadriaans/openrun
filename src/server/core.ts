@@ -845,6 +845,7 @@ function decorate(
             resumeSessionId: task.resumeSessionId,
             workspaceKind: workspace.kind,
             requireIsolation: task.requireIsolation === 1,
+            fireOnce: task.fireOnce === 1,
             health,
             requiresGh,
             ghInstalled: gh.installed,
@@ -1233,7 +1234,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     const runtime = getRuntime(input.runtimeId)
     if (checked && runtime) {
       const refused = unattendedRefusalFor({
-        task: { requireIsolation, requireGhAuth, baseRef, resumeSessionId },
+        task: { requireIsolation, requireGhAuth, baseRef, resumeSessionId, fireOnce },
         trigger: webhookIntegrationId ? 'webhook' : 'schedule',
         runtime,
         workspace: checked.workspace,
@@ -2875,9 +2876,13 @@ export function getDashboard() {
       .prepare("SELECT COUNT(*) AS n FROM runs WHERE startedAt >= ? AND status = 'success'")
       .get(dayAgo) as { n: number }
   ).n
-  const running = (
-    db.prepare("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").get() as { n: number }
-  ).n
+  // The CLI needs every active run, even when newer finished runs fill the recent list.
+  const activeRuns = db
+    .prepare(
+      "SELECT id, taskName, status FROM runs WHERE status = 'running' ORDER BY startedAt ASC",
+    )
+    .all() as { id: string; taskName: string; status: string }[]
+  const running = activeRuns.length
 
   const upcoming = scheduled
     .slice()
@@ -2911,6 +2916,7 @@ export function getDashboard() {
     },
     upcoming,
     recentRuns,
+    activeRuns,
     pending: listPendingRuns(),
   }
 }

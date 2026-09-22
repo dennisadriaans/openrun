@@ -9,10 +9,49 @@ const RUN_OPTIONS = `
   --runtime NAME       preselect an agent (default: last used, then installed)
   --in PATH|NAME       workspace (default: current checkout)
   --model NAME         override the runtime's default model
+  --effort LEVEL       reasoning effort (for example medium or high)
   --prompt TEXT        pass the prompt literally, including schedule words
   --dry-run            preview without creating a run or automation`
 
 const HELP: Record<string, string> = {
+  launch: `openrun [request]
+openrun launch [request | explicit options]
+
+Open an installed coding agent in this terminal with the intended model and effort.
+Supports Codex, Claude Code, Grok, Gemini CLI, Antigravity (agy) and fx.
+A task is optional. Uses your existing agent installation and login.
+
+  openrun sol medium
+  openrun claude opus high
+  openrun "create new file x.html gpt 5.5 extra high"
+  openrun "create new file x.html grok high"
+  openrun "create new file index-test.html with contents '123' sonnet low"
+  openrun "review my changes using Sol with medium reasoning"
+  openrun launch --runtime codex --model gpt-5.6-sol --effort medium
+  openrun launch --runtime claude --prompt "fix the schedule page"
+
+Name the runtime, model and effort in any order, before or after the task.
+For example: openrun "low create a file test.html claude sonnet"
+Quote literal task contents to keep model names inside them as text.
+Complete task requests such as the example above resolve locally.
+Other natural language sends your request and model choices to Open Run + TypeSafe.
+No account or API key is needed. Repository files are not sent. Explicit options
+and literal --prompt / -- text work without hosted interpretation.
+Add schedule to run later: openrun schedule in 10 minutes "review changes" using sol medium
+
+Options${RUN_OPTIONS}
+
+For launch, --in is a local directory. --json requires --dry-run.
+Use openrun run for a managed run that continues after the terminal closes.`,
+  resume: `openrun resume [run-id]
+
+Continue a finished Open Run conversation in its native Codex or Claude Code CLI.
+Uses the saved session ID and execution directory on this machine.
+An active run must finish or be stopped first. Omit the ID to choose a run.
+
+  openrun runs
+  openrun resume <run-id>
+  openrun resume <run-id> --dry-run --json`,
   init: `openrun init [path] [--check COMMAND]…
 
 Register a Git repository and detect its verification commands.
@@ -26,11 +65,14 @@ Omit the time or prompt for guided setup with editable timing presets.
 
   openrun schedule every weekday at 8:30 "sweep dependency updates"
   openrun schedule in 20 minutes "check the build" for claude
+  openrun schedule in 10 minutes "review changes" using sol medium
   openrun schedule cron "0 9 * * 1-5" --prompt "review new issues" --dry-run
 
 Once: at 16:40 · in 20 minutes · tomorrow at 9
 Recurring: every day at 9 · every monday · every 15 minutes · hourly
 Times use the local timezone. Keep the machine awake for schedules to fire.
+Use explicit --runtime, --model, --effort and --prompt options to work offline.
+After a run finishes, openrun resume <run-id> opens its native conversation.
 
 Options${RUN_OPTIONS}
   --name NAME          automation name (default: derived from prompt)
@@ -140,12 +182,16 @@ export function cliHelp(command = ''): string {
   return `openrun — run and schedule local coding agents
 
 Get started in your repository
-  openrun              open the guided menu
+  openrun sol medium    open Codex with Sol and medium reasoning
+  openrun claude opus high
+  openrun              type a request alongside live runs and schedules
   openrun init
   openrun run "fix the flaky checkout test"
   openrun schedule every weekday at 9 "sweep dependency updates"
 
 Commands
+  launch / [request]   open a native agent with the model and effort you describe
+  resume               continue a saved run in its native agent
   init                 register a repository and detect checks
   run                  start a conversation now
   schedule             schedule an automation
@@ -162,6 +208,24 @@ Advanced
   login                sign in for hosted integrations
   api                  access every application operation
 
+The OpenTUI interface stays open after each action. Type or paste from any menu
+to ask for a task, model, effort and timing. Text fields also accept complete
+requests; Ctrl+Enter keeps the text as a field value. The main input handles commands,
+schedules and native launches. Tab or Enter accepts the proposed text inside the
+input; Enter again submits it. Ctrl+A selects all; Ctrl+C copies selected text and
+Ctrl+V pastes. Terminal Copy/Paste shortcuts also work.
+Esc or Ctrl+C without a selection clears the input. Esc on an empty input restores
+the previous field or menu; type quit or press Ctrl+C twice to quit.
+The chat timeline keeps your requests, results and run activity in order, including
+when you return from a native agent. Transcripts are saved in ~/.openrun/cli-sessions/.
+The input stays available while a request is being prepared; further requests queue
+in order. Live schedules, active runs, runs today and enabled integrations stay below
+it. Shift+Tab focuses the timeline; PageUp/PageDown scroll it and Shift+PageUp/PageDown
+scroll the pending panel. Automatic native launches use Codex --yolo and Claude Code
+--dangerously-skip-permissions, allowing commands without approval prompts.
+Running work continues
+after you leave. The interface uses Bun 1.3+ or Node.js 26.4+ automatically;
+scripts and the worker need Node.js 22.12+.
 The worker starts automatically. Enter confirms sensible defaults; ↑↓ changes
 choices. Run now or choose a schedule, with a summary before starting work.
 Use --yes to skip prompts, --json for scripts, NO_COLOR=1 to disable colors.

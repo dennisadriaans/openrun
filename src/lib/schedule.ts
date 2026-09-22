@@ -128,6 +128,7 @@ export function formatScheduledRunLabel(scheduledAt: number): string | null {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    ...(date.getSeconds() ? { second: '2-digit' as const } : {}),
   }).format(date)
   return `Scheduled ${formatted} ${formatTimezoneOffset(date)}`
 }

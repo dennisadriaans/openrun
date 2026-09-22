@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chooseSchedule, guideRun, selectRuntime, selectWorkspace } from './guided.ts'
-import { Cancelled, type Choice, type FlowUi } from './ui.ts'
+import { Back, Cancelled, type Choice, type FlowUi } from './ui.ts'
 import type { CliClient } from './local.ts'
 
-function terminal(answers: string[] = [], textAnswers: string[] = [], preferredRuntime = 'codex') {
+function terminal(
+  answers: (string | Error)[] = [],
+  textAnswers: (string | Error)[] = [],
+  preferredRuntime = 'codex',
+) {
   const selections: { message: string; value: string }[] = []
   const texts: { message: string; initial: string }[] = []
   const ui: FlowUi = {
@@ -14,6 +18,7 @@ function terminal(answers: string[] = [], textAnswers: string[] = [], preferredR
     note() {},
     async select(message: string, choices: Choice[], initial = choices[0]?.value) {
       const value = answers.shift() ?? initial!
+      if (value instanceof Error) throw value
       assert.ok(
         choices.some((choice) => choice.value === value),
         `Unavailable choice ${value} for ${message}`,
@@ -23,6 +28,7 @@ function terminal(answers: string[] = [], textAnswers: string[] = [], preferredR
     },
     async text(message, initial = '', validate) {
       const value = textAnswers.shift() ?? initial
+      if (value instanceof Error) throw value
       texts.push({ message, initial })
       assert.equal(validate?.(value), undefined)
       return value
@@ -196,4 +202,29 @@ test('a preview outside a registered project offers exit without registering any
     Cancelled,
   )
   assert.ok(calls.every((row) => row.operation.endsWith('.list')))
+})
+
+test('back through run setup keeps the prompt and allows changing the agent without writes', async () => {
+  const { client, calls } = fixture()
+  const { ui, texts } = terminal(
+    [new Back(), 'claude', 'go'],
+    ['Review the CLI', 'Review the CLI navigation'],
+  )
+  const intent = await guideRun(client, [], 'run', ui)
+  assert.equal(texts[1]?.initial, 'Review the CLI')
+  assert.equal(intent.prompt, 'Review the CLI navigation')
+  assert.equal(intent.runtimeHint, 'claude')
+  assert.ok(calls.every((row) => row.operation.endsWith('.list')))
+})
+
+test('back from a settings field returns to settings and keeps the existing model', async () => {
+  const { client } = fixture()
+  const { ui } = terminal(['codex', 'settings', 'model', 'back', 'go'], [new Back()])
+  const intent = await guideRun(client, ['--model=original', '--prompt=Review it'], 'run', ui)
+  assert.equal(intent.modelHint, 'original')
+})
+
+test('back from weekly time returns to the day, then schedule selection', async () => {
+  const { ui } = terminal(['week', 'friday', new Back(), 'day'], [new Back(), '10:30'])
+  assert.deepEqual(await chooseSchedule(ui), { kind: 'recurring', cron: '30 10 * * *' })
 })

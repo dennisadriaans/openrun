@@ -60,6 +60,62 @@ describe('unattendedGate', () => {
     assert.match(reason ?? '', /uncommitted changes/i)
   })
 
+  it('a one-time task may continue edits in the user checkout', () => {
+    assert.equal(
+      unattendedBlockedReason(
+        input({
+          workspaceKind: 'main',
+          requireIsolation: false,
+          fireOnce: true,
+          health: { ...healthy, code: 'dirty', dirty: true },
+        }),
+      ),
+      null,
+    )
+  })
+
+  it('a one-time task still checks its branch, directory, quarantine and managed worktrees', () => {
+    for (const code of [
+      'branch-drift',
+      'detached',
+      'blocked',
+      'missing',
+      'not-a-worktree',
+    ] as const) {
+      assert.ok(
+        unattendedBlockedReason(
+          input({
+            workspaceKind: 'main',
+            requireIsolation: false,
+            fireOnce: true,
+            health: { ...healthy, code },
+          }),
+        ),
+        code,
+      )
+    }
+    assert.ok(
+      unattendedBlockedReason(
+        input({
+          workspaceKind: 'worktree',
+          requireIsolation: false,
+          fireOnce: true,
+          health: { ...healthy, code: 'dirty', dirty: true },
+        }),
+      ),
+    )
+    assert.ok(
+      unattendedBlockedReason(
+        input({
+          workspaceKind: 'main',
+          requireIsolation: true,
+          fireOnce: true,
+          health: { ...healthy, code: 'dirty', dirty: true },
+        }),
+      ),
+    )
+  })
+
   it('a webhook execution ignores source-checkout contamination', () => {
     assert.equal(
       unattendedBlockedReason(

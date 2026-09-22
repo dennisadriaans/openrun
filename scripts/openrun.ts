@@ -2,12 +2,41 @@
 /** CLI over the shared contract: local IPC by default, HTTP only with --url. */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { commandCorrection, readCliArgs, requestsUnattended, type GlobalFlags } from './cli/args.ts'
+import {
+  commandCorrection,
+  readCliArgs,
+  readCliLine,
+  requestsUnattended,
+  type GlobalFlags,
+} from './cli/args.ts'
 import { cliHelp } from './cli/help.ts'
-import { accent, Cancelled, CliUi, commandMenu, interactiveTerminal } from './cli/ui.ts'
-import { guideRun, manageRuntimes, registerProject } from './cli/guided.ts'
+import { launchTerminalRuntime } from './cli/terminalRuntime.ts'
+import {
+  accent,
+  Back,
+  backTo,
+  browse,
+  Cancelled,
+  CliUi,
+  CommandRequest,
+  homeMatches,
+  interactiveTerminal,
+  Quit,
+} from './cli/ui.ts'
+import { watchHome, taskTiming, type TaskRowView } from './cli/home.ts'
+import {
+  guideRun,
+  manageRuntimes,
+  registerProject,
+  selectWorkspace,
+  ensureProjectChecks,
+} from './cli/guided.ts'
+import { launchNative, prepareNativeIntent, type NativeLaunch } from './cli/native.ts'
+import { modelKindForBin } from '../src/lib/models.ts'
+import { nativeSessionExists, validateNativeSessionId } from '../src/server/nativeSessions.ts'
 import {
   ensureLocalRuntime,
+  localCall,
   localStatus,
   stopLocalRuntime,
   unavailable,
@@ -149,6 +178,7 @@ function printIntent(
   console.log(field('Workspace', `${workspaceLabel(workspace)}   ${workspace.path}`))
   console.log(field('Fires', scheduleLabel(intent)))
   if (intent.modelHint) console.log(field('Model', intent.modelHint))
+  if (intent.effortHint) console.log(field('Effort', intent.effortHint))
   if (intent.openPr) console.log(field('Ships', 'branch, commit, push, open a pull request'))
   console.log(field('Prompt', prompt.split('\n')[0] ?? ''))
   for (const line of prompt.split('\n').slice(1)) {
@@ -169,6 +199,133 @@ type Context = {
   flags: GlobalFlags
   url: string
   ui: CliUi
+}
+
+/** Resolve only missing scheduling prerequisites; a complete request needs no tour. */
+async function scheduleInterpreted(ctx: Context, intent: CliIntent): Promise<number> {
+  const runtimes = await listOf<RuntimeChoice>(ctx.client, 'runtimes.list')
+  let runtime = resolveRuntime(intent.runtimeHint || ctx.ui.preferredRuntime, runtimes)
+  if (!runtime.ok && ctx.ui.interactive && !intent.runtimeHint) {
+    const available = runtimes.filter((row) => row.enabled && row.installed !== false)
+    const selected = await ctx.ui.select(
+      'Which agent should run it?',
+      available.map((row) => ({
+        value: row.id,
+        label: runtimeLabel(row),
+      })),
+    )
+    runtime = resolveRuntime(selected, runtimes)
+  }
+  if (!runtime.ok) throw new Error(runtime.error)
+  const rows = await listOf<WorkspaceChoice>(ctx.client, 'workspaces.list', {})
+  const workspace = resolveWorkspace(intent.workspaceHint, process.cwd(), rows)
+  if (!workspace.ok && !ctx.flags.dryRun) {
+    const project = await registerProject(
+      ctx.client,
+      intent.workspaceHint || process.cwd(),
+      false,
+      ctx.ui,
+    )
+    intent.workspaceHint = project.path
+  }
+  const selected = await selectWorkspace(ctx.client, intent.workspaceHint, ctx.ui, {
+    dryRun: ctx.flags.dryRun,
+  })
+  if (!ctx.flags.dryRun) await ensureProjectChecks(ctx.client, selected, ctx.ui)
+  return cmdSchedule(ctx, { ...intent, runtimeHint: runtime.value.id, workspaceHint: selected.id })
+}
+
+async function cmdLaunch(ctx: Context, mode: 'auto' | 'schedule' = 'auto'): Promise<number> {
+  if (ctx.url)
+    throw new Error(
+      'Native launching uses this machine. Omit --url, or use openrun run for a remote managed run.',
+    )
+  let words = ctx.flags.rest
+  if (!words.length && ctx.ui.interactive) {
+    const text = await ctx.ui.text(
+      'Which agent or task? Try “Sol medium” or “review my changes using Opus high”',
+      '',
+      undefined,
+      true,
+    )
+    words = text ? [text] : []
+  }
+  const { action, intent } = await prepareNativeIntent(words, ctx.ui, mode)
+  if (action === 'help') {
+    console.log(cliHelp())
+    return 0
+  }
+  if (action !== 'launch' && action !== 'schedule')
+    return main(action, { ...ctx, flags: { ...ctx.flags, rest: [] } })
+  if (action === 'schedule') return scheduleInterpreted(ctx, intent)
+  return launchNative(
+    {
+      runtime: intent.runtimeHint as NativeLaunch['runtime'],
+      model: intent.modelHint,
+      effort: intent.effortHint || '',
+      prompt: intent.prompt,
+      cwd: intent.workspaceHint || process.cwd(),
+    },
+    ctx.flags,
+    ctx.ui,
+  )
+}
+
+async function cmdResume(ctx: Context): Promise<number> {
+  if (ctx.url)
+    throw new Error(
+      'Resume the native session on the machine that ran it. Omit --url on that machine.',
+    )
+  let id = ctx.flags.rest[0]
+  if (!id) {
+    const runs = await listOf<RunRowView>(ctx.client, 'runs.list', { limit: 30 })
+    id = await ctx.ui.select(
+      'Which conversation should open in its agent?',
+      runs.map((run) => ({
+        value: run.id,
+        label: run.taskName || run.id,
+        hint: run.status,
+      })),
+    )
+  }
+  const run = (await ctx.client.call('runs.get', { id })) as {
+    cwd: string
+    runtimeId: string
+    sessionId: string
+    status: string
+    model: string
+    effort: string
+  } | null
+  if (!run) throw new Error(`Run ${id} was not found. Choose one with openrun runs.`)
+  if (run.status === 'running' || run.status === 'queued')
+    throw new Error(
+      `This run is still active. Wait for it to finish, or stop it with openrun cancel ${id}.`,
+    )
+  const runtimes = await listOf<RuntimeChoice>(ctx.client, 'runtimes.list')
+  const runtime = runtimes.find((row) => row.id === run.runtimeId)
+  const kind = modelKindForBin(runtime?.bin || '')
+  if (kind !== 'codex' && kind !== 'claude')
+    throw new Error('Native resume currently supports Codex and Claude Code runs.')
+  if (!run.sessionId)
+    throw new Error('This run did not save a native session. Read it with openrun show instead.')
+  validateNativeSessionId(run.sessionId)
+  if (!nativeSessionExists(run.cwd, kind, run.sessionId))
+    throw new Error(
+      'The native session or its execution directory is no longer available on this machine.',
+    )
+  return launchNative(
+    {
+      runtime: kind,
+      binary: runtime!.bin,
+      model: run.model || '',
+      effort: run.effort || '',
+      prompt: '',
+      cwd: run.cwd,
+      sessionId: run.sessionId,
+    },
+    ctx.flags,
+    ctx.ui,
+  )
 }
 
 async function listOf<T>(client: CliClient, id: string, input?: unknown): Promise<T[]> {
@@ -214,7 +371,15 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
     if (ctx.flags.json) {
       console.log(
         JSON.stringify(
-          { name, prompt, runtimeId: runtime.id, workspaceId: workspace.id, ...intent.schedule },
+          {
+            name,
+            prompt,
+            runtimeId: runtime.id,
+            workspaceId: workspace.id,
+            model: intent.modelHint,
+            effort: intent.effortHint || '',
+            ...intent.schedule,
+          },
           null,
           2,
         ),
@@ -222,6 +387,7 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
       return 0
     }
     if (ctx.ui.interactive) {
+      printIntent('Would schedule', name, intent, runtime, workspace, prompt)
       ctx.ui.done('Preview complete. No automation created.')
       return 0
     }
@@ -230,22 +396,35 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
     return 0
   }
 
-  const saved = (await ctx.client.call('tasks.save', {
-    name,
-    description: 'Scheduled from the command line.',
-    runtimeId: runtime.id,
-    prompt,
-    cwd: workspace.path,
-    workspaceId: workspace.id,
-    cron: intent.schedule.cron,
-    enabled: true,
-    model: intent.modelHint,
-    fireOnce: intent.schedule.kind === 'once',
-    scheduledAt: intent.schedule.kind === 'once' ? intent.schedule.at : 0,
-    // Asking an unattended agent to push means `gh` has to work when it fires,
-    // not when it finishes. This is the existing preflight, not a new rule.
-    requireGhAuth: intent.openPr,
-  })) as { id: string; name: string } | null
+  ctx.ui.progress('Saving schedule')
+  const saved = (await ctx.client
+    .call('tasks.save', {
+      name,
+      description: 'Scheduled from the command line.',
+      runtimeId: runtime.id,
+      prompt,
+      cwd: workspace.path,
+      workspaceId: workspace.id,
+      cron: intent.schedule.cron,
+      enabled: true,
+      model: intent.modelHint,
+      effort: intent.effortHint || '',
+      fireOnce: intent.schedule.kind === 'once',
+      scheduledAt: intent.schedule.kind === 'once' ? intent.schedule.at : 0,
+      // Asking an unattended agent to push means `gh` has to work when it fires,
+      // not when it finishes. This is the existing preflight, not a new rule.
+      requireGhAuth: intent.openPr,
+    })
+    .catch((error: unknown) => {
+      throw new Error(
+        `Could not confirm schedule: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })) as { id: string; name: string } | null
+  if (!saved?.id)
+    throw new Error(
+      'The worker did not confirm a saved automation. Check automations before retrying.',
+    )
+  ctx.ui.scheduleSaved({ id: saved.id, prompt, when: scheduleLabel(intent) })
   ctx.ui.rememberRuntime(runtime.id)
 
   if (ctx.flags.json) {
@@ -254,8 +433,9 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
   }
 
   if (ctx.ui.interactive) {
+    ctx.ui.session = true
     ctx.ui.done(
-      `Scheduled · ${saved?.name ?? name}\n\nNext: openrun automations\nPause: openrun disable ${saved?.id ?? ''}`,
+      `Scheduled · ${saved?.name ?? name}\n${scheduleLabel(intent)}\n${runtimeLabel(runtime)} · ${intent.modelHint || 'default model'} · ${intent.effortHint || 'default effort'}\n${workspace.path}\n\nNext: openrun runs\nContinue a finished run: openrun resume <run-id>\nPause: openrun disable ${saved?.id ?? ''}`,
     )
     return 0
   }
@@ -283,7 +463,13 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     if (ctx.flags.json) {
       console.log(
         JSON.stringify(
-          { prompt, runtimeId: runtime.id, workspaceId: workspace.id, model: intent.modelHint },
+          {
+            prompt,
+            runtimeId: runtime.id,
+            workspaceId: workspace.id,
+            model: intent.modelHint,
+            effort: intent.effortHint || '',
+          },
           null,
           2,
         ),
@@ -299,12 +485,15 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     return 0
   }
 
+  ctx.ui.progress('Starting run')
   const started = (await ctx.client.call('runs.startChat', {
     workspaceId: workspace.id,
     runtimeId: runtime.id,
     prompt,
     model: intent.modelHint,
+    effort: intent.effortHint || '',
   })) as { runId: string } | null
+  if (started?.runId) ctx.ui.runStarted(started.runId, deriveTaskName(intent.prompt))
   ctx.ui.rememberRuntime(runtime.id)
 
   if (ctx.flags.json) {
@@ -324,14 +513,6 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
   return 0
 }
 
-type TaskRowView = TaskChoice & {
-  cron?: string
-  fireOnce?: number
-  scheduledAt?: number
-  runtimeId?: string
-  nextRunAt?: number | null
-}
-
 async function cmdList(ctx: Context): Promise<number> {
   const tasks = await listOf<TaskRowView>(ctx.client, 'tasks.list')
   if (ctx.flags.json) {
@@ -348,32 +529,39 @@ async function cmdList(ctx: Context): Promise<number> {
   }
 
   if (ctx.ui.interactive) {
-    const id = await ctx.ui.select('Your automations', [
-      ...tasks.map((task) => ({
-        value: task.id,
-        label: task.name,
-        hint: task.enabled ? 'enabled' : 'paused',
-      })),
-      { value: ':new', label: 'Create a schedule' },
-      { value: ':exit', label: 'Done' },
-    ])
-    if (id === ':exit') return 0
-    if (id === ':new') return main('schedule', { ...ctx, flags: { ...ctx.flags, rest: [] } })
-    const task = tasks.find((row) => row.id === id)!
-    ctx.ui.note(
-      `${task.name}\n${task.id}\n${task.enabled ? (task.fireOnce ? formatScheduledRunLabel(task.scheduledAt ?? 0) : formatNextRunLabel(task.cron ?? '')) : 'Paused'}`,
-      'Automation',
-    )
-    const action = await ctx.ui.select('Manage this automation', [
-      { value: ':exit', label: 'Done' },
-      { value: 'now', label: 'Run now' },
-      {
-        value: task.enabled ? 'disable' : 'enable',
-        label: task.enabled ? 'Pause schedule' : 'Enable schedule',
+    let current = tasks
+    await browse(
+      async () => {
+        current = await listOf<TaskRowView>(ctx.client, 'tasks.list')
+        return ctx.ui.select('Your automations', [
+          ...current.map((task) => ({ value: task.id, label: task.name, hint: taskTiming(task) })),
+          { value: ':new', label: 'Create a schedule' },
+          { value: ':exit', label: 'Back' },
+        ])
       },
-      { value: 'rm', label: 'Delete automation' },
-    ])
-    return action === ':exit' ? 0 : main(action, { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+      async (id) => {
+        if (id === ':new') return main('schedule', { ...ctx, flags: { ...ctx.flags, rest: [] } })
+        await browse(
+          async () => {
+            current = await listOf<TaskRowView>(ctx.client, 'tasks.list')
+            const task = current.find((row) => row.id === id)
+            if (!task) return ':exit'
+            ctx.ui.note(`${task.name}\n${task.id}\n${taskTiming(task)}`, 'Automation')
+            return ctx.ui.select('Manage this automation', [
+              { value: 'now', label: 'Run now' },
+              {
+                value: task.enabled ? 'disable' : 'enable',
+                label: task.enabled ? 'Pause automation' : 'Enable automation',
+              },
+              { value: 'rm', label: 'Delete automation' },
+              { value: ':exit', label: 'Back to automations' },
+            ])
+          },
+          (action) => main(action, { ...ctx, flags: { ...ctx.flags, rest: [id] } }),
+        )
+      },
+    )
+    return 0
   }
 
   console.log('')
@@ -440,15 +628,41 @@ async function cmdRuns(ctx: Context): Promise<number> {
   }
 
   if (ctx.ui.interactive) {
-    const id = await ctx.ui.select('Recent runs · choose one to read', [
-      ...runs.map((run) => ({
-        value: run.id,
-        label: run.taskName || run.id,
-        hint: `${run.status ?? ''} · ${run.id}`,
-      })),
-      { value: ':exit', label: 'Done' },
-    ])
-    return id === ':exit' ? 0 : main('show', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+    await browse(
+      async () => {
+        const current = await listOf<RunRowView>(ctx.client, 'runs.list', {
+          limit: ctx.flags.limit || 15,
+        })
+        return ctx.ui.select('Recent runs · choose one to read', [
+          ...current.map((run) => ({
+            value: run.id,
+            label: run.taskName || run.id,
+            hint: `${run.status ?? ''} · ${run.id}`,
+          })),
+          { value: ':exit', label: 'Back' },
+        ])
+      },
+      async (id) => {
+        await browse(
+          async () => {
+            await main('show', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+            return ctx.ui.select('Run actions', [
+              { value: ':exit', label: 'Back to recent runs' },
+              { value: 'refresh', label: 'Refresh conversation' },
+              { value: 'resume', label: 'Continue in the native agent' },
+              { value: 'cancel', label: 'Stop run' },
+            ])
+          },
+          async (action) => {
+            if (action === 'cancel')
+              await main('cancel', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+            if (action === 'resume')
+              await main('resume', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+          },
+        )
+      },
+    )
+    return 0
   }
 
   console.log('')
@@ -502,7 +716,7 @@ async function withTask(
       verb !== 'Deleted',
     ))
   )
-    throw new Cancelled('Automation unchanged.')
+    return 0
   const result = (await act(task)) as { runId?: string } | undefined
   const runId = result?.runId
   console.log(
@@ -562,6 +776,10 @@ async function cmdWhere(ctx: Context): Promise<number> {
 
 async function main(command: string, ctx: Context): Promise<number> {
   switch (command) {
+    case 'launch':
+      return cmdLaunch(ctx)
+    case 'resume':
+      return cmdResume(ctx)
     case 'worker':
       return cmdWorker(ctx)
     case 'init': {
@@ -628,26 +846,36 @@ async function main(command: string, ctx: Context): Promise<number> {
       }
       const rows = await listOf<Record<string, unknown>>(ctx.client, `${command}.list`)
       if (ctx.ui.interactive && command === 'projects') {
-        const id = await ctx.ui.select('Your projects', [
-          ...rows.map((row) => ({
-            value: String(row.id),
-            label: String(row.name),
-            hint: String(row.path),
-          })),
-          { value: ':add', label: 'Register a repository' },
-          { value: ':exit', label: 'Done' },
-        ])
-        if (id === ':exit') return 0
-        if (id === ':add') return main('init', { ...ctx, flags: { ...ctx.flags, rest: [] } })
-        const project = rows.find((row) => row.id === id)!
-        const action = await ctx.ui.select(String(project.name), [
-          { value: 'run', label: 'Run a task here' },
-          { value: 'schedule', label: 'Schedule work here' },
-          { value: ':exit', label: 'Done' },
-        ])
-        return action === ':exit'
-          ? 0
-          : main(action, { ...ctx, flags: { ...ctx.flags, rest: [`--in=${project.path}`] } })
+        let current = rows
+        await browse(
+          async () => {
+            current = await listOf<Record<string, unknown>>(ctx.client, 'projects.list')
+            return ctx.ui.select('Your projects', [
+              ...current.map((row) => ({
+                value: String(row.id),
+                label: String(row.name),
+                hint: String(row.path),
+              })),
+              { value: ':add', label: 'Register a repository' },
+              { value: ':exit', label: 'Back' },
+            ])
+          },
+          async (id) => {
+            if (id === ':add') return main('init', { ...ctx, flags: { ...ctx.flags, rest: [] } })
+            const project = current.find((row) => row.id === id)!
+            await browse(
+              () =>
+                ctx.ui.select(String(project.name), [
+                  { value: 'run', label: 'Run a task here' },
+                  { value: 'schedule', label: 'Schedule work here' },
+                  { value: ':exit', label: 'Back to projects' },
+                ]),
+              (action) =>
+                main(action, { ...ctx, flags: { ...ctx.flags, rest: [`--in=${project.path}`] } }),
+            )
+          },
+        )
+        return 0
       }
       if (ctx.flags.json) console.log(JSON.stringify(rows, null, 2))
       else if (!rows.length)
@@ -694,7 +922,7 @@ async function main(command: string, ctx: Context): Promise<number> {
         throw new Error(id ? `Run not found: ${id}` : `Usage: openrun ${command} <run-id>`)
       if (command === 'cancel') {
         if (ctx.ui.interactive && !(await ctx.ui.confirm(`Stop “${run.taskName || id}”?`, false)))
-          throw new Cancelled('Run left running.')
+          return 0
         const result = await ctx.client.call('runs.cancel', { id })
         console.log(
           ctx.flags.json
@@ -713,10 +941,15 @@ async function main(command: string, ctx: Context): Promise<number> {
       const operations = OPERATIONS.filter((op) => op.clients.includes('desktop'))
       if (ctx.ui.interactive && (!id || !operations.some((op) => op.id === id))) {
         if (id) ctx.ui.info(`Unknown operation: ${id}`)
-        id = await ctx.ui.select(
-          'Choose an operation',
-          operations.map((op) => ({ value: op.id, label: op.id, hint: op.method })),
+        await browse(
+          () =>
+            ctx.ui.select('Choose an operation', [
+              ...operations.map((op) => ({ value: op.id, label: op.id, hint: op.method })),
+              { value: ':exit', label: 'Back' },
+            ]),
+          (operation) => main('api', { ...ctx, flags: { ...ctx.flags, rest: [operation] } }),
         )
+        return 0
       }
       if (!id) {
         console.log(
@@ -761,6 +994,26 @@ async function main(command: string, ctx: Context): Promise<number> {
     }
     case 'schedule':
     case 'run': {
+      if (
+        command === 'schedule' &&
+        !ctx.url &&
+        ctx.flags.rest.length &&
+        ctx.flags.rest.some((word) => /^--(runtime|model|effort|prompt|cron)(=|$)/.test(word))
+      ) {
+        const complete = parseCliSchedule(ctx.flags.rest)
+        if (complete.ok && complete.intent.schedule.kind !== 'now')
+          return scheduleInterpreted(ctx, complete.intent)
+      }
+      if (
+        command === 'schedule' &&
+        !ctx.url &&
+        ctx.flags.rest.length &&
+        !ctx.flags.rest.some(
+          (word) => word === '--' || /^--(runtime|model|effort|prompt|cron)(=|$)/.test(word),
+        )
+      ) {
+        return cmdLaunch(ctx, 'schedule')
+      }
       let intent: CliIntent
       if (ctx.ui.interactive) {
         intent = await guideRun(ctx.client, ctx.flags.rest, command, ctx.ui, {
@@ -813,22 +1066,27 @@ async function main(command: string, ctx: Context): Promise<number> {
 async function cmdWorker(ctx: Context): Promise<number> {
   const { flags, url, ui } = ctx
   if (url) throw new Error('Worker controls are local. Remove --url / OPENRUN_URL.')
-  const action =
-    flags.rest[0] ??
-    (ui.interactive
-      ? await ui.select('Background worker', [
+  if (!flags.rest.length && ui.interactive) {
+    await browse(
+      () =>
+        ui.select('Background worker', [
           { value: 'status', label: 'Show status' },
           { value: 'start', label: 'Start worker' },
           { value: 'logs', label: 'Read logs' },
           { value: 'stop', label: 'Stop worker', hint: 'also cancels active runs' },
-        ])
-      : 'status')
+          { value: ':exit', label: 'Back' },
+        ]),
+      (action) => cmdWorker({ ...ctx, flags: { ...flags, rest: [action] } }),
+    )
+    return 0
+  }
+  const action = flags.rest[0] ?? 'status'
   if (
     action === 'stop' &&
     ui.interactive &&
     !(await ui.confirm('Stop the worker and cancel its active runs?', false))
   )
-    throw new Cancelled('Worker unchanged.')
+    return 0
   if (action === 'logs') {
     try {
       const logs = readFileSync(join(openrunHome(), 'worker.log'), 'utf8')
@@ -874,42 +1132,52 @@ async function cmdWorker(ctx: Context): Promise<number> {
   return 0
 }
 
-async function entry(): Promise<void> {
+async function entry(interactive: boolean, initialRequest?: string): Promise<void> {
   let url = ''
-  const ui = new CliUi(interactiveTerminal() && !requestsUnattended(process.argv.slice(2)))
+  let restartRequest: string | undefined
+  const ui = new CliUi(interactive)
+  let home: ReturnType<typeof watchHome> | undefined
   try {
+    await ui.start()
     let argv = process.argv.slice(2)
     let parsed: ReturnType<typeof readCliArgs>
     for (;;) {
       try {
-        parsed = readCliArgs(argv, ui.interactive)
+        parsed =
+          initialRequest === undefined ? readCliArgs(argv, ui.interactive) : readCliArgs([], true)
         break
       } catch (error) {
         if (!ui.interactive) throw error
         ui.intro()
         ui.info(explain(error, url))
-        const choice = await ui.select('Let’s fix that', [
-          { value: 'edit', label: 'Edit the command', hint: 'your arguments are kept' },
-          { value: 'help', label: 'Show command reference' },
-          { value: 'exit', label: 'Exit' },
-        ])
-        if (choice === 'exit') throw new Cancelled('Nothing started.')
+        const choice = await backTo(() =>
+          ui.select('Let’s fix that', [
+            { value: 'edit', label: 'Edit the command', hint: 'your arguments are kept' },
+            { value: 'help', label: 'Show command reference' },
+            { value: 'exit', label: 'Quit Open Run' },
+          ]),
+        )
+        if (!choice) continue
+        if (choice === 'exit') throw new Quit()
         if (choice === 'help') {
           console.log(cliHelp())
           continue
         }
         const correction = commandCorrection(argv)
-        const line = await ui.text(
-          'Command arguments (without openrun; authentication kept)',
-          correction.line,
-          (value) => {
-            try {
-              readCliArgs(correction.parse(value), true)
-            } catch (err) {
-              return err instanceof Error ? err.message : String(err)
-            }
-          },
+        const line = await backTo(() =>
+          ui.text(
+            'Command arguments (without openrun; authentication kept)',
+            correction.line,
+            (value) => {
+              try {
+                readCliArgs(correction.parse(value), true)
+              } catch (err) {
+                return err instanceof Error ? err.message : String(err)
+              }
+            },
+          ),
         )
+        if (line === undefined) continue
         argv = correction.parse(line)
         ui.interactive = interactiveTerminal() && !requestsUnattended(argv)
       }
@@ -928,19 +1196,22 @@ async function entry(): Promise<void> {
         } catch (error) {
           if (!ui.interactive) throw error
           ui.info(explain(error, url))
-          flags.url = await ui.text('Server URL', flags.url || openrunEnv('URL') || '', (value) => {
-            try {
-              serverUrl(value)
-            } catch (err) {
-              return (err as Error).message
-            }
-          })
+          const corrected = await backTo(() =>
+            ui.text('Server URL', flags.url || openrunEnv('URL') || '', (value) => {
+              try {
+                serverUrl(value)
+              } catch (err) {
+                return (err as Error).message
+              }
+            }),
+          )
+          if (corrected !== undefined) flags.url = corrected
         }
       }
     }
     ui.intro()
     if (url && ui.interactive) ui.info(`Connected target: ${url}`)
-    if (!command) command = await commandMenu(ui)
+    ui.session = !command
     // Resolve transport lazily: help, operation discovery and worker status do not start a worker.
     let local: Promise<CliClient> | undefined
     const client: CliClient = url
@@ -957,51 +1228,130 @@ async function entry(): Promise<void> {
           },
         }
     const ctx: Context = { client, flags, url, ui }
+    const overviewClient = url ? client : { call: localCall }
+    if (ui.interactive) {
+      home = watchHome(overviewClient, ui, {
+        url,
+        token: flags.token || (url ? storedToken(url) : ''),
+        firstLoad: !command ? client : overviewClient,
+      })
+      if (command) ui.beginAction(argv.join(' '))
+    }
+    let pendingRequest = initialRequest
     for (;;) {
-      if (command === 'exit') {
-        ui.done('See you next run.')
-        return
+      if (!command) {
+        const request = pendingRequest ?? (await backTo(() => ui.homeRequest())) ?? ''
+        pendingRequest = undefined
+        if (!request) continue
+        ui.beginAction(request)
+        try {
+          const input = request.replace(/^openrun\s+/i, '')
+          const matches = homeMatches(input)
+          if (matches.length) {
+            command =
+              matches.length === 1
+                ? matches[0]!.value
+                : await ui.select('Choose a command', matches)
+            ctx.flags = { ...flags, rest: [], dryRun: false, limit: 0 }
+          } else {
+            const parsedHome = readCliLine(input)
+            command = parsedHome.help ? 'help' : parsedHome.command
+            ctx.flags = { ...flags, ...parsedHome.flags, url: flags.url, token: flags.token }
+            if (parsedHome.help) ctx.flags.rest = [parsedHome.command]
+          }
+        } catch (error) {
+          if (error instanceof CommandRequest) {
+            ui.finishAction('Switched to another request.')
+            pendingRequest = error.request
+            command = ''
+            ui.session = true
+            continue
+          }
+          if (error instanceof Quit) throw error
+          ui.info(
+            error instanceof Back || error instanceof Cancelled
+              ? error.message || 'Cancelled request.'
+              : error instanceof Error
+                ? error.message
+                : String(error),
+          )
+          ui.finishAction()
+          command = ''
+          continue
+        }
+        if (command === 'refresh') {
+          home?.refresh()
+          ui.finishAction('Refreshing overview.')
+          command = ''
+          continue
+        }
+        local = undefined
       }
-      if (command === 'help') {
-        console.log(cliHelp())
+      if (command === 'exit') {
+        ui.session = false
+        ui.done('See you next run. The worker keeps running.')
         return
       }
       try {
-        process.exitCode = await main(command, ctx)
-        return
+        if (command === 'help') console.log(cliHelp(ctx.flags.rest[0] || ''))
+        else process.exitCode = await main(command, ctx)
+        if (!ui.session) return
+        await ui.presentOutput()
       } catch (error) {
-        if (error instanceof Cancelled || !ui.interactive) throw error
-        ui.note(explain(error, url), 'Let’s get you unstuck')
-        // Do not replay writes: a dropped response can still mean the run was started.
-        command = await ui.select('What would you like to do next?', [
-          {
-            value: 'runs',
-            label: 'Inspect recent runs',
-            hint: 'check whether work already started',
-          },
-          { value: 'init', label: 'Set up a project' },
-          { value: 'runtimes', label: 'Configure agents' },
-          ...(!url ? [{ value: 'worker', label: 'Worker status and logs' }] : []),
-          { value: 'menu', label: 'Choose another command' },
-          { value: 'exit', label: 'Exit' },
-        ])
-        if (command === 'menu') command = await commandMenu(ui)
-        ctx.flags = {
-          ...ctx.flags,
-          rest: [],
-          dryRun: ctx.flags.dryRun && ['run', 'schedule', 'api'].includes(command),
+        if (error instanceof CommandRequest) {
+          ui.finishAction('Switched to another request.')
+          pendingRequest = error.request
+          command = ''
+          ui.session = true
+          continue
         }
+        if (error instanceof Quit || !ui.interactive) throw error
+        if (error instanceof Cancelled || error instanceof Back)
+          ui.info(error.message || 'Cancelled request.')
+        else
+          ui.note(
+            `${explain(error, url)}\n\nCheck Recent runs before retrying work that may already have started.`,
+            'Let’s get you unstuck',
+          )
+        ui.session = true
+      } finally {
+        ui.finishAction()
+        home?.refresh()
       }
+      command = ''
     }
   } catch (error) {
-    if (error instanceof Cancelled) {
+    if (error instanceof CommandRequest) {
+      restartRequest = error.request
+    } else if (error instanceof Quit) {
+      ui.session = false
+      ui.done('See you next run. The worker keeps running.')
+      process.exitCode = 0
+    } else if (error instanceof Cancelled || error instanceof Back) {
       ui.done(error.message || 'Cancelled.')
       process.exitCode = 130
     } else {
       console.error(`Error: ${explain(error, url)}`)
       process.exitCode = 1
     }
+  } finally {
+    home?.stop()
+    ui.close()
   }
+  if (restartRequest !== undefined) await entry(true, restartRequest)
 }
 
-await entry()
+const argv = process.argv.slice(2)
+let interactive = interactiveTerminal() && !requestsUnattended(argv)
+try {
+  if (readCliArgs(argv, interactive).help) interactive = false
+} catch {
+  // Invalid arguments use the interactive correction flow.
+}
+try {
+  if (!interactive || !(await launchTerminalRuntime(import.meta.url, argv)))
+    await entry(interactive)
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exitCode = 1
+}

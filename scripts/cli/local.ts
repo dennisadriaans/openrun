@@ -107,7 +107,7 @@ export async function ensureLocalRuntime(onStart?: () => void): Promise<CliClien
     const source = import.meta.url.endsWith('.ts')
     const worker = fileURLToPath(new URL(source ? '../worker.ts' : '../worker.js', import.meta.url))
     const child = spawn(
-      process.execPath,
+      process.env.OPENRUN_NODE_EXECUTABLE || (process.versions.bun ? 'node' : process.execPath),
       source ? ['--experimental-strip-types', worker] : [worker],
       {
         cwd: fileURLToPath(new URL('../../', import.meta.url)),

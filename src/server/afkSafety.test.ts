@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, beforeEach, describe, it } from 'node:test'
@@ -80,7 +80,7 @@ function seed(options?: { checks?: boolean; kind?: 'main' | 'worktree' }) {
     `INSERT INTO runtimes
        (id, label, bin, argsTemplate, promptViaStdin, description, enabled, canOpenPrs, transport, createdAt)
      VALUES ('afk-runtime', 'AFK runtime', ?, ?, 0, '', 1, 0, 'cli', 1)`,
-  ).run(process.execPath, JSON.stringify(['-e', 'process.exit(0)']))
+  ).run(process.execPath, JSON.stringify(['-e', 'process.exit(0)', '--', '{prompt}']))
   db.prepare(
     `INSERT INTO projects
        (id, name, slug, path, defaultBranch, remoteUrl, managed, setupCommand, checks, createdAt)
@@ -162,6 +162,43 @@ async function waitForTerminal(runId: string): Promise<string> {
 
 describe('AFK safety core boundaries', () => {
   beforeEach(() => seed())
+
+  it('saves and arms a one-time task in the current dirty checkout with matching fire readiness', () => {
+    seed({ kind: 'main' })
+    const existingFile = join(repo, 'existing-work.txt')
+    writeFileSync(existingFile, 'work in progress')
+    let taskId = ''
+    try {
+      const scheduledAt = Date.now() + 60_000
+      const task = core.upsertTask(
+        taskInput({
+          enabled: true,
+          cron: '* * * * *',
+          fireOnce: true,
+          scheduledAt,
+        }),
+      )
+      taskId = task.id
+      assert.equal(task.enabled, 1)
+      assert.equal(task.nextRunAt, scheduledAt)
+      assert.equal(task.unattendedBlockedReason, null)
+      assert.deepEqual(task.readinessBlockers, [])
+      const row = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as TaskRow
+      const runtime = getDb()
+        .prepare('SELECT * FROM runtimes WHERE id = ?')
+        .get('afk-runtime') as RuntimeRow
+      assert.equal(unattendedRefusal(row, runtime), null)
+      core.setTaskEnabled(task.id, false)
+      assert.equal(core.setTaskEnabled(task.id, true)?.enabled, 1)
+      assert.throws(
+        () => core.upsertTask(taskInput({ enabled: true, cron: '* * * * *' })),
+        /uncommitted changes/i,
+      )
+    } finally {
+      if (taskId) core.setTaskEnabled(taskId, false)
+      rmSync(existingFile)
+    }
+  })
 
   it('uses the verification gate at save, enable, and final preflight', () => {
     assert.throws(

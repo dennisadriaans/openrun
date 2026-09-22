@@ -145,12 +145,13 @@ export function parseClaudeBundleModels(text: string): DiscoveredModel[] {
   const entry = /\{id:"(claude-[a-z0-9.-]+)",family:"([a-z0-9]+)",display_name:"([^"]+)"/g
   const found: DiscoveredModel[] = []
 
-  for (let m = entry.exec(text); m; m = entry.exec(text)) {
+  const entries = [...text.matchAll(entry)]
+  for (const [index, m] of entries.entries()) {
     const [, slug, , name] = m
     if (!slug || !name) continue
-    // Metadata for one model stays well inside this window; a larger one risks
-    // reading the *next* entry's capabilities.
-    const window = text.slice(m.index, m.index + 2400)
+    // Optional metadata must never come from the following model's entry.
+    const end = entries[index + 1]?.index ?? text.indexOf('],aliases:', m.index)
+    const window = text.slice(m.index, end >= 0 ? end : m.index + 2400)
     const caps = /capabilities:\[([^\]]*)\]/.exec(window)?.[1] ?? ''
     const defaultEffort = /default_effort:"([a-z]+)"/.exec(window)?.[1] ?? ''
     const rank = Number(/advisor_rank:(\d+)/.exec(window)?.[1] ?? '0')
@@ -284,6 +285,36 @@ function fxDisplayName(slug: string): string {
       return part.charAt(0).toUpperCase() + part.slice(1)
     })
     .join(' ')
+}
+
+// --- Gemini (installed model constants) -----------------------------------
+
+/** Gemini publishes its selectable ids and aliases in the installed models module. */
+export function parseGeminiModelsModule(text: string): DiscoveredModel[] {
+  const entries = [
+    ...text.matchAll(/(?:export\s+)?const\s+([A-Z_0-9]*GEMINI[A-Z_0-9]*)\s*=\s*['"]([\w.-]+)['"]/g),
+  ]
+  return entries.flatMap(([, key, slug], index) => {
+    if (
+      !key ||
+      !slug ||
+      key.includes('EMBEDDING') ||
+      !(/MODEL(?:_AUTO)?$/.test(key) || key.startsWith('GEMINI_MODEL_ALIAS_'))
+    )
+      return []
+    const name = slug.replace(/-/g, ' ').replace(/\b[a-z]/g, (letter) => letter.toUpperCase())
+    return [
+      {
+        slug,
+        name: /gemini/i.test(name) ? name : `Gemini ${name}`,
+        // The terminal CLI exposes model selection but no effort argument.
+        efforts: [],
+        defaultEffort: '',
+        rank: entries.length - index,
+        preferred: key === 'GEMINI_MODEL_ALIAS_AUTO',
+      },
+    ]
+  })
 }
 
 // --- Codex (`~/.codex/models_cache.json`) ----------------------------------
