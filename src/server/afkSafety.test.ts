@@ -80,7 +80,7 @@ function seed(options?: { checks?: boolean; kind?: 'main' | 'worktree' }) {
     `INSERT INTO runtimes
        (id, label, bin, argsTemplate, promptViaStdin, description, enabled, canOpenPrs, transport, createdAt)
      VALUES ('afk-runtime', 'AFK runtime', ?, ?, 0, '', 1, 0, 'cli', 1)`,
-  ).run(process.execPath, JSON.stringify(['-e', 'process.exit(0)']))
+  ).run(process.execPath, JSON.stringify(['-e', 'process.exit(0)', '--', '{prompt}']))
   db.prepare(
     `INSERT INTO projects
        (id, name, slug, path, defaultBranch, remoteUrl, managed, setupCommand, checks, createdAt)

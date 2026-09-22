@@ -305,6 +305,17 @@ export function parseLocalRequest(
   )
     remaining.splice(0, 2)
   const scheduled = scheduledTask(prompt, remaining, now)
+  // Recognized controls were removed above. An unresolved runtime/model must
+  // still reach interpretation instead of becoming part of a literal task.
+  if (
+    scheduled &&
+    remaining.some(
+      (word, index) =>
+        /^(using|use|for|model|runtime|agent)$/i.test(word) ||
+        (word.toLowerCase() === 'with' && index === remaining.length - 2),
+    )
+  )
+    return undefined
   const parsed = parseCliSchedule(
     scheduled ? [scheduled.prompt] : mode === 'schedule' ? remaining : [],
     now,
