@@ -219,10 +219,15 @@ export class CliUi {
   async homeRequest(initial = ''): Promise<string> {
     if (!this.interactive) throw new Error('Home needs an interactive terminal.')
     await this.start()
-    const history = (this.commandHistory ??= new CommandHistory())
+    const history = this.history()
     const command = await this.terminal!.homeRequest(history.commands, initial)
     history.remember(command)
     return command
+  }
+
+  private history(): CommandHistory {
+    if (!this.commandHistory) this.commandHistory = new CommandHistory()
+    return this.commandHistory
   }
 
   close(): void {
@@ -280,7 +285,7 @@ export class CliUi {
       } catch (error) {
         if (!(error instanceof RequestInput)) {
           if (error instanceof CommandRequest) {
-            ;(this.commandHistory ??= new CommandHistory()).remember(error.request)
+            this.history().remember(error.request)
           }
           throw error
         }
@@ -288,8 +293,7 @@ export class CliUi {
         if (error.cancelled) continue
         if (error.submitted && error.initial.trim()) {
           const request = error.initial.trim()
-          const history = (this.commandHistory ??= new CommandHistory())
-          history.remember(request)
+          this.history().remember(request)
           throw new CommandRequest(request)
         }
         const request = await backTo(() => this.homeRequest(error.initial))

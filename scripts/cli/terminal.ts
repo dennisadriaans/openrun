@@ -400,7 +400,10 @@ export class TerminalSurface {
       !key.super &&
       !key.hyper &&
       key.sequence &&
-      !/[\x00-\x1f\x7f]/.test(key.sequence)
+      Array.from(key.sequence).every((char) => {
+        const code = char.charCodeAt(0)
+        return code > 31 && code !== 127
+      })
     ) {
       key.preventDefault()
       key.stopPropagation()
