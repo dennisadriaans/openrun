@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## v0.3.0 — 2026-09-22
+
+- You no longer need to memorize runtime names, automation IDs or schedule syntax to get started from the terminal. The CLI preselects an available agent, remembers your choice, and lets you press Enter to run now or choose a schedule. Guided project setup, editable settings and recovery choices keep you moving, with compact summaries and subtle colors. Use `--yes` or `--json` for scripts.
+- You no longer need the browser to schedule an agent. `openrun schedule for claude at 16:40 "create new homepage with contactform" push and open a pull request` reads the runtime, the time, the workspace you are standing in and the ask, then arms it on the same local scheduler the Automations page uses. `openrun ls`, `now`, `enable`, `disable`, `rm` and `run` cover the rest without leaving the terminal. `--dry-run` previews an automation without creating it; `--prompt` passes work literally when it contains schedule words. Invalid options and unsupported intervals fail with a next step, and explicit times today stay on today.
+
+  You no longer need a custom authentication header for non-browser clients: the access token is accepted as `Authorization: Bearer` for the generated fetch client, CLI and Apple package.
+- You no longer need to clone Open Run or install its web development dependencies to use the CLI: the npm package includes the command, background worker, and MCP helper for running agents from any project.
+- You no longer need the web server to use Open Run from the terminal. The CLI starts a local background worker, keeps runs and automations in the existing SQLite database, and lets you register projects, schedule work, inspect or cancel runs, and connect and configure integrations. Command help includes focused examples, the only available agent is selected automatically, and run details and worker status are readable without decoding JSON. Outside a registered checkout, the CLI asks you to select a workspace. Worker controls make ownership explicit, and a second process cannot duplicate schedules or cancel another process's runs. Hosted integration authorization and delivery continue to use the existing relay.
+
+### 🚀 Features
+
+- **cli:** add standalone command and npm package ([#138](https://github.com/dennisadriaans/openrun/pull/138))
+
+**Full changelog**: [`v0.2.1...v0.3.0`](https://github.com/dennisadriaans/openrun/compare/v0.2.1...v0.3.0)
+
 ## v0.2.1 — 2026-09-15
 
 - You no longer need another worktree to continue a saved CLI chat. Interactive, manual, and scheduled runs use the chat's existing workspace, while webhook deliveries still start clean in their own worktree.
