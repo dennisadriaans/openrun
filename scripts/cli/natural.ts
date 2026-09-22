@@ -6,7 +6,7 @@ import {
   type CliSchedule,
 } from '../../src/lib/cliSchedule.ts'
 import { commandLineTokens, splitCommandLine } from './args.ts'
-import { modelsForKind, type ModelOption } from '../../src/lib/models.ts'
+import { modelsForKind } from '../../src/lib/models.ts'
 
 import {
   NATIVE_RUNTIMES,
@@ -48,61 +48,54 @@ export type InterpretedIntent = {
   scheduleText?: string
 }
 
-// Controls can lead the request, follow these words, or end it with a runtime/model or model/effort pair.
 const AGENT_LEADS = new Set(['using', 'use', 'with', 'for'])
+type AgentControls = {
+  runtime?: NativeRuntime
+  model?: string
+  effort?: string
+  end: number
+}
 
+/** Read adjacent controls in any order, stopping at task text or a quoted token. */
 function readAgentSelection(words: string[], start: number, catalogs: NativeCatalog[]) {
-  let runtime: NativeRuntime | undefined
-  let runtimeEnd = start
-  for (let end = start + 1; end <= Math.min(start + 2, words.length); end++) {
-    const matched = resolveNativeRuntime(words.slice(start, end).join(' '))
-    if (matched) {
-      runtime = matched
-      runtimeEnd = end
+  const result: AgentControls = { end: start }
+  const models = catalogs.flatMap((row) => row.models)
+  while (result.end < words.length) {
+    let index = result.end
+    const lead = words[index]?.toLowerCase() ?? ''
+    if (AGENT_LEADS.has(lead) || lead === 'at') index++
+    const label = words[index]?.toLowerCase()
+    if (['runtime', 'agent', 'model', 'reasoning', 'effort'].includes(label ?? '')) {
+      index++
+      if (label === 'reasoning' && words[index]?.toLowerCase() === 'effort') index++
+    }
+    let matched: AgentControls | undefined
+    const modelCatalogs = result.runtime
+      ? catalogs.filter((row) => row.runtime === result.runtime)
+      : catalogs
+    // Keep the longest name, so "Claude Sonnet 5" is one model control.
+    for (let end = index + 1; end <= words.length; end++) {
+      if (!words[end - 1]) break
+      const hint = words.slice(index, end).join(' ')
+      const runtime = result.runtime === undefined ? resolveNativeRuntime(hint) : undefined
+      const model = result.model === undefined ? matchNativeModel(hint, modelCatalogs) : undefined
+      const effort = result.effort === undefined ? resolveNativeEffort(hint, models) : undefined
+      if (runtime && !['model', 'effort', 'reasoning'].includes(label ?? '')) {
+        matched = { runtime, end }
+      } else if (model && !['runtime', 'agent', 'effort', 'reasoning'].includes(label ?? '')) {
+        matched = { model: hint, end }
+      } else if (effort !== undefined && !['runtime', 'agent', 'model'].includes(label ?? '')) {
+        matched = { effort, end }
+      }
+    }
+    if (!matched) break
+    Object.assign(result, matched)
+    if (matched.effort !== undefined) {
+      if (words[result.end]?.toLowerCase() === 'reasoning') result.end++
+      if (words[result.end]?.toLowerCase() === 'effort') result.end++
     }
   }
-  let selected: { runtime: NativeRuntime; model: ModelOption; end: number } | undefined
-  // Try the full name as well as a runtime-prefixed name: "grok 4.7" and
-  // "agy Claude Sonnet 4.6" both contain words that also name a runtime.
-  for (const offset of new Set([start, runtimeEnd])) {
-    const candidates =
-      offset === start || !runtime ? catalogs : catalogs.filter((row) => row.runtime === runtime)
-    for (let end = offset + 1; end <= words.length; end++) {
-      if (words.slice(offset, end).some((word) => !word)) break
-      const match = matchNativeModel(words.slice(offset, end).join(' '), candidates)
-      if (match && (!selected || end > selected.end)) selected = { ...match, end }
-    }
-  }
-  const chosenRuntime = selected?.runtime ?? runtime
-  if (!chosenRuntime) return undefined
-  let index = selected?.end ?? runtimeEnd
-  const effortStart = index
-  if (['with', 'at'].includes(words[index]?.toLowerCase() ?? '')) index++
-  if (words[index]?.toLowerCase() === 'reasoning') index++
-  if (words[index]?.toLowerCase() === 'effort') index++
-  let effort: string | undefined
-  let effortEnd = effortStart
-  const models = selected ? [selected.model] : catalogs.flatMap((row) => row.models)
-  for (let end = index + 1; end <= Math.min(index + 3, words.length); end++) {
-    if (words.slice(index, end).some((word) => !word)) break
-    const matched = resolveNativeEffort(words.slice(index, end).join(' '), models)
-    if (matched !== undefined) {
-      effort = matched
-      effortEnd = end
-    }
-  }
-  if (effort !== undefined) {
-    if (words[effortEnd]?.toLowerCase() === 'reasoning') effortEnd++
-    if (words[effortEnd]?.toLowerCase() === 'effort') effortEnd++
-  }
-  return {
-    runtime: chosenRuntime,
-    model: selected?.model.slug ?? '',
-    effort: effort ?? '',
-    hasRuntime: runtime !== undefined,
-    hasEffort: effort !== undefined,
-    end: effortEnd,
-  }
+  return result.end > start ? result : undefined
 }
 
 /** Keep recognized agent controls even when other parts need interpretation. */
@@ -117,45 +110,88 @@ export function parseLocalAgent(argv: readonly string[], catalogs: NativeCatalog
       ? ''
       : word,
   )
-  const remaining: string[] = []
-  let selection: ReturnType<typeof readAgentSelection>
-  let selectionStart = -1
+  const groups: (AgentControls & { start: number; explicit: boolean })[] = []
   for (let index = 0; index < words.length; ) {
-    const lead = AGENT_LEADS.has(controls[index]!.toLowerCase())
-    const candidate = !selection
-      ? readAgentSelection(controls, index + (lead ? 1 : 0), catalogs)
+    const candidate = readAgentSelection(controls, index, catalogs)
+    if (!candidate) {
+      index++
+      continue
+    }
+    groups.push({
+      ...candidate,
+      start: index,
+      explicit:
+        AGENT_LEADS.has(controls[index]!.toLowerCase()) ||
+        /^(runtime|agent|model|effort|reasoning)$/i.test(controls[index]!),
+    })
+    index = candidate.end
+  }
+  const anchored = groups.filter((group) => {
+    const fields = [group.runtime, group.model, group.effort].filter((value) => value !== undefined)
+    return (
+      (group.runtime || group.model) &&
+      (group.explicit ||
+        group.start === 0 ||
+        fields.length > 1 ||
+        (group.runtime && group.end === words.length))
+    )
+  })
+  // A bare "sonnet" or "low" in prose is not a control. Once an agent is
+  // named, controls at either end can complete it: "low <task> claude sonnet".
+  const chosen = anchored.length
+    ? groups.filter(
+        (group) =>
+          anchored.includes(group) ||
+          group.explicit ||
+          group.start === 0 ||
+          group.end === words.length,
+      )
+    : []
+  const runtimes = [...new Set(chosen.flatMap((group) => (group.runtime ? [group.runtime] : [])))]
+  const modelHints = [...new Set(chosen.flatMap((group) => (group.model ? [group.model] : [])))]
+  const efforts = [
+    ...new Set(chosen.flatMap((group) => (group.effort !== undefined ? [group.effort] : []))),
+  ]
+  const runtime = runtimes[0]
+  const model = modelHints[0]
+    ? matchNativeModel(
+        modelHints[0],
+        runtime ? catalogs.filter((row) => row.runtime === runtime) : catalogs,
+      )
+    : undefined
+  const selectedRuntime = runtime ?? model?.runtime
+  const selection =
+    selectedRuntime &&
+    runtimes.length <= 1 &&
+    modelHints.length <= 1 &&
+    efforts.length <= 1 &&
+    (!modelHints.length || model)
+      ? {
+          runtime: selectedRuntime,
+          model: model?.model.slug ?? '',
+          effort: efforts[0] ?? '',
+          hasRuntime: runtime !== undefined,
+          hasEffort: efforts.length > 0,
+        }
       : undefined
-    // A bare model word may be part of the task ("write a sonnet"). A suffix
-    // needs an adjacent effort or an explicit runtime/model pair.
-    const found =
-      candidate &&
-      (lead ||
-        index === 0 ||
-        ((candidate.hasEffort || (candidate.hasRuntime && candidate.model)) &&
-          candidate.end === words.length))
-        ? candidate
-        : undefined
-    if (found) {
-      selection = found
-      selectionStart = index
-      index = found.end
-    } else remaining.push(words[index++]!)
-  }
+  const removed = new Set<number>()
+  if (selection)
+    for (const group of chosen)
+      for (let index = group.start; index < group.end; index++) removed.add(index)
+  const remaining = words.filter((_word, index) => !removed.has(index))
   let prompt = remaining.join(' ')
-  if (source !== undefined && tokens && selection) {
-    // Strip just the control span. Preserve quotes, escapes and whitespace in
-    // the work, while still unwrapping a single quoted task argument.
-    prompt =
-      remaining.length === 1
-        ? remaining[0]!
-        : [
-            source.slice(0, tokens[selectionStart]!.start).trim(),
-            source.slice(tokens[selection.end - 1]!.end).trim(),
-          ]
-            .filter(Boolean)
-            .join(' ')
+  if (source !== undefined && tokens) {
+    // Preserve literal quotes, escapes and spaces between untouched task words.
+    const parts: string[] = []
+    let start = 0
+    for (const group of selection ? chosen : []) {
+      parts.push(source.slice(start, tokens[group.start]!.start).trim())
+      start = tokens[group.end - 1]!.end
+    }
+    parts.push(source.slice(start).trim())
+    prompt = remaining.length === 1 ? remaining[0]! : parts.filter(Boolean).join(' ')
   }
-  return { words: remaining, selection, prompt, selectionStart, wordCount: words.length }
+  return { words: remaining, selection, prompt }
 }
 
 // Only clearly stated work takes the local shortcut. Management requests and
@@ -261,13 +297,7 @@ export function parseLocalRequest(
   mode: 'auto' | 'schedule',
   now = new Date(),
 ): InterpretedIntent | undefined {
-  const {
-    words: remaining,
-    selection,
-    prompt,
-    selectionStart,
-    wordCount,
-  } = parseLocalAgent(argv, catalogs)
+  const { words: remaining, selection, prompt } = parseLocalAgent(argv, catalogs)
   if (
     mode === 'schedule' &&
     ['a', 'an', 'the'].includes(remaining[0]?.toLowerCase() ?? '') &&
@@ -289,7 +319,6 @@ export function parseLocalRequest(
     if (!selection) return undefined
     if (remaining.length) {
       if (
-        (selectionStart !== 0 && selection.end !== wordCount) ||
         (!scheduled && !TASK_START.test(prompt)) ||
         (!scheduled && TIMING.test(remaining.filter((word) => !/\s/.test(word)).join(' ')))
       )

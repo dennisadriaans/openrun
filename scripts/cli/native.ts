@@ -33,7 +33,7 @@ import {
   resolveNativeEffort,
   resolveNativeRuntime,
 } from './agentSelection.ts'
-import { type CliUi, interactiveTerminal } from './ui.ts'
+import { accent, type CliUi, interactiveTerminal } from './ui.ts'
 import type { GlobalFlags } from './args.ts'
 
 export type NativeLaunch = {
@@ -414,13 +414,15 @@ export function nativeArgs(input: NativeLaunch): string[] {
 
 function discovery(input: NativeLaunch): void {
   if (!interactiveTerminal()) return
-  console.error(
-    `\nOpen Run · ${NATIVE_RUNTIMES[input.runtime].label} · ${input.model || 'default model'} · ${input.effort || 'default effort'}`,
+  console.info(
+    accent(
+      [
+        `\nOpen Run · ${NATIVE_RUNTIMES[input.runtime].label} · ${input.model || 'default model'} · ${input.effort || 'default effort'}`,
+        `Run later: openrun schedule in 10 minutes "your task" using ${input.model || input.runtime}${input.effort ? ` ${input.effort}` : ''}`,
+        'Explore: openrun automations · openrun runs · openrun help\n',
+      ].join('\n'),
+    ),
   )
-  console.error(
-    `Run later: openrun schedule in 10 minutes "your task" using ${input.model || input.runtime}${input.effort ? ` ${input.effort}` : ''}`,
-  )
-  console.error('Explore: openrun automations · openrun runs · openrun help\n')
 }
 
 export async function launchNative(

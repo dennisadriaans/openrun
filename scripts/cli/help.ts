@@ -30,7 +30,9 @@ A task is optional. Uses your existing agent installation and login.
   openrun launch --runtime codex --model gpt-5.6-sol --effort medium
   openrun launch --runtime claude --prompt "fix the schedule page"
 
-Put a model and effort after a task to select its agent automatically.
+Name the runtime, model and effort in any order, before or after the task.
+For example: openrun "low create a file test.html claude sonnet"
+Quote literal task contents to keep model names inside them as text.
 Complete task requests such as the example above resolve locally.
 Other natural language sends your request and model choices to Open Run + TypeSafe.
 No account or API key is needed. Repository files are not sent. Explicit options
@@ -209,8 +211,10 @@ Advanced
 The OpenTUI interface stays open after each action. Type or paste from any menu
 to ask for a task, model, effort and timing. Text fields also accept complete
 requests; Ctrl+Enter keeps the text as a field value. Ctrl+K opens the request
-input from any prompt, with shared history and suggestions. Esc restores the
-previous field or menu; type quit or press Ctrl+C twice to quit.
+input from any prompt, with shared history and suggestions. Ctrl+A selects all;
+Ctrl+C copies selected text and Ctrl+V pastes. Terminal Copy/Paste shortcuts also work.
+Esc or Ctrl+C without a selection clears the input. Esc on an empty input restores
+the previous field or menu; type quit or press Ctrl+C twice to quit.
 Home shows live runs, schedules and automations. Complete schedule requests submit directly.
 Tab switches between the input and the scrollable overview. Running work continues
 after you leave. The interface uses Bun 1.3+ or Node.js 26.4+ automatically;

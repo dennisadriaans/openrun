@@ -91,6 +91,17 @@ test('gateways do not steal model nicknames from the native runtime', () => {
     assert.equal(parseLocalAgent([text], catalogs).selection, undefined, text)
 })
 
+test('an explicit gateway selects its own model regardless of control order', () => {
+  for (const controls of ['agy low sonnet', 'sonnet low agy', 'low sonnet agy']) {
+    const result = parseLocalRequest([`create a file ${controls}`], catalogs, 'auto')
+    const model = resolveNativeModel('sonnet', modelsForKind('antigravity'))
+    assert.equal(result?.intent.runtimeHint, 'antigravity')
+    assert.equal(result?.intent.modelHint, model?.slug)
+    assert.equal(result?.intent.effortHint, 'low')
+    assert.equal(result?.intent.prompt, 'create a file')
+  }
+})
+
 test('newly discovered families and named models beyond the catalog limit stay selectable', () => {
   const models: ModelOption[] = Array.from({ length: 90 }, (_, index) => ({
     slug: `vendor/model-${index}`,

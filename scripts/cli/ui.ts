@@ -48,14 +48,52 @@ export function homeMatches(value: string): Choice[] {
   )
 }
 
-/** Keep relevant choices visible even when one command already matches exactly. */
+function suggestionScore(needle: string, target: string): number {
+  if (target.startsWith(needle)) return 0
+  if (target.includes(needle)) return 1
+  let position = 0
+  for (const letter of needle) {
+    position = target.indexOf(letter, position)
+    if (position < 0) break
+    position++
+  }
+  if (position >= 0) return 2
+
+  // Allow small typos against a prefix so suggestions survive unfinished words.
+  const allowance = needle.length < 7 ? 1 : 2
+  if (needle.length < 4 || needle.length > target.length + allowance) return Infinity
+  let previous = Array.from({ length: target.length + 1 }, (_, index) => index)
+  for (let row = 0; row < needle.length; row++) {
+    const current = [row + 1]
+    for (let column = 0; column < target.length; column++) {
+      current.push(
+        Math.min(
+          current[column]! + 1,
+          previous[column + 1]! + 1,
+          previous[column]! + (needle[row] === target[column] ? 0 : 1),
+        ),
+      )
+    }
+    previous = current
+  }
+  return Math.min(...previous) <= allowance ? 3 : Infinity
+}
+
+/** Match command names and labels as the user types, including abbreviations and typos. */
 export function homeSuggestions(value: string): Choice[] {
-  const needle = value.trim().toLowerCase()
+  const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const needle = normalize(value)
   if (!needle) return []
-  const matches = HOME_CHOICES.filter(
-    (choice) => choice.value.startsWith(needle) || choice.label.toLowerCase().startsWith(needle),
-  )
-  return matches.length ? matches : homeMatches(needle)
+  const matches = HOME_CHOICES.map((choice) => {
+    const words = choice.label.split(' ')
+    const targets = [choice.value, ...words.map((_, index) => words.slice(index).join(''))]
+    const score = Math.min(...targets.map((target) => suggestionScore(needle, normalize(target))))
+    return { choice, score }
+  })
+    .filter(({ score }) => Number.isFinite(score))
+    .sort((a, b) => a.score - b.score)
+    .map(({ choice }) => choice)
+  return matches.length ? matches : homeMatches(value)
 }
 
 export function requestSuggestion(value: string): string {
@@ -66,16 +104,14 @@ export function requestSuggestion(value: string): string {
   const action =
     matches.length === 1
       ? matches[0]!.label
-      : suggestions.length === 1
-        ? suggestions[0]!.label
-        : 'Choose a command'
+      : matches.length
+        ? 'Choose a command'
+        : 'Resolve request'
   const hint = `Enter → ${action}`
-  return suggestions.length === 1
-    ? hint
-    : `${hint}\n${suggestions
-        .slice(0, 4)
-        .map((choice) => choice.label)
-        .join(' · ')}`
+  return `${hint}\n${suggestions
+    .slice(0, 4)
+    .map((choice) => choice.label)
+    .join(' · ')}`
 }
 export class Cancelled extends Error {}
 export class Back extends Error {}
@@ -159,7 +195,7 @@ export function accent(value: string): string {
     !process.env.CI &&
     process.env.NO_COLOR === undefined &&
     process.env.TERM !== 'dumb'
-    ? `\x1b[36m${value}\x1b[0m`
+    ? `\x1b[38;2;89;156;231m${value}\x1b[0m`
     : value
 }
 

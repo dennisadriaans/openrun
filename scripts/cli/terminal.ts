@@ -8,6 +8,7 @@ import type {
   KeyEvent,
   PasteEvent,
   SelectOption,
+  ClipboardService,
 } from '@opentui/core'
 import { format, stripVTControlCharacters } from 'node:util'
 import {
@@ -52,7 +53,8 @@ const colors =
         failure: '#ffffff',
       }
 
-const navigationKeys = 'Ctrl+K ask   Esc back   Ctrl+C twice quit'
+const navigationKeys =
+  'Ctrl+A select all   Ctrl+C copy/clear   Ctrl+V paste   Ctrl+K ask   Esc clear/back'
 const loadingFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const loadingLines = [
   'Consulting the rubber duck…',
@@ -67,6 +69,7 @@ const loadingLines = [
 export class TerminalSurface {
   private core: typeof import('@opentui/core')
   private renderer: CliRenderer
+  private clipboard: ClipboardService
   private actions: BoxRenderable
   private promptTitle: TextRenderable
   private detailTitle: TextRenderable
@@ -126,6 +129,10 @@ export class TerminalSurface {
     this.core = core
     const { BoxRenderable, TextRenderable, ScrollBoxRenderable } = core
     this.renderer = renderer
+    this.clipboard = core.createClipboard({
+      host: core.createHostClipboard(),
+      terminal: core.createRendererClipboardAdapter(renderer),
+    })
     renderer.root.flexDirection = 'column'
     renderer.root.justifyContent = 'flex-end'
     const root = new BoxRenderable(renderer, {
@@ -347,15 +354,111 @@ export class TerminalSurface {
   }
 
   private onPaste = (event: PasteEvent): void => {
-    if (!(this.control instanceof this.core.SelectRenderable) || !this.rejectPrompt) return
+    if (!this.control || !this.rejectPrompt) return
     event.preventDefault()
     event.stopPropagation()
-    this.requestInput(
-      stripVTControlCharacters(new TextDecoder().decode(event.bytes)).replace(/[\r\n]/g, ' '),
+    this.insertPaste(event.bytes)
+  }
+
+  private insertPaste(bytes: Uint8Array): void {
+    const text = stripVTControlCharacters(new TextDecoder().decode(bytes)).replace(
+      /\r\n|[\r\n\t]/g,
+      ' ',
     )
+    if (!text) return
+    this.interruptedAt = 0
+    this.footer.content = this.promptKeys
+    if (this.control instanceof this.core.InputRenderable) {
+      this.reading = false
+      this.control.focus()
+      this.control.deleteSelection()
+      this.control.insertText(text)
+    } else this.requestInput(text)
+  }
+
+  private async copyInput(text: string): Promise<void> {
+    if (!text) return
+    try {
+      const result = await this.clipboard.writeText(text, { destination: 'best-available' })
+      if (this.closed) return
+      if (result.host.status === 'written' || result.terminal.status === 'attempted')
+        this.footer.content = 'Copied to clipboard'
+      else
+        this.info(
+          'Clipboard unavailable. Hold Shift while selecting text, then use your terminal’s Copy command.',
+        )
+    } catch {
+      if (!this.closed) this.info('Could not copy. Use your terminal’s Copy command.')
+    }
+  }
+
+  private async pasteClipboard(): Promise<void> {
+    const control = this.control
+    const unavailable = () =>
+      this.info('Use your terminal’s Paste command (Ctrl+Shift+V or Cmd+V).')
+    if (this.renderer.capabilities?.remote) {
+      unavailable()
+      return
+    }
+    try {
+      const result = await this.clipboard.read({ preferredTypes: ['text/plain'] })
+      if (this.closed || this.control !== control) return
+      if (result.status === 'read') this.insertPaste(result.representation.bytes)
+      else if (result.status !== 'empty') unavailable()
+    } catch {
+      if (!this.closed && this.control === control) unavailable()
+    }
+  }
+
+  private clearInput(): boolean {
+    if (this.pendingRequestInput) {
+      if (!this.pendingRequestInput.initial) return false
+      this.pendingRequestInput.initial = ''
+      this.pendingRequestInput.submitted = false
+      return true
+    }
+    if (!(this.control instanceof this.core.InputRenderable) || !this.control.value) return false
+    this.control.value = ''
+    this.control.clearSelection()
+    this.reading = false
+    this.control.focus()
+    return true
   }
 
   private onKey = (key: KeyEvent): void => {
+    const input = this.control instanceof this.core.InputRenderable ? this.control : undefined
+    const shortcut = key.ctrl || key.meta || key.super
+    const copy = (shortcut && key.name === 'c') || (key.ctrl && key.name === 'insert')
+    if (
+      input &&
+      copy &&
+      (input.hasSelection() || key.shift || key.meta || key.super || key.name === 'insert')
+    ) {
+      key.preventDefault()
+      key.stopPropagation()
+      this.interruptedAt = 0
+      void this.copyInput(input.getSelectedText() || input.value)
+      return
+    }
+    if (input && shortcut && key.name === 'a') {
+      key.preventDefault()
+      key.stopPropagation()
+      this.interruptedAt = 0
+      this.reading = false
+      input.focus()
+      input.selectAll()
+      return
+    }
+    if (
+      this.rejectPrompt &&
+      ((shortcut && key.name === 'v') || (key.shift && key.name === 'insert'))
+    ) {
+      key.preventDefault()
+      key.stopPropagation()
+      this.interruptedAt = 0
+      void this.pasteClipboard()
+      return
+    }
     if (key.ctrl && key.name === 'c') {
       key.preventDefault()
       key.stopPropagation()
@@ -364,6 +467,7 @@ export class TerminalSurface {
         else this.exit()
       } else {
         this.interruptedAt = Date.now()
+        this.clearInput()
         this.footer.content = 'Press Ctrl+C again within 2 seconds to quit. Running work continues.'
       }
       return
@@ -376,8 +480,9 @@ export class TerminalSurface {
     ) {
       key.preventDefault()
       key.stopPropagation()
-      if (key.name === 'escape') this.pendingRequestInput.cancelled = true
-      else if (key.name === 'backspace')
+      if (key.name === 'escape') {
+        if (!this.clearInput()) this.pendingRequestInput.cancelled = true
+      } else if (key.name === 'backspace')
         this.pendingRequestInput.initial = [...this.pendingRequestInput.initial]
           .slice(0, -1)
           .join('')
@@ -411,7 +516,7 @@ export class TerminalSurface {
     } else if (key.name === 'escape') {
       key.preventDefault()
       key.stopPropagation()
-      this.rejectPrompt?.(new Back())
+      if (!this.clearInput()) this.rejectPrompt?.(new Back())
     } else if (key.name === 'tab' && (this.detailScroll.visible || this.scheduledScroll.visible)) {
       key.preventDefault()
       key.stopPropagation()
@@ -420,7 +525,7 @@ export class TerminalSurface {
         (this.scheduledScroll.visible ? this.scheduledScroll : this.detailScroll).focus()
       else this.control?.focus()
       this.footer.content = this.reading
-        ? '↑↓ scroll   Tab return to input   Esc back'
+        ? '↑↓ scroll   Tab return to input   Esc clear/back'
         : this.promptKeys
     }
   }
@@ -693,8 +798,8 @@ export class TerminalSurface {
       textColor: colors.text,
       focusedTextColor: colors.text,
       cursorColor: colors.text,
-      selectionBg: colors.input,
-      selectionFg: colors.text,
+      selectionBg: colors.button,
+      selectionFg: colors.buttonText,
     })
     this.control = input
     this.frameControl().add(input)
@@ -750,18 +855,22 @@ export class TerminalSurface {
       textColor: colors.text,
       focusedTextColor: colors.text,
       cursorColor: colors.text,
-      selectionBg: colors.input,
-      selectionFg: colors.text,
+      selectionBg: colors.button,
+      selectionFg: colors.buttonText,
       placeholder: 'Ask for a task, or type a command…',
     })
     this.control = input
     this.frameControl().add(input)
+    let historyIndex = history.length
+    let draft = ''
     const showSuggestion = (value: string) => {
+      if (!value) {
+        historyIndex = history.length
+        draft = ''
+      }
       this.preview.update(value)
     }
     input.on(this.core.InputRenderableEvents.INPUT, showSuggestion)
-    let historyIndex = history.length
-    let draft = ''
     input.onKeyDown = (key) => {
       if (key.name !== 'up' && key.name !== 'down') return
       if (key.ctrl || key.meta || key.shift || key.option || key.super || key.hyper) return
@@ -786,7 +895,7 @@ export class TerminalSurface {
         this.homeAction = resolve
         input.on(this.core.InputRenderableEvents.ENTER, (raw: string) => {
           if (raw.trim()) resolve(raw.trim())
-          else this.info('Type a request, or press Esc to leave Open Run.')
+          else this.info('Type a request, or press Ctrl+C twice to quit.')
         })
       })
     } finally {
@@ -803,6 +912,7 @@ export class TerminalSurface {
     this.closed = true
     this.stopLoading()
     this.preview.cancel()
+    void this.clipboard.dispose().catch(() => {})
     this.rejectPrompt?.(new Quit())
     process.removeListener('SIGINT', this.exit)
     process.removeListener('SIGTERM', this.exit)

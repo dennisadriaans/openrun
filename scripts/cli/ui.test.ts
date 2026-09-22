@@ -5,9 +5,12 @@ import {
   browse,
   CliUi,
   CommandRequest,
+  homeMatches,
+  homeSuggestions,
   isCommandRequest,
   Quit,
   RequestInput,
+  requestSuggestion,
   steps,
 } from './ui.ts'
 
@@ -21,6 +24,52 @@ function uiWithTerminal(terminal: object) {
   })
   return { ui, remembered }
 }
+
+test('matching suggestions stay below the input through the complete command and label', () => {
+  for (const [text, command, label] of [
+    ['schedule an automation', 'schedule', 'Schedule an automation'],
+    ['setup a project', 'init', 'Set up a project'],
+  ]) {
+    for (let length = 1; length <= text!.length; length++) {
+      const input = text!.slice(0, length)
+      assert.ok(
+        homeSuggestions(input).some((choice) => choice.value === command),
+        input,
+      )
+      assert.ok(requestSuggestion(input).split('\n')[1]?.includes(label!), input)
+    }
+  }
+  assert.equal(
+    requestSuggestion('schedule'),
+    'Enter → Schedule an automation\nSchedule an automation',
+  )
+})
+
+test('suggestions tolerate abbreviations and typos without turning them into exact commands', () => {
+  for (const [input, command] of [
+    ['schdl', 'schedule'],
+    ['scheduel', 'schedule'],
+    ['schedule an autro', 'schedule'],
+    ['schedule an autromation', 'schedule'],
+    ['autromation', 'schedule'],
+    ['set up prjct', 'init'],
+    ['SETUP A PROJECT', 'init'],
+  ]) {
+    assert.ok(
+      homeSuggestions(input!).some((choice) => choice.value === command),
+      input,
+    )
+  }
+  assert.deepEqual(
+    homeMatches('schedule').map((choice) => choice.value),
+    ['schedule'],
+  )
+  assert.deepEqual(homeMatches('scheduel'), [])
+  assert.match(requestSuggestion('scheduel'), /^Enter → Resolve request\n/)
+  for (const input of ['', 'create a file', 'schedule in 10 seconds "fix the checkout"']) {
+    assert.deepEqual(homeSuggestions(input), [], input)
+  }
+})
 
 test('complete task requests and navigation work in fields without claiming ordinary values', () => {
   for (const request of [

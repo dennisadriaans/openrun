@@ -67,7 +67,10 @@ settings**. A compact summary shows what is about to run.
 Run `openrun` on its own for the live Home overview: upcoming schedules,
 automations, integrations and recent runs. Run activity updates in place,
 including work started from another terminal. Press **Tab** to scroll the
-overview, **Esc** to go back, and **Ctrl+C twice** to quit. Missing names and IDs lead to
+overview. **Ctrl+A** selects the input, **Ctrl+C** copies selected text, and
+**Ctrl+V** pastes. You can also use your terminal’s Copy and Paste commands.
+**Esc** or **Ctrl+C** without a selection clears the input; **Ctrl+C twice** quits.
+Esc goes back when the input is empty. Missing names and IDs lead to
 selectors; invalid command options can be corrected in place. Use `--yes` to
 skip prompts, with `--runtime` when more than one agent is available. `--json`
 also skips prompts and returns structured results. Set `NO_COLOR=1` to turn

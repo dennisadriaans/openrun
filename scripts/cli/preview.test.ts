@@ -71,7 +71,7 @@ test('clearing the input or leaving a prompt cancels interpretation, and command
   )
   t.after(() => preview.cancel())
   preview.update('run')
-  assert.equal(shown, 'Enter → Run a task')
+  assert.match(shown, /^Enter → Run a task\n.*Run a task/)
   t.mock.timers.tick(1000)
   assert.equal(calls, 0)
   preview.update('create a file')
@@ -85,6 +85,29 @@ test('clearing the input or leaving a prompt cancels interpretation, and command
   preview.cancel()
   t.mock.timers.tick(600)
   assert.equal(calls, 1)
+})
+
+test('exact and fuzzy suggestions stay visible after typing pauses', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let shown = ''
+  const preview = new RequestPreview(
+    (message) => {
+      shown = message
+    },
+    async () => assert.fail('Matching suggestions must stay visible without interpretation'),
+  )
+  t.after(() => preview.cancel())
+  for (const [input, label] of [
+    ['s', 'Schedule an automation'],
+    ['sch', 'Schedule an automation'],
+    ['schedule', 'Schedule an automation'],
+    ['schedule an autromation', 'Schedule an automation'],
+    ['setup a project', 'Set up a project'],
+  ]) {
+    preview.update(input!)
+    t.mock.timers.tick(1000)
+    assert.ok(shown.split('\n')[1]?.includes(label!), input)
+  }
 })
 
 test('explicit commands and literal prompts can be previewed without hosted interpretation', async (t) => {

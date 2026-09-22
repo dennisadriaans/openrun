@@ -70,6 +70,62 @@ test('task controls work at either end and with catalog model names', () => {
   assert.equal(result?.intent.prompt, 'review changes')
 })
 
+test('runtime, model, effort and the literal task work in every order', () => {
+  const prompt = "create new file test-123123.html with contents '123'"
+  const orders = [
+    ['claude', 'sonnet', 'low'],
+    ['claude', 'low', 'sonnet'],
+    ['sonnet', 'claude', 'low'],
+    ['sonnet', 'low', 'claude'],
+    ['low', 'claude', 'sonnet'],
+    ['low', 'sonnet', 'claude'],
+  ]
+  for (const order of orders) {
+    for (let index = 0; index <= order.length; index++) {
+      const words = [...order.slice(0, index), prompt, ...order.slice(index)]
+      for (const args of [readCliLine(words.join(' ')), readCliArgs(words)]) {
+        const result = parseLocalRequest(args.flags.rest, catalogs, 'auto')
+        assert.ok(result, words.join(' '))
+        assert.equal(result.action, 'launch')
+        assert.equal(result.intent.prompt, prompt)
+        assert.equal(result.intent.runtimeHint, 'claude')
+        assert.equal(result.intent.modelHint, 'claude-sonnet-5')
+        assert.equal(result.intent.effortHint, 'low')
+        assert.deepEqual(result.clarify, [])
+      }
+    }
+  }
+})
+
+test('controls inside a task preserve literal contents and scheduled execution', () => {
+  const now = new Date(2026, 8, 22, 14, 0)
+  const prompt = "create new file test-123123.html with contents 'claude low sonnet'"
+  for (const request of [
+    "create new file low claude sonnet test-123123.html with contents 'claude low sonnet'",
+    `${prompt} using effort low model sonnet runtime claude`,
+    `low ${prompt} using claude model sonnet`,
+  ]) {
+    for (const timing of ['', ' in 10 minutes']) {
+      const result = parseLocalRequest([request + timing], catalogs, 'auto', now)
+      assert.ok(result, request + timing)
+      assert.equal(result.intent.prompt, prompt)
+      assert.equal(result.intent.modelHint, 'claude-sonnet-5')
+      assert.equal(result.intent.effortHint, 'low')
+      assert.equal(result.action, timing ? 'schedule' : 'launch')
+    }
+  }
+})
+
+test('conflicting controls require interpretation instead of silently choosing an agent', () => {
+  for (const request of [
+    'create a file claude sonnet codex low',
+    'low create a file claude sonnet high',
+  ]) {
+    assert.equal(parseLocalAgent([request], catalogs).selection, undefined, request)
+    assert.equal(parseLocalRequest([request], catalogs, 'auto'), undefined, request)
+  }
+})
+
 test('home requests with an explicit execution delay schedule the original task directly', () => {
   const now = new Date(2026, 8, 22, 14, 0, 55)
   const prompt = "create new file test-html with contents '123'"
