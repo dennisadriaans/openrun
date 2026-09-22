@@ -36,6 +36,27 @@ export const ACCESS_TOKEN_QUERY_PARAM = 'openrun_token'
 export const ACCESS_TOKEN_QUERY_PARAM_LEGACY = 'agentops_token'
 
 /**
+ * The token out of an `Authorization: Bearer …` header, or null.
+ *
+ * Every non-browser client Open Run generates presents the access token this
+ * way — the typed fetch client in `contract/generated/client.ts` and
+ * `OpenRunKit` both do — because that is the convention an HTTP client library
+ * makes easy. Reading it here means the CLI, the Apple apps and anything
+ * written against the OpenAPI document authenticate the same way, instead of
+ * each having to know the bespoke header name.
+ *
+ * The scheme is matched case-insensitively (RFC 7235 says it is
+ * case-insensitive) and an empty credential is treated as absent, so a bare
+ * `Authorization: Bearer` cannot be mistaken for a presented token.
+ */
+export function bearerToken(header: string | null | undefined): string | null {
+  if (!header) return null
+  const match = /^bearer[ \t]+(.+)$/i.exec(header.trim())
+  const token = match?.[1]?.trim()
+  return token ? token : null
+}
+
+/**
  * Header `scripts/start.ts` stamps with the socket's peer address.
  *
  * A `Request` carries no peer address, and the mobile guard needs one. The

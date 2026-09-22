@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  bearerToken,
   ACCESS_TOKEN_COOKIE,
   accessCookieHeader,
   DEFAULT_HOST,
@@ -369,4 +370,20 @@ test('only the mobile surface authenticates itself', () => {
   assert.equal(selfAuthenticatingPath('/api/runs/r1/stream'), false)
   assert.equal(selfAuthenticatingPath('/tasks'), false)
   assert.equal(selfAuthenticatingPath(null), false)
+})
+
+test('reads an Authorization: Bearer token, whatever the casing', () => {
+  assert.equal(bearerToken('Bearer abc123'), 'abc123')
+  assert.equal(bearerToken('bearer abc123'), 'abc123')
+  assert.equal(bearerToken('BEARER\tabc123'), 'abc123')
+  assert.equal(bearerToken('  Bearer   abc123  '), 'abc123')
+})
+
+test('treats a missing or empty bearer credential as no token', () => {
+  assert.equal(bearerToken(null), null)
+  assert.equal(bearerToken(undefined), null)
+  assert.equal(bearerToken(''), null)
+  assert.equal(bearerToken('Bearer'), null)
+  assert.equal(bearerToken('Bearer   '), null)
+  assert.equal(bearerToken('Basic abc123'), null)
 })

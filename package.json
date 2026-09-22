@@ -27,6 +27,9 @@
   "imports": {
     "#/*": "./src/*"
   },
+  "bin": {
+    "openrun": "scripts/openrun.ts"
+  },
   "scripts": {
     "dev": "node --experimental-strip-types scripts/dev.ts",
     "dev:mobile": "AGENTOPS_MOBILE=1 vite dev --port 3000",
@@ -34,6 +37,8 @@
     "build": "vite build",
     "start": "node --experimental-strip-types scripts/start.ts",
     "token:print": "node --experimental-strip-types scripts/token.ts",
+    "cli": "node --experimental-strip-types scripts/openrun.ts",
+    "cli:package": "node --experimental-strip-types scripts/package-cli.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "contract:generate": "node --experimental-strip-types scripts/contract/generate.ts",
@@ -49,6 +54,7 @@
     "ship": "node --experimental-strip-types scripts/ship.ts"
   },
   "dependencies": {
+    "@clack/prompts": "^1.8.1",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.12",
     "@codemirror/lang-javascript": "^6.2.5",
@@ -94,6 +100,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
   }

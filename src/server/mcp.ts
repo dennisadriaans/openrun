@@ -338,7 +338,9 @@ export function removeMcpServer(input: McpWriteInput & { name: string }): void {
  */
 function openrunToolScript(): string {
   const candidates = [
+    join(process.cwd(), 'scripts', 'mcp-server.js'),
     join(process.cwd(), 'scripts', 'mcp-server.ts'),
+    fileURLToPath(new URL('../../scripts/mcp-server.js', import.meta.url)),
     fileURLToPath(new URL('../../scripts/mcp-server.ts', import.meta.url)),
   ]
   return candidates.find((candidate) => existsSync(candidate)) ?? ''
@@ -347,9 +349,8 @@ function openrunToolScript(): string {
 /**
  * The config entry that points an agent at Open Run's own tools.
  *
- * Spawned with this process's own node binary and `--experimental-strip-types`
- * — the same way `pnpm start` runs its TypeScript entry — so there is no build
- * step between adding the server and it working.
+ * Spawned with this process's own node binary. Source checkouts use type
+ * stripping; the npm package includes a compiled JavaScript helper.
  */
 export function openrunToolServer(): McpServerConfig | null {
   const script = openrunToolScript()
@@ -358,7 +359,7 @@ export function openrunToolServer(): McpServerConfig | null {
     name: OPENRUN_MCP_SERVER_NAME,
     transport: 'stdio',
     command: process.execPath,
-    args: ['--experimental-strip-types', script],
+    args: script.endsWith('.ts') ? ['--experimental-strip-types', script] : [script],
   }
 }
 
