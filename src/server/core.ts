@@ -845,6 +845,7 @@ function decorate(
             resumeSessionId: task.resumeSessionId,
             workspaceKind: workspace.kind,
             requireIsolation: task.requireIsolation === 1,
+            fireOnce: task.fireOnce === 1,
             health,
             requiresGh,
             ghInstalled: gh.installed,
@@ -1233,7 +1234,7 @@ export function upsertTask(input: TaskInput): TaskWithMeta {
     const runtime = getRuntime(input.runtimeId)
     if (checked && runtime) {
       const refused = unattendedRefusalFor({
-        task: { requireIsolation, requireGhAuth, baseRef, resumeSessionId },
+        task: { requireIsolation, requireGhAuth, baseRef, resumeSessionId, fireOnce },
         trigger: webhookIntegrationId ? 'webhook' : 'schedule',
         runtime,
         workspace: checked.workspace,

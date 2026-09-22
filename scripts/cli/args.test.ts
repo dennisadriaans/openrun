@@ -4,9 +4,50 @@ import {
   commandCorrection,
   editableCommand,
   readCliArgs,
+  readCliLine,
   requestsUnattended,
   splitCommandLine,
 } from './args.ts'
+
+test('Home keeps implicit task text verbatim and explicit option values opaque', () => {
+  const request = "create new file index-test.html with contents '123' sonnet low"
+  assert.deepEqual(readCliLine(request).flags.rest, [request])
+  assert.deepEqual(readCliLine(`launch ${request}`).flags.rest, [request])
+  assert.deepEqual(readCliLine('launch').flags.rest, [])
+  assert.deepEqual(readCliLine('launch --model sonnet --prompt "write sonnet low"').flags.rest, [
+    '--model=sonnet',
+    '--prompt=write sonnet low',
+  ])
+  assert.deepEqual(readCliLine('run -- "write sonnet low"').flags.rest, ['--', 'write sonnet low'])
+  assert.equal(readCliLine('runs').command, 'runs')
+})
+
+test('implicit requests retain all their words and known commands keep their meaning', () => {
+  const natural = readCliArgs(['sol', 'medium', '--dry-run'])
+  assert.equal(natural.command, 'launch')
+  assert.deepEqual(natural.flags.rest, ['sol', 'medium'])
+  assert.equal(
+    readCliArgs(['schedule', 'in', '10', 'minutes', 'review changes']).command,
+    'schedule',
+  )
+  const explicit = readCliArgs([
+    'launch',
+    '--runtime',
+    'codex',
+    '--effort',
+    'medium',
+    '--',
+    'fix the schedule page',
+  ])
+  assert.deepEqual(explicit.flags.rest, [
+    '--runtime=codex',
+    '--effort=medium',
+    '--',
+    'fix the schedule page',
+  ])
+  assert.throws(() => readCliArgs(['resume']), /run ID/)
+  assert.equal(readCliArgs(['resume', 'run_1', '--dry-run', '--json']).flags.dryRun, true)
+})
 
 test('help is scoped to a command, including nested automation commands', () => {
   assert.equal(readCliArgs([]).help, true)

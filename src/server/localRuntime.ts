@@ -7,6 +7,7 @@ import { getDb } from './db.ts'
 import { openrunHome } from './paths.ts'
 import { dispatch } from './contract/dispatch.ts'
 import { isShuttingDown } from './processControl.ts'
+import { SERVER_PING_MS, subscribeActivityLive, type ActivityLiveEvent } from './activityLive.ts'
 
 const KEY = 'local_runtime_owner'
 const g = globalThis as unknown as { __openrunLocalRuntime?: boolean }
@@ -76,6 +77,21 @@ export function bootLocalRuntime(): void {
           )
             throw new Error('Unauthorized local client.')
           if (typeof operation !== 'string') throw new Error('Expected an operation.')
+          if (operation === '$activity') {
+            // Reuse the app-wide feed; the CLI never owns a second scheduler.
+            socket.setTimeout(0)
+            const send = (event: ActivityLiveEvent) => {
+              if (!socket.destroyed && !socket.write(`${JSON.stringify(event)}\n`)) socket.destroy()
+            }
+            const unsubscribe = subscribeActivityLive(send)
+            const heartbeat = setInterval(() => send({ type: 'ping' }), SERVER_PING_MS)
+            socket.once('close', () => {
+              clearInterval(heartbeat)
+              unsubscribe()
+            })
+            send({ type: 'hello' })
+            return
+          }
           let result: unknown
           if (operation === '$status') {
             result = {

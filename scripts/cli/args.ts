@@ -18,6 +18,8 @@ const COMMANDS = new Set([
   'init',
   'schedule',
   'run',
+  'launch',
+  'resume',
   'ls',
   'runs',
   'show',
@@ -42,6 +44,7 @@ const VALUE_FLAGS = new Set([
   '--runtime',
   '--for',
   '--model',
+  '--effort',
   '--in',
   '--workspace',
   '--name',
@@ -52,8 +55,18 @@ const VALUE_FLAGS = new Set([
 ])
 const COMMAND_FLAGS: Record<string, string[]> = {
   init: ['--check'],
-  schedule: ['--runtime', '--model', '--in', '--workspace', '--name', '--cron', '--prompt'],
-  run: ['--runtime', '--model', '--in', '--workspace', '--prompt'],
+  schedule: [
+    '--runtime',
+    '--model',
+    '--effort',
+    '--in',
+    '--workspace',
+    '--name',
+    '--cron',
+    '--prompt',
+  ],
+  run: ['--runtime', '--model', '--effort', '--in', '--workspace', '--prompt'],
+  launch: ['--runtime', '--model', '--effort', '--in', '--workspace', '--prompt'],
   runs: ['--limit'],
   'integrations configure': ['--runtime', '--in', '--event', '--prompt', '--name'],
 }
@@ -102,12 +115,22 @@ export function commandCorrection(argv: readonly string[]) {
 
 /** Read quotes and escapes for the correction prompt. Never execute a shell or expand variables. */
 export function splitCommandLine(line: string): string[] {
-  const words: string[] = []
+  return commandLineTokens(line).map((token) => token.value)
+}
+
+/** Keep source offsets so natural requests can remove controls without rewriting the task. */
+export function commandLineTokens(line: string): { value: string; start: number; end: number }[] {
+  const words: { value: string; start: number; end: number }[] = []
   let word = ''
   let quote = ''
   let started = false
+  let start = 0
   for (let i = 0; i < line.length; i++) {
     const char = line[i]!
+    if (!started && !/\s/.test(char)) {
+      start = i
+      started = true
+    }
     if (char === '\\' && quote !== "'") {
       if (i + 1 === line.length) throw new Error('Add a character after the trailing backslash.')
       word += line[++i]
@@ -119,7 +142,7 @@ export function splitCommandLine(line: string): string[] {
       quote = char
       started = true
     } else if (/\s/.test(char)) {
-      if (started) words.push(word)
+      if (started) words.push({ value: word, start, end: i })
       word = ''
       started = false
     } else {
@@ -128,7 +151,7 @@ export function splitCommandLine(line: string): string[] {
     }
   }
   if (quote) throw new Error('Close the quoted text to continue.')
-  if (started) words.push(word)
+  if (started) words.push({ value: word, start, end: line.length })
   return words
 }
 
@@ -211,8 +234,10 @@ export function readCliArgs(
   }
   if (!command && !help && (!interactive || flags.json || flags.yes))
     throw new Error('Choose a command. Run "openrun help".')
-  if (command && !COMMANDS.has(command))
-    throw new Error(`Unknown command: ${command}. Run "openrun help".`)
+  if (command && !COMMANDS.has(command)) {
+    flags.rest.unshift(command)
+    command = 'launch'
+  }
 
   if (help) return { command, help, flags }
   const action = positionals[0]
@@ -228,8 +253,8 @@ export function readCliArgs(
       )
     }
   }
-  if (flags.dryRun && !['schedule', 'run', 'api'].includes(command))
-    throw new Error('--dry-run is supported by schedule, run and api only.')
+  if (flags.dryRun && !['schedule', 'run', 'launch', 'resume', 'api'].includes(command))
+    throw new Error('--dry-run is supported by launch, resume, schedule, run and api only.')
 
   if (command === 'worker' && !['status', 'start', 'stop', 'logs'].includes(action ?? 'status'))
     throw new Error(`Unknown worker command: ${action}. Run "openrun worker --help".`)
@@ -254,6 +279,7 @@ export function readCliArgs(
     where: 0,
     login: 0,
     show: 1,
+    resume: 1,
     cancel: 1,
     worker: 1,
     api: 2,
@@ -263,11 +289,25 @@ export function readCliArgs(
     throw new Error(`Unexpected argument. Run "openrun ${command} --help" for usage.`)
   if (
     (!interactive || flags.json || flags.yes) &&
-    ['show', 'cancel', 'now', 'enable', 'disable', 'rm'].includes(command) &&
+    ['show', 'resume', 'cancel', 'now', 'enable', 'disable', 'rm'].includes(command) &&
     !positionals.length
   ) {
-    const required = ['show', 'cancel'].includes(command) ? 'a run ID' : 'an automation name or ID'
+    const required = ['show', 'resume', 'cancel'].includes(command)
+      ? 'a run ID'
+      : 'an automation name or ID'
     throw new Error(`Pass ${required}. Run "openrun ${command} --help".`)
   }
   return { command, help, flags }
+}
+
+/** Home accepts shell-style commands, but keeps a free-form task's original text. */
+export function readCliLine(line: string) {
+  const tokens = commandLineTokens(line)
+  const argv = tokens.map((token) => token.value)
+  const parsed = readCliArgs(argv, true)
+  if (parsed.command === 'launch' && !parsed.help && !argv.some((word) => word.startsWith('-'))) {
+    const request = argv[0] === 'launch' ? line.slice(tokens[0]!.end).trim() : line
+    parsed.flags.rest = request ? [request] : []
+  }
+  return parsed
 }

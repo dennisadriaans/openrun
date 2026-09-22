@@ -145,6 +145,19 @@ describe('parseCliSchedule', () => {
     })
   })
 
+  it('preserves seconds in a one-shot timestamp without treating the amount as a workspace', () => {
+    for (const unit of ['second', 'seconds', 'sec', 'secs', 's']) {
+      const intent = parse(['in', '10', unit, 'new file index3.html'])
+      assert.deepEqual(intent.schedule, {
+        kind: 'once',
+        cron: '0 10 * * *',
+        at: NOW.getTime() + 10_000,
+      })
+      assert.equal(intent.workspaceHint, '')
+      assert.equal(intent.prompt, 'new file index3.html')
+    }
+  })
+
   it('reads "tomorrow at" as tomorrow, never today', () => {
     assert.deepEqual(parse(['tomorrow', 'at', '16:40', 'x']).schedule, {
       kind: 'once',

@@ -12,6 +12,7 @@
  *    fresh execution worktree.
  * 2. **Health** — the worktree must physically exist, be the right worktree,
  *    be on its configured branch, and be clean (see `workspaceHealth.ts`).
+ *    A one-time run in the user's own checkout may continue existing edits.
  * 3. **Capability preflight** — an automation that is going to reach for
  *    GitHub is refused up front when `gh` is missing or logged out, instead of
  *    crashing partway through and leaving the workspace half-edited.
@@ -30,6 +31,8 @@ export type UnattendedGateInput = {
   workspaceKind: string
   /** Task opt-out. False lets an automation deliberately run in the main checkout. */
   requireIsolation: boolean
+  /** A one-time task in the user's checkout may start from its current edits. */
+  fireOnce?: boolean
   /** Physical state of the workspace; null when it could not be inspected. */
   health: WorkspaceHealth | null
   /** True when this automation may open PRs or was marked as needing the gh CLI. */
@@ -71,8 +74,16 @@ export function requiresGhAuth(input: { canOpenPrs: boolean; requireGhAuth: bool
  */
 export function unattendedBlockedReason(input: UnattendedGateInput): string | null {
   const continuing = !input.freshExecution && Boolean(input.resumeSessionId?.trim())
+  const currentEdits =
+    !input.freshExecution &&
+    input.fireOnce &&
+    input.workspaceKind === 'main' &&
+    !input.requireIsolation &&
+    input.health?.code === 'dirty'
   const inspected =
-    continuing && input.health && ['dirty', 'branch-drift', 'detached'].includes(input.health.code)
+    input.health &&
+    (currentEdits ||
+      (continuing && ['dirty', 'branch-drift', 'detached'].includes(input.health.code)))
       ? { ...input.health, code: 'ok' as const }
       : input.health
   const health = workspaceHealthBlockedReason(inspected, { unattended: !input.freshExecution })

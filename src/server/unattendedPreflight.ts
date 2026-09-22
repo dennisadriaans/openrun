@@ -46,6 +46,7 @@ export function unattendedVerificationRefusal(input: {
 /** The two automation columns the AFK rules read. */
 export type UnattendedPolicy = Pick<TaskRow, 'requireIsolation' | 'requireGhAuth' | 'baseRef'> & {
   resumeSessionId?: string
+  fireOnce?: number
 }
 
 /** Reason an unattended fire is unsafe, given an already-inspected workspace. */
@@ -66,6 +67,7 @@ export function unattendedRefusalFor(input: {
     freshExecution: webhook,
     workspaceKind: input.workspace.kind,
     requireIsolation: input.task.requireIsolation === 1,
+    fireOnce: input.task.fireOnce === 1,
     health: input.health,
     resumeSessionId: input.task.resumeSessionId,
     requiresGh: requiresGhAuth({

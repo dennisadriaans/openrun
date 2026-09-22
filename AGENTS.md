@@ -9,6 +9,13 @@ A **TanStack Start** proof-of-concept that plans and schedules **local coding-ag
 (`claude`, `codex`, `grok`, `gemini`, `agy`, `fx`) as child
 processes. No model APIs, no cloud, no keys — it drives the CLIs the user is already logged into.
 
+The optional natural-language CLI launcher is the exception for interpretation:
+`scripts/cli/natural.ts` sends the typed request and model choices to Open Run's
+hosted interpreter, without an account or user API key. Explicit flags work
+offline. The endpoint returns selections and source spans; all agent execution
+and scheduling remain local. `scripts/cli/native.ts` owns terminal handoff and
+native launch/resume. Never embed the hosted service credential in this repo.
+
 Each runtime has a **transport**: `cli` parses the binary's own JSON output, `acp` drives it
 over the [Agent Client Protocol](https://agentclientprotocol.com). Either way what lands in
 the DB is the same ACP-shaped event vocabulary (`lib/acp.ts`) — tool calls with a title, kind,

@@ -29,6 +29,8 @@ test('claude bundle scan keeps latest-per-family even without effort support', (
   assert.ok(haiku, 'haiku is the latest of its family')
   // No `effort` capability — sending `--effort` would be rejected by the CLI.
   assert.deepEqual(haiku.efforts, [])
+  assert.equal(haiku.defaultEffort, '')
+  assert.equal(haiku.rank, 1)
 })
 
 test('claude bundle scan drops superseded ids so the picker stays short', () => {

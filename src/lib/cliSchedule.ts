@@ -4,10 +4,10 @@
  *     openrun schedule task for claude at 16:40 "build the homepage" \
  *       push and open a pull request when done
  *
- * has to become a `tasks.save` payload with no model in the loop. Open Run
- * drives CLIs the user is already logged into and holds no API keys, so a
- * hosted natural-language parser is not available to it — see the open-core
- * rule in AGENTS.md. What makes a deterministic parse tractable is that the
+ * becomes a `tasks.save` payload without inference. Explicit commands stay
+ * usable offline; the optional hosted interpreter in `scripts/cli/natural.ts`
+ * also uses this parser to resolve selected schedule text locally.
+ * What makes a deterministic parse tractable is that the
  * shell has already done the hard part: a quoted prompt arrives as a single
  * argv element with spaces in it, and everything around it is a short keyword
  * phrase from a closed vocabulary.
@@ -43,6 +43,8 @@ export type CliIntent = {
   runtimeHint: string
   /** Model slug as typed; empty when the line did not say. */
   modelHint: string
+  /** Reasoning effort; omitted unless explicitly selected. */
+  effortHint?: string
   /** Workspace as a path, project name or branch; empty when not stated. */
   workspaceHint: string
   /**
@@ -96,6 +98,7 @@ const DOW: Record<string, number> = {
   sat: 6,
 }
 
+const SECOND_UNITS = new Set(['second', 'seconds', 'sec', 'secs', 's'])
 const MINUTE_UNITS = new Set(['minute', 'minutes', 'min', 'mins', 'm'])
 const HOUR_UNITS = new Set(['hour', 'hours', 'hr', 'hrs', 'h'])
 const DAY_UNITS = new Set(['day', 'days', 'd'])
@@ -153,12 +156,13 @@ function onceAt(at: number): CliSchedule {
   return { kind: 'once', cron: dailyCron(date.getHours(), date.getMinutes()), at }
 }
 
-/** `20 minutes` / `2h` / `1 day` as milliseconds; null when it is not a span. */
+/** A positive duration in seconds, minutes, hours or days, as milliseconds. */
 function parseDuration(amount: string, unit: string | undefined): number | null {
   if (!/^\d+$/.test(amount)) return null
   const n = Number(amount)
   if (n <= 0) return null
   const u = (unit ?? 'minutes').toLowerCase()
+  if (SECOND_UNITS.has(u)) return n * 1_000
   if (MINUTE_UNITS.has(u)) return n * 60_000
   if (HOUR_UNITS.has(u)) return n * 3_600_000
   if (DAY_UNITS.has(u)) return n * 86_400_000
@@ -233,6 +237,7 @@ export function parseCliSchedule(
   let schedule: CliSchedule | null = null
   let runtimeHint = ''
   let modelHint = ''
+  let effortHint: string | undefined
   let workspaceHint = ''
   let name = ''
   let explicitNow = false
@@ -269,6 +274,7 @@ export function parseCliSchedule(
       if (!taken) return { ok: false, error: `"${flag}" needs a value.` }
       if (flag === '--runtime') runtimeHint = taken.value
       else if (flag === '--model') modelHint = taken.value
+      else if (flag === '--effort') effortHint = taken.value
       else if (flag === '--workspace' || flag === '--in') workspaceHint = taken.value
       else if (flag === '--name') name = taken.value
       else if (flag === '--prompt') literalPrompt = taken.value
@@ -315,6 +321,16 @@ export function parseCliSchedule(
     }
 
     if (token === 'at') {
+      const delay = parseDuration(tokens[i + 1] ?? '', tokens[i + 2])
+      if (
+        delay !== null &&
+        tokens[i + 3]?.toLowerCase() === 'from' &&
+        tokens[i + 4]?.toLowerCase() === 'now'
+      ) {
+        schedule = onceAt(now.getTime() + delay)
+        i += 5
+        continue
+      }
       const clock = readClock(tokens, i + 1)
       if (!clock) {
         return {
@@ -356,7 +372,8 @@ export function parseCliSchedule(
       const span = parseDuration(tokens[i + 1] ?? '', tokens[i + 2])
       if (span !== null) {
         schedule = onceAt(now.getTime() + span)
-        i += 3
+        i +=
+          tokens[i + 3]?.toLowerCase() === 'from' && tokens[i + 4]?.toLowerCase() === 'now' ? 5 : 3
         continue
       }
       const value = tokens[i + 1]
@@ -367,6 +384,17 @@ export function parseCliSchedule(
       }
       leftover.push(raw)
       i += 1
+      continue
+    }
+
+    const fromNow = parseDuration(raw, tokens[i + 1])
+    if (
+      fromNow !== null &&
+      tokens[i + 2]?.toLowerCase() === 'from' &&
+      tokens[i + 3]?.toLowerCase() === 'now'
+    ) {
+      schedule = onceAt(now.getTime() + fromNow)
+      i += 4
       continue
     }
 
@@ -439,6 +467,7 @@ export function parseCliSchedule(
       schedule: explicitNow ? { kind: 'now' } : (schedule ?? { kind: 'now' }),
       runtimeHint,
       modelHint,
+      ...(effortHint ? { effortHint } : {}),
       workspaceHint,
       openPr,
       name,
