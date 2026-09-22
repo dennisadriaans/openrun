@@ -1,0 +1,851 @@
+/**
+ * Run detail — conversation workspace.
+ *
+ * Chat column + bottom terminal drawer + right files/git panel.
+ * Panel chrome adapted from t3code ChatView (MIT, T3 Tools Inc.).
+ */
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { ArrowLeft, Ban, MoreHorizontal, Plus, RotateCcw, Terminal, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import * as fns from '../fns/index.ts'
+import { Chat } from '../features/chat/Chat.tsx'
+import { ChatDebugMenuItem } from '../features/chat/ChatDebugToggle.tsx'
+import { ThreadStack } from '../features/chat/ThreadStack.tsx'
+import { TerminalPaletteMenuItems } from '../features/chat/TerminalPalettePicker.tsx'
+import { useChatTheme } from '../features/chat/ChatThemeProvider.tsx'
+import { DiffPanel } from '../features/git/DiffPanel.tsx'
+import { EmptyState, Modal } from '../components/ui.tsx'
+import { Button } from '../components/ui.tsx'
+import { RightPanelToggleControl } from '../features/workspaces/PanelLayoutControls.tsx'
+import { RightPanel } from '../features/workspaces/RightPanel.tsx'
+import { TerminalDrawer } from '../features/workspaces/TerminalDrawer.tsx'
+import { VerticalResizeHandle } from '../features/workspaces/VerticalResizeHandle.tsx'
+import { SidebarToggle, useSidebar } from '../components/AppChrome.tsx'
+import { WorkspaceBreadcrumb } from '../features/workspaces/WorkspaceBreadcrumb.tsx'
+import {
+  peekCachedRunSummary,
+  prefetchConversation,
+  scheduleIdleWorkspacePrefetch,
+  useConversation,
+  useMarkRunRead,
+  useRemoveRun,
+  useRunWorkspace,
+  useRunPullRequest,
+} from '../features/runs/queries.ts'
+import { RUN_PRELOAD_STALE_MS } from '../features/runs/queryPolicy.ts'
+import { useDiscard } from '../features/git/queries.ts'
+import { useRuntimes } from '../features/runtimes/queries.ts'
+import { useRepeatRun } from '../features/chat/launchQueries.ts'
+import { useQueuedMessageActions, useSendMessage } from '../features/chat/queries.ts'
+import { defaultEffort, defaultModel, modelsForRuntime } from '@openrun/domain/runtimes/models'
+import type { RuntimeMode } from '@openrun/domain/runtimes/runtimeMode'
+import { isWorkspaceReady } from '@openrun/domain/workspaces/workspaceReady'
+import { runListTitle } from '@openrun/domain/runs/runPreview'
+import {
+  NO_RUN_COMMITS,
+  shortSha,
+  undoCommitsBlockedReason,
+  undoCommitsLabel,
+} from '@openrun/domain/runs/undoRun'
+import { isDemoDetailRun, isDemoMode } from '../lib/demoData.ts'
+import { useRunLive } from '../lib/useRunLive.ts'
+
+export const Route = createFileRoute('/runs/$runId')({
+  loader: ({ context, params }) => {
+    void prefetchConversation(context.queryClient, params.runId)
+  },
+  preloadStaleTime: RUN_PRELOAD_STALE_MS,
+  component: RunDetail,
+})
+
+const DEFAULT_RIGHT_PANEL_WIDTH = 420
+const MIN_RIGHT_PANEL_WIDTH = 280
+const MAX_RIGHT_PANEL_WIDTH = 800
+
+type LayoutState = {
+  terminalOpen: boolean
+  rightPanelOpen: boolean
+  maximized: boolean
+  terminalHeight: number
+  rightPanelWidth: number
+}
+
+function layoutStorageKey(runId: string) {
+  return `agentops:layout:${runId}`
+}
+
+function defaultLayout(): LayoutState {
+  return {
+    terminalOpen: false,
+    rightPanelOpen: false,
+    maximized: false,
+    terminalHeight: 220,
+    rightPanelWidth: DEFAULT_RIGHT_PANEL_WIDTH,
+  }
+}
+
+function hasStoredLayout(runId: string): boolean {
+  try {
+    return sessionStorage.getItem(layoutStorageKey(runId)) != null
+  } catch {
+    return false
+  }
+}
+
+function loadLayout(runId: string): LayoutState {
+  const fallback = defaultLayout()
+  try {
+    const raw = sessionStorage.getItem(layoutStorageKey(runId))
+    if (!raw) return fallback
+    const parsed = { ...fallback, ...JSON.parse(raw) } as LayoutState
+    parsed.rightPanelWidth = Math.min(
+      MAX_RIGHT_PANEL_WIDTH,
+      Math.max(MIN_RIGHT_PANEL_WIDTH, Number(parsed.rightPanelWidth) || DEFAULT_RIGHT_PANEL_WIDTH),
+    )
+    return parsed
+  } catch {
+    return fallback
+  }
+}
+
+function RunDetail() {
+  const { runId } = Route.useParams()
+  const { streamHealthy } = useRunLive(runId)
+  const { data, isLoading } = useConversation(runId, { streamHealthy })
+  const { data: runtimes } = useRuntimes()
+  const { open: sidebarOpen } = useSidebar()
+  const debug = useChatTheme().theme === 'terminal'
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [reviewPath, setReviewPath] = useState<string | null>(null)
+  const [confirmUndoAll, setConfirmUndoAll] = useState(false)
+  const [dropCommits, setDropCommits] = useState(false)
+  const [layout, setLayout] = useState<LayoutState>(() => loadLayout(runId))
+  const layoutChosenRef = useRef(hasStoredLayout(runId))
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+  const qc = useQueryClient()
+  const listRow = peekCachedRunSummary(qc, runId)
+  const navigate = useNavigate()
+  const showRight = layout.rightPanelOpen || layout.maximized
+  // Every changed-files surface reads this: the right panel, the strip above the
+  // composer, the diff overlay and the undo dialog. Only the panel is gated on
+  // being open, so this stays enabled — gating it on `showRight` left the
+  // composer strip and the review overlay with no files whenever the panel was
+  // closed, which is the default for every run that was not webhook-triggered.
+  const { data: workspacePanel } = useRunWorkspace(runId, {
+    streamHealthy,
+  })
+
+  const pullRequestQuery = useRunPullRequest(runId)
+  const pullRequest = pullRequestQuery.data
+
+  const markRead = useMarkRunRead()
+  const sendMessage = useSendMessage(runId)
+  const queueActions = useQueuedMessageActions(runId)
+  const startNewRun = useRepeatRun()
+  const discard = useDiscard(runId)
+  const remove = useRemoveRun()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  useEffect(() => {
+    if (showRight) return
+    return scheduleIdleWorkspacePrefetch(qc, runId)
+  }, [qc, runId, showRight])
+
+  const runStatus = data?.run.status
+  const lastAgentAt = data?.messages.reduce(
+    (at, m) => (m.role === 'assistant' && m.createdAt > at ? m.createdAt : at),
+    0,
+  )
+  // Reading the run here is what clears its dot on the list — re-mark as the
+  // agent writes, so a run finished while open never comes back unread.
+  useEffect(() => {
+    if (isDemoDetailRun(runId)) return
+    markRead.mutate(runId)
+  }, [markRead.mutate, runId, lastAgentAt, runStatus])
+
+  useEffect(() => {
+    layoutChosenRef.current = hasStoredLayout(runId)
+    setLayout(loadLayout(runId))
+    setSelectedPath(null)
+    setReviewPath(null)
+    setConfirmUndoAll(false)
+    setConfirmDelete(false)
+    remove.reset()
+  }, [remove.reset, runId])
+
+  useEffect(() => {
+    if (!moreMenuOpen) return
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!moreMenuRef.current?.contains(event.target as Node)) setMoreMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoreMenuOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [moreMenuOpen])
+
+  const patchLayout = useCallback((partial: Partial<LayoutState>) => {
+    layoutChosenRef.current = true
+    setLayout((prev) => ({ ...prev, ...partial }))
+  }, [])
+
+  useEffect(() => {
+    if (!layoutChosenRef.current) return
+    try {
+      sessionStorage.setItem(layoutStorageKey(runId), JSON.stringify(layout))
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [runId, layout])
+
+  useEffect(() => {
+    if (!reviewPath) return
+    const currentFiles = workspacePanel?.files ?? []
+    if (currentFiles.length === 0) {
+      setReviewPath(null)
+      return
+    }
+    if (!currentFiles.some((file) => file.path === reviewPath)) {
+      setReviewPath(currentFiles[0]?.path ?? null)
+    }
+  }, [workspacePanel?.files, reviewPath])
+
+  useEffect(() => {
+    const trigger = data?.run?.trigger
+    if (!trigger) return
+    if (layoutChosenRef.current) return
+    if (trigger === 'webhook' || (isDemoMode() && isDemoDetailRun(runId))) {
+      patchLayout({ rightPanelOpen: true })
+    }
+    layoutChosenRef.current = true
+  }, [data?.run?.trigger, patchLayout, runId])
+
+  const openReview = useCallback((path: string) => setReviewPath(path), [])
+  const firstChangedPath = workspacePanel?.files[0]?.path
+  const openReviewAll = useCallback(() => {
+    if (firstChangedPath) setReviewPath(firstChangedPath)
+  }, [firstChangedPath])
+  const onSelectFile = useCallback(
+    (path: string) => {
+      setSelectedPath(path)
+      patchLayout({ rightPanelOpen: true, maximized: false })
+    },
+    [patchLayout],
+  )
+  const onUndoAllFiles = useCallback(() => setConfirmUndoAll(true), [])
+  // `mutateAsync`, not `mutate`: the composer restores the draft when this
+  // rejects, so a refused follow-up leaves the words in the box.
+  const sendFollowUp = sendMessage.mutateAsync
+  const runWorking = (data?.run?.status ?? listRow?.status) === 'running'
+  const queuedMessages = data?.queued ?? []
+  const onSend = useCallback(
+    (input: {
+      prompt: string
+      model: string
+      effort: string
+      runtimeMode: RuntimeMode
+      runtimeId?: string
+    }) => {
+      // Busy agent, or a queue left over from a stopped turn: the message waits
+      // its turn rather than being refused.
+      return sendFollowUp({ ...input, queue: runWorking || queuedMessages.length > 0 })
+    },
+    [sendFollowUp, runWorking, queuedMessages.length],
+  )
+  const onSendNow = useCallback(
+    (input: {
+      prompt: string
+      model: string
+      effort: string
+      runtimeMode: RuntimeMode
+      runtimeId?: string
+    }) => {
+      return sendFollowUp({ ...input, queue: true, force: true })
+    },
+    [sendFollowUp],
+  )
+  const dropQueued = queueActions.drop.mutate
+  const clearQueue = queueActions.clear.mutate
+  const flushQueue = queueActions.flush.mutate
+  const onDropQueued = useCallback((id: string) => dropQueued({ id }), [dropQueued])
+  const onClearQueue = useCallback(() => clearQueue(), [clearQueue])
+  // The server interrupts a working agent for us; from here it is one action.
+  const onFlushQueue = useCallback(() => flushQueue(), [flushQueue])
+  const onNewChat = useCallback(() => {
+    void navigate({
+      to: '/runs/new',
+      search: {
+        projectId: data?.project?.id,
+        workspaceId: data?.workspace?.id,
+        runtimeId: data?.runtime?.id,
+        model: data?.model || undefined,
+        effort: data?.effort || undefined,
+      },
+    })
+  }, [data, navigate])
+  const onStop = useCallback(() => {
+    const current = data?.run
+    if (!current) return
+    qc.setQueryData(['conversation', current.id], (prev: typeof data) =>
+      prev ? { ...prev, run: { ...prev.run, status: 'cancelled' as const } } : prev,
+    )
+    void fns.cancelRun({ data: { id: current.id } }).then(() => {
+      void qc.invalidateQueries({ queryKey: ['conversation', current.id] })
+      void qc.invalidateQueries({ queryKey: ['runWorkspace', current.id] })
+    })
+  }, [data, qc])
+
+  // Keep the workspace chrome mounted while conversation loads — only the
+  // transcript waits. "Not found" waits until the first fetch settles.
+  if (!isLoading && !data) {
+    return (
+      <div className="px-8 py-8">
+        <EmptyState title="Run not found">
+          <Link
+            to="/runs"
+            className="text-tier-secondary underline underline-offset-2 hover:text-foreground"
+          >
+            Back to run history
+          </Link>
+        </EmptyState>
+      </div>
+    )
+  }
+
+  const run = data?.run
+  const messages = data?.messages ?? []
+  const files = workspacePanel?.files ?? []
+  const repo = workspacePanel?.repo ?? {
+    isRepo: false,
+    branch: '',
+    head: '',
+    remote: '',
+    hasUpstream: false,
+    ahead: 0,
+    dirty: false,
+  }
+  const totals = workspacePanel?.totals ?? { additions: 0, deletions: 0 }
+  const checkResults = data?.checkResults ?? []
+  const canFollowUp = data?.canFollowUp ?? listRow?.status !== 'running'
+  const gh = workspacePanel?.gh ?? { installed: false, authenticated: false }
+  const runCommits = workspacePanel?.commits ?? NO_RUN_COMMITS
+  const commitsBlockedReason = undoCommitsBlockedReason(runCommits)
+  const canDropCommits = commitsBlockedReason === null
+  const workspace = data?.workspace ?? null
+  const project = data?.project ?? null
+  const booting = isLoading || !data
+  const fallbackRuntime = runtimes?.find(
+    (runtime) => runtime.id === (data?.runtime?.id ?? listRow?.runtimeId),
+  )
+  const models = data?.models?.length
+    ? data.models
+    : fallbackRuntime
+      ? modelsForRuntime(fallbackRuntime)
+      : []
+  const seededModel = data?.model || defaultModel(models)?.slug || ''
+  const seededEffort = data?.effort || defaultEffort(defaultModel(models))
+
+  const followUpReason =
+    (run?.status ?? listRow?.status) === 'running'
+      ? 'The agent is still working — your message is queued until it finishes.'
+      : 'This runtime has no resumable session, so follow-ups are unavailable.'
+
+  const showChat = !layout.maximized
+  const runBusy = run?.status === 'running'
+  const undoFilesReason = runBusy
+    ? 'Wait for the agent to finish before undoing changes.'
+    : undefined
+
+  const newRunRuntimeId = data?.runtime?.id ?? fallbackRuntime?.id
+  const firstPrompt = messages.find((message) => message.role === 'user')?.content.trim() ?? ''
+  const newRunBlockedReason = !run
+    ? 'Loading run details'
+    : runBusy
+      ? 'Wait for the current run to finish'
+      : !workspace?.id
+        ? 'This run has no workspace to reuse'
+        : !newRunRuntimeId
+          ? 'The run runtime is unavailable'
+          : !firstPrompt
+            ? 'This run has no prompt to repeat'
+            : null
+  const canStartNewRun = newRunBlockedReason === null && !startNewRun.isPending
+  const startNewRunMutate = startNewRun.mutate
+  const onNewRun = () => {
+    if (!run || !workspace?.id || !newRunRuntimeId || !firstPrompt || runBusy) return
+    startNewRunMutate(run.id, {
+      onSuccess: ({ runId: newRunId }) =>
+        void navigate({ to: '/runs/$runId', params: { runId: newRunId } }),
+    })
+    setMoreMenuOpen(false)
+  }
+
+  const closeDelete = () => {
+    remove.reset()
+    setConfirmDelete(false)
+  }
+
+  const openDelete = () => {
+    remove.reset()
+    setMoreMenuOpen(false)
+    setConfirmDelete(true)
+  }
+
+  const confirmRunDelete = async () => {
+    if (!run || runBusy) return
+    try {
+      await remove.mutateAsync(run.id)
+      navigate({ to: '/runs' })
+    } catch {
+      // Keep the modal open so the accessible error can be retried.
+    }
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-var(--header-h,0px))] min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1">
+        {showChat ? (
+          <div className="flex min-w-0 flex-1 flex-col" style={{ viewTransitionName: 'run-chat' }}>
+            {/*
+              The top bar lives inside the chat column (t3code layout) so the
+              right panel is a full-height sibling rather than sitting below it.
+            */}
+            <header className="flex h-[var(--workspace-topbar-height,44px)] shrink-0 items-center gap-1.5 border-b border-border px-3">
+              {!sidebarOpen ? <SidebarToggle /> : null}
+              <Link
+                to="/runs"
+                className="flex shrink-0 items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-[var(--bg-luminous-quaternary)] hover:text-foreground"
+                title="Back to run history"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+
+              <WorkspaceBreadcrumb
+                projectId={project?.id}
+                projectName={project?.name}
+                branch={data?.execution ? run?.headBranch : workspace?.branch}
+                isMainCheckout={!data?.execution && workspace?.kind === 'main'}
+                branchDisabled={booting}
+                trailing={
+                  run ? (
+                    <ThreadStack
+                      runId={run.id}
+                      title={runListTitle({
+                        trigger: run.trigger,
+                        taskName: run.taskName,
+                        prompt: firstPrompt,
+                      })}
+                      runtimeId={data?.runtime?.id ?? run.runtimeId}
+                      runtimeLabel={data?.runtime?.label ?? run.runtimeId}
+                      workspaceId={workspace?.id ?? run.workspaceId}
+                      projectId={project?.id ?? workspace?.projectId ?? ''}
+                    />
+                  ) : null
+                }
+              />
+
+              <div className="flex shrink-0 items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => patchLayout({ terminalOpen: !layout.terminalOpen })}
+                  disabled={!workspace?.id}
+                  aria-label="Toggle terminal"
+                  aria-pressed={layout.terminalOpen}
+                  title={workspace?.id ? 'Toggle terminal' : 'This run has no active workspace'}
+                  className={`inline-flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${
+                    layout.terminalOpen
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  }`}
+                >
+                  <Terminal className="size-3.5" />
+                </button>
+                {run?.status === 'running' ? (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    aria-label="Cancel run"
+                    title="Cancel run"
+                    className="inline-flex size-7 items-center justify-center rounded-md text-danger transition-colors hover:bg-danger/10"
+                  >
+                    <Ban className="size-3.5" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onNewChat}
+                  disabled={!run}
+                  aria-label="New chat"
+                  title="Start an empty chat with the same settings"
+                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+                <div ref={moreMenuRef} className="relative">
+                  <button
+                    type="button"
+                    disabled={!run}
+                    aria-label="More"
+                    aria-haspopup="menu"
+                    aria-expanded={moreMenuOpen}
+                    title="More"
+                    onClick={() => setMoreMenuOpen((open) => !open)}
+                    className={`inline-flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${
+                      moreMenuOpen
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                    }`}
+                  >
+                    <MoreHorizontal className="size-3.5" />
+                  </button>
+                  {moreMenuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-50 mt-1.5 max-h-[min(24rem,70vh)] min-w-48 overflow-y-auto rounded-xl border border-border bg-elevated p-1.5 shadow-2xl shadow-[var(--shadow-primary)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!canStartNewRun}
+                        title={
+                          newRunBlockedReason ?? 'Repeat the first prompt with the same settings'
+                        }
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-foreground transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                        onClick={onNewRun}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        {startNewRun.isPending ? 'Starting…' : 'Repeat run'}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={runBusy}
+                        title={
+                          runBusy ? 'Cancel the run before deleting' : 'Permanently delete this run'
+                        }
+                        aria-label={runBusy ? 'Cancel the run before deleting' : 'Delete run'}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                        onClick={openDelete}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete run
+                      </button>
+                      {runBusy ? (
+                        <p className="px-2 py-1 text-ui-xs text-danger">
+                          Cancel the run before deleting
+                        </p>
+                      ) : null}
+                      <ChatDebugMenuItem />
+                      {debug ? <TerminalPaletteMenuItems /> : null}
+                    </div>
+                  ) : null}
+                </div>
+                {startNewRun.isError ? (
+                  <span
+                    role="alert"
+                    className="max-w-48 truncate text-ui-sm text-danger"
+                    title={
+                      startNewRun.error instanceof Error
+                        ? startNewRun.error.message
+                        : String(startNewRun.error)
+                    }
+                  >
+                    Could not start run
+                  </span>
+                ) : null}
+                {!showRight ? (
+                  <RightPanelToggleControl
+                    rightPanelOpen={false}
+                    onToggle={() => patchLayout({ rightPanelOpen: true, maximized: false })}
+                  />
+                ) : null}
+              </div>
+            </header>
+
+            <div className="min-h-0 flex-1">
+              <Chat
+                messages={messages}
+                transcriptPending={booting}
+                activePath={selectedPath}
+                canFollowUp={canFollowUp}
+                canQueue={data?.canQueueFollowUp ?? false}
+                followUpReason={followUpReason}
+                pending={false}
+                running={run?.status === 'running'}
+                checkResults={checkResults}
+                pullRequest={pullRequest ?? null}
+                repositoryUrl={project?.remoteUrl}
+                models={models}
+                runId={runId}
+                runtimeId={data?.runtime?.id ?? fallbackRuntime?.id}
+                runtimes={runtimes ?? []}
+                canSwitchRuntime={data?.canSwitchRuntime ?? false}
+                runTrigger={run?.trigger}
+                installWorkspaceId={workspace?.id ?? run?.workspaceId}
+                installWorkspaceReady={workspace ? isWorkspaceReady(workspace.status) : false}
+                installWorkspaceStatus={workspace?.status}
+                installProjectId={project?.id ?? workspace?.projectId}
+                installProjectName={project?.name}
+                installWorkspaceLabel={
+                  workspace
+                    ? workspace.kind === 'main'
+                      ? 'main'
+                      : workspace.branch || workspace.id
+                    : null
+                }
+                initialModel={seededModel}
+                initialEffort={seededEffort}
+                changedFiles={files}
+                onSelectFile={onSelectFile}
+                onReviewFile={openReview}
+                onReviewFiles={openReviewAll}
+                onUndoAllFiles={onUndoAllFiles}
+                undoFilesDisabled={runBusy}
+                undoFilesReason={undoFilesReason}
+                onStop={onStop}
+                onSend={onSend}
+                onSendNow={onSendNow}
+                queued={queuedMessages}
+                queueBusy={
+                  queueActions.drop.isPending ||
+                  queueActions.clear.isPending ||
+                  queueActions.flush.isPending
+                }
+                onDropQueued={onDropQueued}
+                onClearQueue={onClearQueue}
+                onFlushQueue={onFlushQueue}
+                workspaceId={workspace?.id ?? run?.workspaceId}
+                onNewChat={onNewChat}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {showRight ? (
+          <div
+            className={`relative flex min-h-0 shrink-0 flex-col border-l border-border ${
+              layout.maximized ? 'flex-1' : ''
+            }`}
+            style={layout.maximized ? undefined : { width: layout.rightPanelWidth }}
+          >
+            {!layout.maximized ? (
+              <VerticalResizeHandle
+                width={layout.rightPanelWidth}
+                onWidthChange={(rightPanelWidth) => patchLayout({ rightPanelWidth })}
+                min={MIN_RIGHT_PANEL_WIDTH}
+                max={MAX_RIGHT_PANEL_WIDTH}
+              />
+            ) : null}
+            <RightPanel
+              runId={runId}
+              files={files}
+              checkResults={checkResults}
+              currentMessageId={
+                [...messages].reverse().find((m) => m.role === 'assistant')?.id ?? ''
+              }
+              runBusy={run?.status === 'running'}
+              selectedPath={selectedPath}
+              onSelectPath={setSelectedPath}
+              onReviewFile={openReview}
+              onUndoAllFiles={() => setConfirmUndoAll(true)}
+              reviewPath={reviewPath}
+              undoDisabled={runBusy}
+              undoDisabledReason={undoFilesReason}
+              onToggleRightPanel={() => patchLayout({ rightPanelOpen: false, maximized: false })}
+              maximized={layout.maximized}
+              onToggleMaximized={() =>
+                patchLayout({ maximized: !layout.maximized, rightPanelOpen: true })
+              }
+              git={{
+                runId,
+                repo,
+                fileCount: files.length,
+                totals,
+                taskName: workspacePanel?.taskName ?? run?.taskName ?? '',
+                gh,
+                baseBranch: workspacePanel?.baseBranch ?? run?.baseBranch ?? '',
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      {reviewPath ? (
+        <DiffPanel
+          variant="overlay"
+          runId={runId}
+          files={files}
+          path={reviewPath}
+          discardDisabled={runBusy}
+          discardDisabledReason={undoFilesReason}
+          onClose={() => setReviewPath(null)}
+          onSelect={setReviewPath}
+          onDiscardAll={() => setConfirmUndoAll(true)}
+        />
+      ) : null}
+
+      {confirmUndoAll ? (
+        <Modal
+          title="Undo all changes"
+          onClose={() => {
+            setConfirmUndoAll(false)
+            setDropCommits(false)
+          }}
+          className="z-[110]"
+        >
+          <div className="space-y-4">
+            <p className="text-ui-base text-tier-secondary">
+              Restore every file this run changed to the snapshot taken when it started. This cannot
+              be undone.
+            </p>
+
+            {runCommits.commits.length > 0 ? (
+              <div className="space-y-2 rounded-md border border-border px-3 py-2.5">
+                <label className="flex items-start gap-2 text-ui-base text-tier-secondary">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={dropCommits && canDropCommits}
+                    disabled={!canDropCommits}
+                    onChange={(e) => setDropCommits(e.target.checked)}
+                  />
+                  <span>
+                    {undoCommitsLabel(runCommits)}
+                    <span className="block text-ui-sm text-tier-tertiary">
+                      Without this the files go back but the commits stay on the branch, so
+                      <code className="mono"> git log </code>
+                      still shows them.
+                    </span>
+                  </span>
+                </label>
+
+                <ul className="space-y-0.5 pl-6 text-ui-sm text-tier-tertiary">
+                  {runCommits.commits.slice(0, 5).map((commit) => (
+                    <li key={commit.sha} className="truncate">
+                      <span className="mono">{shortSha(commit.sha)}</span> {commit.subject}
+                    </li>
+                  ))}
+                  {runCommits.commits.length > 5 ? (
+                    <li>+{runCommits.commits.length - 5} more</li>
+                  ) : null}
+                </ul>
+
+                {commitsBlockedReason ? (
+                  <p className="text-ui-sm text-amber-300">{commitsBlockedReason}</p>
+                ) : dropCommits ? (
+                  <p className="text-ui-sm text-tier-tertiary">
+                    The branch moves back to {shortSha(runCommits.baseCommit)}. The dropped commits
+                    stay in your reflog.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {discard.isError ? (
+              <p className="rounded-md border border-border px-3 py-2 text-ui-base text-tier-secondary">
+                {discard.error instanceof Error ? discard.error.message : String(discard.error)}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setConfirmUndoAll(false)
+                  setDropCommits(false)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                disabled={discard.isPending || runBusy}
+                onClick={() =>
+                  discard.mutate(
+                    { resetCommits: dropCommits && canDropCommits },
+                    {
+                      onSuccess: () => {
+                        setConfirmUndoAll(false)
+                        setDropCommits(false)
+                        setReviewPath(null)
+                      },
+                    },
+                  )
+                }
+              >
+                {discard.isPending
+                  ? 'Undoing…'
+                  : dropCommits && canDropCommits
+                    ? 'Undo all and drop commits'
+                    : 'Undo all'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {/*
+        Spans the full workspace width rather than the chat column, so the
+        terminal toggle still works while the right panel is maximized.
+      */}
+      {data?.execution && (data.execution.note || data.execution.setupLog) ? (
+        <details className="border-t border-border px-4 py-2 text-ui-sm text-tier-tertiary">
+          <summary className="cursor-pointer">Execution recovery and setup</summary>
+          {data.execution.note ? <p className="mt-2">{data.execution.note}</p> : null}
+          {data.execution.note ? (
+            <p className="mt-1 break-all mono">{data.execution.path}</p>
+          ) : null}
+          {data.execution.setupLog ? (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap">
+              {data.execution.setupLog}
+            </pre>
+          ) : null}
+        </details>
+      ) : null}
+      <TerminalDrawer
+        open={layout.terminalOpen}
+        height={layout.terminalHeight}
+        onHeightChange={(terminalHeight) => patchLayout({ terminalHeight })}
+        onClose={() => patchLayout({ terminalOpen: false })}
+        workspaceId={workspace?.id ?? run?.workspaceId}
+      />
+
+      {confirmDelete && run ? (
+        <Modal title="Delete run" onClose={closeDelete}>
+          <div className="space-y-4">
+            <p className="text-ui-base text-tier-secondary">
+              Permanently delete <span className="text-foreground">{run.taskName}</span>? This
+              cannot be undone.
+            </p>
+            {remove.isError ? (
+              <p
+                role="alert"
+                className="rounded-md border border-danger px-3 py-2 text-ui-base text-danger"
+              >
+                {remove.error instanceof Error ? remove.error.message : String(remove.error)}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={closeDelete}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                disabled={remove.isPending || runBusy}
+                onClick={() => void confirmRunDelete()}
+              >
+                {remove.isPending ? 'Deleting…' : 'Delete run'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  )
+}

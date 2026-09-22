@@ -3,6 +3,7 @@ import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { createRequire } from 'node:module'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const name = '@dennisadriaans/openrun'
@@ -18,6 +19,18 @@ const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as
   dependencies: Record<string, string>
   devDependencies: Record<string, string>
 }
+const versions = { ...manifest.dependencies, ...manifest.devDependencies }
+for (const workspace of [
+  'apps/cli',
+  'apps/worker',
+  'packages/runtime',
+  'packages/domain',
+  'packages/contracts',
+]) {
+  const pkg = JSON.parse(readFileSync(join(root, workspace, 'package.json'), 'utf8'))
+  Object.assign(versions, pkg.dependencies, pkg.devDependencies)
+}
+const require = createRequire(import.meta.url)
 const output = join(root, 'dist', 'npm')
 rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true })
@@ -25,11 +38,10 @@ mkdirSync(output, { recursive: true })
 const result = await build({
   absWorkingDir: root,
   entryPoints: {
-    // Keep the CLI beside cli/local.ts's location so its worker path and cwd
-    // resolve identically in a source checkout and an installed package.
-    'scripts/cli/openrun': 'scripts/openrun.ts',
-    'scripts/worker': 'scripts/worker.ts',
-    'scripts/mcp-server': 'scripts/mcp-server.ts',
+    // The installed launcher finds its worker and MCP helper beside this binary.
+    'bin/openrun': 'apps/cli/src/index.ts',
+    'bin/worker': 'apps/worker/src/index.ts',
+    'bin/mcp-server': 'apps/worker/src/mcp.ts',
   },
   outdir: output,
   bundle: true,
@@ -37,6 +49,16 @@ const result = await build({
   format: 'esm',
   target: 'node22',
   packages: 'external',
+  plugins: [
+    {
+      name: 'bundle-workspace-packages',
+      setup(builder) {
+        builder.onResolve({ filter: /^@openrun\// }, (args) => ({
+          path: require.resolve(args.path),
+        }))
+      },
+    },
+  ],
   sourcemap: true,
   metafile: true,
 })
@@ -49,13 +71,14 @@ for (const entry of Object.values(result.metafile.outputs)) {
     if (!imported.external || imported.path.startsWith('node:')) continue
     const parts = imported.path.split('/')
     const dependency = parts.slice(0, imported.path.startsWith('@') ? 2 : 1).join('/')
-    const version = manifest.dependencies[dependency] ?? manifest.devDependencies[dependency]
-    if (!version) throw new Error(`Missing runtime dependency in package.json: ${dependency}`)
+    const version = versions[dependency]
+    if (!version || version.startsWith('workspace:'))
+      throw new Error(`Missing runtime dependency in package.json: ${dependency}`)
     dependencies[dependency] = version
   }
 }
 
-const bin = 'scripts/cli/openrun.js'
+const bin = 'bin/openrun.js'
 const executable = join(output, bin)
 writeFileSync(
   executable,
@@ -77,7 +100,7 @@ writeFileSync(
       type: 'module',
       bin: { openrun: bin },
       engines: { node: manifest.engines.node },
-      files: ['scripts', 'LICENSE', 'NOTICE'],
+      files: ['bin', 'LICENSE', 'NOTICE'],
       publishConfig: { access: 'public' },
       dependencies: Object.fromEntries(
         Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)),

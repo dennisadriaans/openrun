@@ -30,7 +30,7 @@ jobs:
       # `biome ci` never writes; it fails on anything `pnpm lint:fix` would have
       # changed, so the fix is always one command away for a contributor.
       - name: Biome
-        run: pnpm exec biome ci src scripts
+        run: pnpm exec biome ci apps packages scripts
 
   verify:
     name: typecheck · test · build (${{ matrix.os }}, node ${{ matrix.node }})
@@ -59,6 +59,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Architecture boundaries
+        run: pnpm architecture:check
+
+      - name: Generated contract drift
+        run: pnpm contract:check
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -68,7 +74,15 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # `pnpm build` regenerates src/routeTree.gen.ts through the TanStack Start
+      - name: CLI package
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: pnpm cli:package && pnpm cli:smoke
+
+      - name: Apple client
+        if: matrix.os == 'macos-latest'
+        run: swift test --package-path packages/apple/OpenRunKit
+
+      # `pnpm build` regenerates apps/web/src/routeTree.gen.ts through the TanStack Start
       # Vite plugin, so a stale committed copy shows up as a dirty tree right
       # here for free.
       #
@@ -80,9 +94,9 @@ jobs:
       - name: Warn if routeTree.gen.ts is out of date
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: |
-          if ! git diff --quiet -- src/routeTree.gen.ts; then
-            echo "::warning file=src/routeTree.gen.ts::Stale. Run 'pnpm build' and commit the regenerated file."
-            git diff -- src/routeTree.gen.ts
+          if ! git diff --quiet -- apps/web/src/routeTree.gen.ts; then
+            echo "::warning file=apps/web/src/routeTree.gen.ts::Stale. Run 'pnpm build' and commit the regenerated file."
+            git diff -- apps/web/src/routeTree.gen.ts
           fi
 
   changelog:

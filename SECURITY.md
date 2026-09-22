@@ -68,14 +68,14 @@ to. There is no bug bounty.
 - Bypassing the access-token check on any `/api/**` route or server function.
 - Reaching Open Run from a web page you merely visited — cross-site requests
   that drive a server function, or a DNS-rebinding attack that gets past the
-  `Host` check in `src/lib/serverAccess.ts`.
-- Escaping the workspace path boundary in `src/server/files.ts` — reading or
+  `Host` check in `packages/domain/src/security/serverAccess.ts`.
+- Escaping the workspace path boundary in `packages/runtime/src/workspaces/files.ts` — reading or
   writing outside the run's working directory via traversal, absolute paths or
   symlinks.
 - Getting a forged event onto the cloud relay so that it starts a run
-  (`src/server/cloud/relay.ts`, `src/server/integrations/dispatcher.ts`).
-- Bypassing a supervised-mode approval (`src/lib/approvals.ts`,
-  `src/lib/supervisedPolicy.ts`) so a tool call executes without the decision it
+  (`packages/runtime/src/cloud/relay.ts`, `packages/runtime/src/integrations/dispatcher.ts`).
+- Bypassing a supervised-mode approval (`packages/domain/src/runs/approvals.ts`,
+  `packages/domain/src/runs/supervisedPolicy.ts`) so a tool call executes without the decision it
   required.
 - Argument injection into a spawned CLI via a runtime args template, prompt, or
   workspace name that escapes the intended argv.

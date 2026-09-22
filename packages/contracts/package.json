@@ -1,0 +1,16 @@
+{
+  "name": "@openrun/contracts",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@openrun/domain": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./generated/client": "./src/generated/client.ts",
+    "./operations": "./src/operations.ts",
+    "./openapi": "./src/generated/openapi.json"
+  }
+}

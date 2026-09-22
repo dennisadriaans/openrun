@@ -1,0 +1,55 @@
+/**
+ * Read one saved CLI chat off disk, in full.
+ *
+ * The parsing lives in `lib/nativeTranscript.ts` (pure, testable); this module
+ * only locates the file. Kinds without a reader return no turns, and the caller
+ * falls back to the one-line "resumed" note.
+ */
+import { existsSync, readFileSync } from 'node:fs'
+import type { NativeSessionKind } from '@openrun/domain/runtimes/nativeSessions'
+import {
+  parseClaudeTranscript,
+  parseCodexTranscript,
+  parseGrokTranscript,
+  parseAntigravityTranscript,
+  supportsTranscriptImport,
+  type TranscriptTurn,
+} from '@openrun/domain/runtimes/nativeTranscript'
+import {
+  agyTranscriptFile,
+  claudeSessionFile,
+  codexSessionFile,
+  grokTranscriptFile,
+  validateNativeSessionId,
+} from './nativeSessions.ts'
+
+export function readNativeTranscript(
+  cwd: string,
+  kind: NativeSessionKind,
+  sessionId: string,
+): TranscriptTurn[] {
+  // Validate before checking the kind or file existence: an import/read
+  // boundary must reject a caller-supplied path-like id with a clear error,
+  // rather than silently turning it into an empty transcript.
+  const id = validateNativeSessionId(sessionId)
+  if (!cwd.trim() || !supportsTranscriptImport(kind)) return []
+  const file =
+    kind === 'codex'
+      ? codexSessionFile(id)
+      : kind === 'grok'
+        ? grokTranscriptFile(cwd, id)
+        : kind === 'antigravity'
+          ? agyTranscriptFile(id)
+          : claudeSessionFile(cwd, id)
+  if (!file || !existsSync(file)) return []
+  try {
+    const contents = readFileSync(file, 'utf8')
+    if (kind === 'codex') return parseCodexTranscript(contents)
+    if (kind === 'grok') return parseGrokTranscript(contents)
+    if (kind === 'antigravity') return parseAntigravityTranscript(contents)
+    return parseClaudeTranscript(contents)
+  } catch {
+    // An unreadable or half-written transcript is not worth failing a run over.
+    return []
+  }
+}
