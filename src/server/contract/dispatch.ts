@@ -18,7 +18,7 @@
  *    that reaches past the facade.
  *  - **`core.ts` is imported lazily.** It boots the scheduler and pulls in
  *    `better-sqlite3`, so it is reached the same way `fns/index.ts` reaches it:
- *    `await import('../core')`, once per call. A static import here would pin
+ *    `await import('../core.ts')`, once per call. A static import here would pin
  *    it into the graph and defeat the code splitting every entry point relies
  *    on.
  */
@@ -37,7 +37,7 @@ export type DispatchResult = {
 
 /** See the note on lazy loading in this module's header. */
 async function core(): Promise<Record<string, unknown>> {
-  return (await import('../core')) as unknown as Record<string, unknown>
+  return (await import('../core.ts')) as unknown as Record<string, unknown>
 }
 
 function fail(status: number, error: string): DispatchResult {

@@ -133,9 +133,35 @@ Every step is safe to re-run.
 If a release lands broken, ship a `fix` and let the next release cut a patch.
 Never move a published tag.
 
-## What a release does not do yet
+## Prepare the npm CLI package
 
-`Release · publish` creates a tag and GitHub Release, but attaches no build
-artifact. There is no npm publish and no binary — the app is `private: true`
-and is installed by cloning. Future distribution targets should be added after
-the tag exists and must use that same SHA.
+The CLI is distributed as `@dennisadriaans/openrun` and installs the `openrun`
+command. The package includes compiled JavaScript for the CLI, background worker,
+and MCP helper, plus their runtime dependencies. The web app remains a separate
+source installation.
+
+From the release checkout, prepare the package and create its tarball:
+
+```bash
+pnpm cli:package
+npm pack ./dist/npm --pack-destination ./dist
+```
+
+`dist/npm/package.json` takes its version from the app's `package.json`. Do not
+choose a separate CLI version. The package manifest contains no development or
+installation hooks; users need Node.js and npm, without pnpm or a web build.
+Source maps include the source of each bundled module.
+
+To publish an approved release artifact with an npm account that can publish
+under `@dennisadriaans`:
+
+```bash
+npm publish ./dist/npm --access public
+```
+
+The first publication may require `npm login` and npm's account authorization.
+Keep the root package `private: true`; publish only the generated package.
+
+`Release · publish` currently creates the tag and GitHub Release. It does not
+automatically publish to npm. Build and publish the CLI from that same release
+SHA, after the tag exists.

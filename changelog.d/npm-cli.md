@@ -1,0 +1,1 @@
+You no longer need to clone Open Run or install its web development dependencies to use the CLI: the npm package includes the command, background worker, and MCP helper for running agents from any project.

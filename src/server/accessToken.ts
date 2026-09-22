@@ -13,6 +13,7 @@ import {
   ACCESS_TOKEN_QUERY_PARAM,
   ACCESS_TOKEN_QUERY_PARAM_LEGACY,
   accessCookieHeader,
+  bearerToken,
   DEFAULT_HOST,
   hostHeaderRefusal,
   insecureHostWarning,
@@ -181,14 +182,19 @@ function cookieValue(header: string | null, name: string): string | null {
 /**
  * Token presented by a request, from whichever channel could carry it.
  *
- * Header first. `EventSource` cannot set headers, so the SSE routes fall back
- * to a query parameter; the cookie exists so the browser stops appending the
- * token to URLs after the first authenticated load.
+ * Header first, then `Authorization: Bearer` — which is what the generated
+ * fetch client, the local CLI and `OpenRunKit` all send. `EventSource` cannot
+ * set headers, so the SSE routes fall back to a query parameter; the cookie
+ * exists so the browser stops appending the token to URLs after the first
+ * authenticated load.
  */
 function presentedToken(request: Request): string | null {
   const header =
     request.headers.get(ACCESS_TOKEN_HEADER) ?? request.headers.get(ACCESS_TOKEN_HEADER_LEGACY)
   if (header) return header.trim()
+
+  const bearer = bearerToken(request.headers.get('authorization'))
+  if (bearer) return bearer
 
   const cookieHeader = request.headers.get('cookie')
   const cookie =

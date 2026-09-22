@@ -27,6 +27,7 @@ pnpm lint            # biome check (lint + format); pnpm lint:fix writes
 pnpm build           # production build into dist/
 pnpm start           # serve the build via scripts/start.ts (refuses an unsafe bind)
 pnpm token:print     # print / create the access token (`pnpm token` is pnpm's own npm command)
+pnpm cli <args>      # the local CLI, e.g. pnpm cli schedule at 16:40 "…" for claude
 pnpm preview         # vite preview
 pnpm typecheck       # tsc --noEmit
 pnpm contract:generate # rebuild every transport from src/contract/operations.ts
@@ -204,8 +205,9 @@ Neither hook may open an `EventSource` of its own.
 | Verification checks, verdicts, the repair loop | `lib/checks.ts` (defs), `server/checks.ts` (runner), `lib/verdict.ts` (judgement); `executor.concludeTurn` decides *whether* a turn is verified — unattended turns only |
 | Supervised mode / tool approvals | `lib/approvals.ts` (the model), `lib/claudeControl.ts` (Claude's responder), `lib/supervisedPolicy.ts` (who may) |
 | AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
-| Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts` |
+| Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts`; shared home resolution in `server/paths.ts` |
 | Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
+| The local CLI (`openrun schedule …`) | `scripts/openrun.ts` owns argv and printing; `scripts/cli/local.ts` connects to or starts the local worker, and `scripts/cli/integrations.ts` owns terminal setup and the temporary OAuth callback. Local calls use the same contract dispatcher as HTTP; `--url` explicitly selects the generated HTTP client. `scripts/worker.ts` boots the existing core without a web build. `server/localRuntime.ts` elects one scheduler/executor owner per database before orphan recovery and exposes authenticated loopback IPC. Never write task rows from a short-lived CLI or start a second scheduler. Parsing/resolution stay in `lib/cliSchedule.ts` and `lib/cliResolve.ts`. |
 | Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; externally-created Git worktrees are registered as user-owned workspaces and are never reset or removed by Open Run. |
 | Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `lib/workspaceHealth.ts` (the codes + wording), `server/workspaceHealth.ts` (inspection, quarantine, restore) |
 | Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `lib/unattendedGate.ts` (the rules), `server/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
