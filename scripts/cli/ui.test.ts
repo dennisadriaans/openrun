@@ -6,6 +6,7 @@ import {
   CliUi,
   CommandRequest,
   homeMatches,
+  inputCompletion,
   homeSuggestions,
   isCommandRequest,
   Quit,
@@ -25,24 +26,19 @@ function uiWithTerminal(terminal: object) {
   return { ui, remembered }
 }
 
-test('matching suggestions stay below the input through the complete command and label', () => {
-  for (const [text, command, label] of [
-    ['schedule an automation', 'schedule', 'Schedule an automation'],
-    ['setup a project', 'init', 'Set up a project'],
-  ]) {
-    for (let length = 1; length <= text!.length; length++) {
-      const input = text!.slice(0, length)
-      assert.ok(
-        homeSuggestions(input).some((choice) => choice.value === command),
-        input,
-      )
-      assert.ok(requestSuggestion(input).split('\n')[1]?.includes(label!), input)
-    }
-  }
+test('command proposals are accepted as input without changing task prompts', () => {
+  assert.equal(inputCompletion('sch'), 'schedule')
+  assert.equal(inputCompletion('scheduel'), 'schedule')
+  assert.equal(inputCompletion('openrun integ'), 'openrun integrations')
+  assert.equal(inputCompletion('schedule'), undefined)
+  assert.equal(inputCompletion('schedule in 10 seconds "fix checkout"'), undefined)
+  assert.equal(inputCompletion('create testabc.html sonnet low in 10 seconds'), undefined)
+  assert.equal(inputCompletion(''), undefined)
   assert.equal(
-    requestSuggestion('schedule'),
-    'Enter → Schedule an automation\nSchedule an automation',
+    inputCompletion('review check', ['review checkout sonnet low']),
+    'review checkout sonnet low',
   )
+  assert.equal(requestSuggestion('schedule'), 'Enter → Schedule an automation')
 })
 
 test('suggestions tolerate abbreviations and typos without turning them into exact commands', () => {
@@ -65,7 +61,7 @@ test('suggestions tolerate abbreviations and typos without turning them into exa
     ['schedule'],
   )
   assert.deepEqual(homeMatches('scheduel'), [])
-  assert.match(requestSuggestion('scheduel'), /^Enter → Resolve request\n/)
+  assert.match(requestSuggestion('scheduel'), /^Enter → Resolve request/)
   for (const input of ['', 'create a file', 'schedule in 10 seconds "fix the checkout"']) {
     assert.deepEqual(homeSuggestions(input), [], input)
   }

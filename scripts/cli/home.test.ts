@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { showHome, taskTiming, type TaskRowView } from './home.ts'
+import type { HomeOverview } from './session.ts'
+import { showHome, taskTiming, watchHome, type TaskRowView } from './home.ts'
+import { setImmediate } from 'node:timers/promises'
+import type { watchActivity } from './activity.ts'
 
 test('home uses server timestamps and readiness instead of predicting blocked cron fires', () => {
   const task: TaskRowView = {
@@ -23,7 +26,7 @@ test('home uses server timestamps and readiness instead of predicting blocked cr
 })
 
 test('home shows running, scheduled and automation counts inline', async () => {
-  let overview = ''
+  let overview: HomeOverview = {}
   const calls: string[] = []
   const tasks = [
     { id: 'later', name: 'Later', enabled: 1, nextRunAt: 2_000_000_100_000 },
@@ -35,18 +38,105 @@ test('home shows running, scheduled and automation counts inline', async () => {
       async call(operation) {
         calls.push(operation)
         if (operation === 'tasks.list') return tasks
-        if (operation === 'dashboard.dashboard') return { stats: { running: 1 } }
+        if (operation === 'dashboard.dashboard')
+          return {
+            stats: { running: 1, runsToday: 4 },
+            activeRuns: [{ id: 'running', taskName: 'Test', status: 'running' }],
+          }
+        if (operation === 'integrations.list') return [{ enabled: 1 }, { enabled: 0 }]
         throw new Error(`Unexpected operation: ${operation}`)
       },
     },
     {
-      info() {},
-      scheduledTasks() {},
-      note(message) {
-        overview = message
+      overview(value) {
+        overview = value
       },
     },
   )
-  assert.equal(overview, 'Running now 1   ·   Scheduled 2   ·   Automations 3')
-  assert.deepEqual(calls.sort(), ['dashboard.dashboard', 'tasks.list'])
+  assert.equal(overview.running, 1)
+  assert.equal(overview.scheduled, 2)
+  assert.equal(overview.runs, 4)
+  assert.equal(overview.integrations, 1)
+  assert.deepEqual(
+    overview.tasks?.map((row) => row.id),
+    ['earlier', 'later'],
+  )
+  assert.equal(overview.activeRuns?.[0]?.id, 'running')
+  assert.deepEqual(calls.sort(), ['dashboard.dashboard', 'integrations.list', 'tasks.list'])
+})
+
+test('background refreshes discard older responses and stop updating after the session closes', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  let stream!: Parameters<typeof watchActivity>[0]
+  let stopped = false
+  let release!: (value: TaskRowView[]) => void
+  let reads = 0
+  const views: HomeOverview[] = []
+  const live = watchHome(
+    {
+      async call(operation) {
+        if (operation === 'tasks.list') {
+          reads++
+          if (reads === 1)
+            return new Promise<TaskRowView[]>((resolve) => {
+              release = resolve
+            })
+          return [{ id: 'new', name: 'New schedule', enabled: 1, nextRunAt: 2_000_000_000_000 }]
+        }
+        if (operation === 'integrations.list') return []
+        return { stats: { running: 1, runsToday: 2 } }
+      },
+    },
+    {
+      overview(value) {
+        views.push(value)
+      },
+      status() {},
+      runChanged() {},
+    },
+    {
+      watch(options) {
+        stream = options
+        return () => {
+          stopped = true
+        }
+      },
+    },
+  )
+  t.after(() => live.stop())
+  // A save or stream event invalidates the old read before it resolves.
+  stream.onChange()
+  release([])
+  await setImmediate()
+  assert.equal(views.length, 0)
+  t.mock.timers.tick(100)
+  await setImmediate()
+  assert.equal(views[0]?.tasks?.[0]?.id, 'new')
+  live.stop()
+  live.refresh()
+  t.mock.timers.tick(10_000)
+  await setImmediate()
+  assert.equal(stopped, true)
+  assert.equal(views.length, 1)
+})
+
+test('a partial failure does not replace already visible sections with zeroes', async () => {
+  let update: HomeOverview = {}
+  await showHome(
+    {
+      async call(operation) {
+        if (operation === 'integrations.list') return [{ enabled: true }]
+        throw new Error('Connection interrupted')
+      },
+    },
+    {
+      overview(view) {
+        update = view
+      },
+    },
+  )
+  assert.equal(update.integrations, 1)
+  assert.equal('tasks' in update, false)
+  assert.equal('running' in update, false)
+  assert.match(update.error!, /Connection interrupted/)
 })

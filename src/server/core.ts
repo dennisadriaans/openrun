@@ -2876,9 +2876,13 @@ export function getDashboard() {
       .prepare("SELECT COUNT(*) AS n FROM runs WHERE startedAt >= ? AND status = 'success'")
       .get(dayAgo) as { n: number }
   ).n
-  const running = (
-    db.prepare("SELECT COUNT(*) AS n FROM runs WHERE status = 'running'").get() as { n: number }
-  ).n
+  // The CLI needs every active run, even when newer finished runs fill the recent list.
+  const activeRuns = db
+    .prepare(
+      "SELECT id, taskName, status FROM runs WHERE status = 'running' ORDER BY startedAt ASC",
+    )
+    .all() as { id: string; taskName: string; status: string }[]
+  const running = activeRuns.length
 
   const upcoming = scheduled
     .slice()
@@ -2912,6 +2916,7 @@ export function getDashboard() {
     },
     upcoming,
     recentRuns,
+    activeRuns,
     pending: listPendingRuns(),
   }
 }

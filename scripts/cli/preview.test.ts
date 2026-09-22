@@ -71,7 +71,7 @@ test('clearing the input or leaving a prompt cancels interpretation, and command
   )
   t.after(() => preview.cancel())
   preview.update('run')
-  assert.match(shown, /^Enter → Run a task\n.*Run a task/)
+  assert.equal(shown, 'Enter → Run a task')
   t.mock.timers.tick(1000)
   assert.equal(calls, 0)
   preview.update('create a file')
@@ -87,7 +87,7 @@ test('clearing the input or leaving a prompt cancels interpretation, and command
   assert.equal(calls, 1)
 })
 
-test('exact and fuzzy suggestions stay visible after typing pauses', (t) => {
+test('command previews stay local after typing pauses', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   let shown = ''
   const preview = new RequestPreview(
@@ -106,7 +106,8 @@ test('exact and fuzzy suggestions stay visible after typing pauses', (t) => {
   ]) {
     preview.update(input!)
     t.mock.timers.tick(1000)
-    assert.ok(shown.split('\n')[1]?.includes(label!), input)
+    assert.match(shown, /^Enter → /, `${input}: ${label}`)
+    assert.equal(shown.includes('\n'), false)
   }
 })
 

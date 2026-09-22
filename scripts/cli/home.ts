@@ -3,6 +3,7 @@ import type { TaskChoice } from '../../src/lib/cliResolve.ts'
 import { unavailable, type CliClient } from './local.ts'
 import type { CliUi } from './ui.ts'
 import { watchActivity } from './activity.ts'
+import type { HomeOverview } from './session.ts'
 
 export type TaskRowView = TaskChoice & {
   prompt?: string
@@ -15,7 +16,13 @@ export type TaskRowView = TaskChoice & {
   readinessBlockers?: { message: string }[]
 }
 
-type Dashboard = { stats: { running: number } }
+type DashboardRun = { id: string; taskName?: string; status: string }
+type Dashboard = {
+  stats: { running: number; runsToday: number }
+  activeRuns?: DashboardRun[]
+  recentRuns?: DashboardRun[]
+  pending?: { id: string; taskName: string }[]
+}
 
 /** Use the worker's readiness and timestamps, including for remote targets. */
 export function taskTiming(task: TaskRowView): string {
@@ -30,86 +37,88 @@ export function taskTiming(task: TaskRowView): string {
   return task.cron?.trim() ? 'No next run scheduled' : 'Manual only'
 }
 
-export async function showHome(
-  client: CliClient,
-  ui: Pick<CliUi, 'note' | 'info' | 'scheduledTasks'>,
-): Promise<void> {
-  const [tasksResult, dashboardResult] = await Promise.allSettled([
+export async function showHome(client: CliClient, ui: Pick<CliUi, 'overview'>): Promise<void> {
+  const [tasksResult, dashboardResult, integrationsResult] = await Promise.allSettled([
     client.call('tasks.list') as Promise<TaskRowView[]>,
     client.call('dashboard.dashboard') as Promise<Dashboard>,
+    client.call('integrations.list') as Promise<{ enabled: number | boolean }[]>,
   ])
   const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : undefined
   const scheduled = tasks
     ?.filter((task) => task.enabled && task.nextRunAt && !task.readinessBlockers?.length)
     .sort((a, b) => a.nextRunAt! - b.nextRunAt!)
-  const running =
-    dashboardResult.status === 'fulfilled' ? dashboardResult.value.stats.running : undefined
-  const count = (label: string, amount: number | undefined) => `${label} ${amount ?? '—'}`
-  const failures = [tasksResult, dashboardResult].filter(
-    (result): result is PromiseRejectedResult => result.status === 'rejected',
-  )
-  if (failures.length === 2 && failures.every((result) => unavailable(result.reason))) {
-    ui.info('The local worker is stopped. Choose Background worker to start it.')
-  } else if (failures.length) {
-    const reason = failures[0]!.reason
-    ui.info(
-      `Could not refresh overview: ${reason instanceof Error ? reason.message : String(reason)}. Choose Refresh overview to retry.`,
-    )
-  } else {
-    ui.info('')
-  }
-  ui.note(
-    [
-      count('Running now', running),
-      count('Scheduled', scheduled?.length),
-      count('Automations', tasks?.length),
-    ].join('   ·   '),
-    'Home',
-  )
-  ui.scheduledTasks(
-    (scheduled ?? []).map((task) => ({
+  const overview: HomeOverview = { error: '' }
+  if (tasks) {
+    overview.automations = tasks.length
+    overview.scheduled = scheduled!.length
+    overview.tasks = scheduled!.map((task) => ({
       id: task.id,
       prompt: task.prompt?.trim() || task.name,
       when: taskTiming(task),
-    })),
+    }))
+  }
+  if (dashboardResult.status === 'fulfilled') {
+    const dashboard = dashboardResult.value
+    overview.running = dashboard.stats.running
+    overview.runs = dashboard.stats.runsToday
+    overview.activeRuns = [
+      ...(
+        dashboard.activeRuns ??
+        dashboard.recentRuns?.filter((run) => run.status === 'running') ??
+        []
+      ).map((run) => ({ id: run.id, prompt: run.taskName || run.id, when: 'Running' })),
+      ...(dashboard.pending ?? []).map((run) => ({
+        id: run.id,
+        prompt: run.taskName,
+        when: 'Queued run',
+      })),
+    ]
+  }
+  if (integrationsResult.status === 'fulfilled')
+    overview.integrations = integrationsResult.value.filter((row) => row.enabled).length
+  const failures = [tasksResult, dashboardResult, integrationsResult].filter(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
   )
+  if (failures.length === 3 && failures.every((result) => unavailable(result.reason))) {
+    overview.error = 'Worker stopped · type worker start to restart. Showing last known status.'
+  } else if (failures.length) {
+    const reason = failures[0]!.reason
+    overview.error = `Could not refresh overview: ${reason instanceof Error ? reason.message : String(reason)}. Type refresh to retry.`
+  }
+  ui.overview(overview)
 }
 
-/** Refresh only the overview; leave the action menu and keyboard focus intact. */
-export async function liveHome(
+/** Live for the entire session, including while a request is being saved. */
+export function watchHome(
   client: CliClient,
-  ui: CliUi,
+  ui: Pick<CliUi, 'overview' | 'status' | 'runChanged'>,
   {
     url = '',
     token = '',
     firstLoad = client,
-  }: { url?: string; token?: string; firstLoad?: CliClient } = {},
-): Promise<string> {
+    watch = watchActivity,
+  }: { url?: string; token?: string; firstLoad?: CliClient; watch?: typeof watchActivity } = {},
+): { refresh: () => void; stop: () => void } {
   let active = true
   let healthy = false
   let loading = false
   let again = false
+  let revision = 0
   let debounce: ReturnType<typeof setTimeout> | undefined
-  // Discard late reads after navigation, rather than overwriting a setup summary.
-  const view = {
-    info: (message: string) => {
-      if (active) ui.info(message)
-    },
-    note: (message: string, title?: string) => {
-      if (active) ui.note(message, title)
-    },
-    scheduledTasks: (tasks: Parameters<CliUi['scheduledTasks']>[0]) => {
-      if (active) ui.scheduledTasks(tasks)
-    },
-  }
   const refresh = async (source = client) => {
+    if (!active) return
     if (loading) {
       again = true
       return
     }
     loading = true
+    const startedAtRevision = revision
     try {
-      await showHome(source, view)
+      await showHome(source, {
+        overview: (overview: HomeOverview) => {
+          if (active && startedAtRevision === revision) ui.overview(overview)
+        },
+      })
     } finally {
       loading = false
       if (again && active) {
@@ -120,17 +129,21 @@ export async function liveHome(
   }
   const schedule = () => {
     if (debounce || !active) return
+    revision++
     debounce = setTimeout(() => {
       debounce = undefined
       void refresh()
     }, 100)
   }
   ui.status(url ? `Remote · ${url}` : 'Local worker')
-  await refresh(firstLoad)
-  const stop = watchActivity({
+  void refresh(firstLoad)
+  const stop = watch({
     url,
     token,
     onChange: schedule,
+    onEvent: (event) => {
+      if (event.type === 'run_changed') ui.runChanged(event.runId, event.status)
+    },
     onHealthy: (value) => {
       healthy = value
       ui.status(
@@ -141,13 +154,13 @@ export async function liveHome(
   const fallback = setInterval(() => {
     if (!healthy) schedule()
   }, 3000)
-  try {
-    return await ui.homeRequest()
-  } finally {
-    active = false
-    stop()
-    clearTimeout(debounce)
-    clearInterval(fallback)
-    ui.status(url ? 'Remote' : 'Local worker')
+  return {
+    refresh: schedule,
+    stop: () => {
+      active = false
+      stop()
+      clearTimeout(debounce)
+      clearInterval(fallback)
+    },
   }
 }

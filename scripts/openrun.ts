@@ -23,7 +23,7 @@ import {
   interactiveTerminal,
   Quit,
 } from './cli/ui.ts'
-import { liveHome, taskTiming, type TaskRowView } from './cli/home.ts'
+import { watchHome, taskTiming, type TaskRowView } from './cli/home.ts'
 import {
   guideRun,
   manageRuntimes,
@@ -396,6 +396,7 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
     return 0
   }
 
+  ctx.ui.progress('Saving schedule')
   const saved = (await ctx.client
     .call('tasks.save', {
       name,
@@ -423,6 +424,7 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
     throw new Error(
       'The worker did not confirm a saved automation. Check automations before retrying.',
     )
+  ctx.ui.scheduleSaved({ id: saved.id, prompt, when: scheduleLabel(intent) })
   ctx.ui.rememberRuntime(runtime.id)
 
   if (ctx.flags.json) {
@@ -483,6 +485,7 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     return 0
   }
 
+  ctx.ui.progress('Starting run')
   const started = (await ctx.client.call('runs.startChat', {
     workspaceId: workspace.id,
     runtimeId: runtime.id,
@@ -490,6 +493,7 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     model: intent.modelHint,
     effort: intent.effortHint || '',
   })) as { runId: string } | null
+  if (started?.runId) ctx.ui.runStarted(started.runId, deriveTaskName(intent.prompt))
   ctx.ui.rememberRuntime(runtime.id)
 
   if (ctx.flags.json) {
@@ -1132,6 +1136,7 @@ async function entry(interactive: boolean, initialRequest?: string): Promise<voi
   let url = ''
   let restartRequest: string | undefined
   const ui = new CliUi(interactive)
+  let home: ReturnType<typeof watchHome> | undefined
   try {
     await ui.start()
     let argv = process.argv.slice(2)
@@ -1223,25 +1228,22 @@ async function entry(interactive: boolean, initialRequest?: string): Promise<voi
           },
         }
     const ctx: Context = { client, flags, url, ui }
-    let firstHome = !command
+    const overviewClient = url ? client : { call: localCall }
+    if (ui.interactive) {
+      home = watchHome(overviewClient, ui, {
+        url,
+        token: flags.token || (url ? storedToken(url) : ''),
+        firstLoad: !command ? client : overviewClient,
+      })
+      if (command) ui.beginAction(argv.join(' '))
+    }
     let pendingRequest = initialRequest
     for (;;) {
       if (!command) {
-        // Returning home after Stop must not silently start the worker again.
-        const overviewClient = url ? client : { call: localCall }
-        const request =
-          pendingRequest ??
-          (await backTo(() =>
-            liveHome(overviewClient, ui, {
-              url,
-              token: flags.token || (url ? storedToken(url) : ''),
-              firstLoad: firstHome ? client : overviewClient,
-            }),
-          )) ??
-          ''
+        const request = pendingRequest ?? (await backTo(() => ui.homeRequest())) ?? ''
         pendingRequest = undefined
-        firstHome = false
         if (!request) continue
+        ui.beginAction(request)
         try {
           const input = request.replace(/^openrun\s+/i, '')
           const matches = homeMatches(input)
@@ -1259,20 +1261,30 @@ async function entry(interactive: boolean, initialRequest?: string): Promise<voi
           }
         } catch (error) {
           if (error instanceof CommandRequest) {
+            ui.finishAction('Switched to another request.')
             pendingRequest = error.request
             command = ''
             ui.session = true
             continue
           }
           if (error instanceof Quit) throw error
-          ui.info(error instanceof Error ? error.message : String(error))
-          continue
-        }
-        if (command === 'refresh') {
+          ui.info(
+            error instanceof Back || error instanceof Cancelled
+              ? error.message || 'Cancelled request.'
+              : error instanceof Error
+                ? error.message
+                : String(error),
+          )
+          ui.finishAction()
           command = ''
           continue
         }
-        ui.beginAction()
+        if (command === 'refresh') {
+          home?.refresh()
+          ui.finishAction('Refreshing overview.')
+          command = ''
+          continue
+        }
         local = undefined
       }
       if (command === 'exit') {
@@ -1287,19 +1299,24 @@ async function entry(interactive: boolean, initialRequest?: string): Promise<voi
         await ui.presentOutput()
       } catch (error) {
         if (error instanceof CommandRequest) {
+          ui.finishAction('Switched to another request.')
           pendingRequest = error.request
           command = ''
           ui.session = true
           continue
         }
         if (error instanceof Quit || !ui.interactive) throw error
-        if (error instanceof Cancelled) ui.info(error.message)
-        else if (!(error instanceof Back))
+        if (error instanceof Cancelled || error instanceof Back)
+          ui.info(error.message || 'Cancelled request.')
+        else
           ui.note(
             `${explain(error, url)}\n\nCheck Recent runs before retrying work that may already have started.`,
             'Let’s get you unstuck',
           )
         ui.session = true
+      } finally {
+        ui.finishAction()
+        home?.refresh()
       }
       command = ''
     }
@@ -1318,6 +1335,7 @@ async function entry(interactive: boolean, initialRequest?: string): Promise<voi
       process.exitCode = 1
     }
   } finally {
+    home?.stop()
     ui.close()
   }
   if (restartRequest !== undefined) await entry(true, restartRequest)

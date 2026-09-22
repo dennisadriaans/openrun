@@ -210,13 +210,20 @@ Advanced
 
 The OpenTUI interface stays open after each action. Type or paste from any menu
 to ask for a task, model, effort and timing. Text fields also accept complete
-requests; Ctrl+Enter keeps the text as a field value. Ctrl+K opens the request
-input from any prompt, with shared history and suggestions. Ctrl+A selects all;
-Ctrl+C copies selected text and Ctrl+V pastes. Terminal Copy/Paste shortcuts also work.
+requests; Ctrl+Enter keeps the text as a field value. The main input handles commands,
+schedules and native launches. Tab or Enter accepts the proposed text inside the
+input; Enter again submits it. Ctrl+A selects all; Ctrl+C copies selected text and
+Ctrl+V pastes. Terminal Copy/Paste shortcuts also work.
 Esc or Ctrl+C without a selection clears the input. Esc on an empty input restores
 the previous field or menu; type quit or press Ctrl+C twice to quit.
-Home shows live runs, schedules and automations. Complete schedule requests submit directly.
-Tab switches between the input and the scrollable overview. Running work continues
+The chat timeline keeps your requests, results and run activity in order, including
+when you return from a native agent. Transcripts are saved in ~/.openrun/cli-sessions/.
+The input stays available while a request is being prepared; further requests queue
+in order. Live schedules, active runs, runs today and enabled integrations stay below
+it. Shift+Tab focuses the timeline; PageUp/PageDown scroll it and Shift+PageUp/PageDown
+scroll the pending panel. Automatic native launches use Codex --yolo and Claude Code
+--dangerously-skip-permissions, allowing commands without approval prompts.
+Running work continues
 after you leave. The interface uses Bun 1.3+ or Node.js 26.4+ automatically;
 scripts and the worker need Node.js 22.12+.
 The worker starts automatically. Enter confirms sensible defaults; ↑↓ changes

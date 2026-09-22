@@ -389,6 +389,8 @@ export function nativeArgs(input: NativeLaunch): string[] {
     else if (input.runtime === 'antigravity') args.push('--conversation', input.sessionId)
     else args.push('--resume', input.sessionId)
   } else if (input.runtime === 'fx' && input.prompt) args.push('ask')
+  if (input.runtime === 'codex') args.push('--yolo')
+  if (input.runtime === 'claude') args.push('--dangerously-skip-permissions')
   if (input.model) args.push('--model', input.model)
   const model = resolveNativeModel(input.model, modelsForKind(input.runtime))
   const injected = input.runtime === 'claude' && input.effort === 'ultrathink'
@@ -460,7 +462,10 @@ export async function launchNative(
     throw new Error(
       'Native launching needs a terminal. Use --dry-run --json to preview, or openrun run for managed execution.',
     )
-  return ui.handoff(async () => {
+  ui.info(
+    `Opening ${NATIVE_RUNTIMES[input.runtime].label} · ${input.model || 'default model'} · ${input.effort || 'default effort'}`,
+  )
+  const code = await ui.handoff(async () => {
     discovery(input)
     const child = spawn(binary.path, args, { cwd, stdio: 'inherit', shell: false })
     // Terminal SIGINT reaches the whole foreground group. Let the child own it.
@@ -485,4 +490,6 @@ export async function launchNative(
       process.removeListener('SIGTERM', terminate)
     }
   })
+  ui.info(`Returned from ${NATIVE_RUNTIMES[input.runtime].label} · exit ${code}`)
+  return code
 }
