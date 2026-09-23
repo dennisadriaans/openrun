@@ -24,6 +24,8 @@ const actionLabels: Record<string, string> = {
   where: 'Show connection details',
   login: 'Sign in',
   api: 'Review an application operation',
+  clear: 'Clear the conversation',
+  sessions: 'Resume a CLI session',
 }
 
 export function describeIntent(result: InterpretedIntent, dryRun = false): string {

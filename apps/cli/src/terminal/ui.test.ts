@@ -255,3 +255,19 @@ test('quitting escapes all setup steps without replaying them', async () => {
   )
   assert.deepEqual(visited, ['prompt', 'agent'])
 })
+
+test('slash commands and plain phrases reach the session commands without taking over tasks', () => {
+  const value = (input: string) => homeMatches(input).map((choice) => choice.value)
+  assert.deepEqual(value('/clear'), ['clear'])
+  assert.deepEqual(value('/re'), ['sessions'])
+  assert.deepEqual(value('/'), ['sessions', 'clear'])
+  assert.deepEqual(value('start over'), ['clear'])
+  assert.deepEqual(value('resume my previous session'), ['sessions'])
+  // "resume" still continues a run, and a task that mentions clearing stays a task.
+  assert.deepEqual(value('resume'), ['resume'])
+  assert.deepEqual(value('clear the cache in src/lib'), [])
+  assert.equal(isCommandRequest('/resume'), true)
+  assert.equal(inputCompletion('/c'), '/clear')
+  assert.equal(inputCompletion('/resume'), undefined)
+  assert.equal(requestSuggestion('/clear'), 'Enter → Clear the conversation')
+})

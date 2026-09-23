@@ -39,6 +39,8 @@ export const INTERPRETED_ACTIONS = [
   'resume',
   'init',
   'help',
+  'clear',
+  'sessions',
 ] as const
 export type InterpretedAction = (typeof INTERPRETED_ACTIONS)[number]
 export type InterpretedIntent = {
@@ -522,7 +524,11 @@ export async function interpretRequest(
     )
   const base = resolveCloudUrl(process.env.OPENRUN_CLOUD_URL ?? process.env.AGENTOPS_CLOUD_URL)
   if (!base) throw new Error('Hosted interpretation is disabled. Use explicit launch options.')
-  const body = JSON.stringify({ version: 1, text, models, mode, preferred })
+  // Listing the actions lets the service offer new ones only to CLIs that can run them.
+  const actions = INTERPRETED_ACTIONS.filter(
+    (action) => action !== 'launch' && action !== 'schedule',
+  )
+  const body = JSON.stringify({ version: 1, text, models, mode, preferred, actions })
   const key = `${base}\n${body}`
   if (recentInterpretation?.key === key && recentInterpretation.expires > Date.now())
     return readInterpretation(recentInterpretation.value, text, mode)

@@ -20,6 +20,7 @@ const COMMANDS = new Set([
   'run',
   'launch',
   'resume',
+  'sessions',
   'ls',
   'runs',
   'show',

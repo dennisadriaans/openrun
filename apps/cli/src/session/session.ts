@@ -227,7 +227,10 @@ export class CliSession {
 
   /** Continue an earlier transcript: show it, and append new entries to the same file. */
   resume(file: string): void {
-    const entries = readSessionFile(file)
+    // A slash command that left this session is not part of its conversation.
+    const entries = readSessionFile(file).filter(
+      (entry) => entry.role !== 'user' || !isSlashCommand(entry.text),
+    )
     this.file = file
     this.replace(entries)
   }

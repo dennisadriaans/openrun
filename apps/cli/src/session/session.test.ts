@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { CliSession } from './session.ts'
+import { CliSession, savedSessions } from './session.ts'
 
 test('multiple requests and an asynchronous failure preserve chronological history and FIFO delivery', () => {
   const session = new CliSession(null)
@@ -204,4 +204,65 @@ test('a chat card follows its task through Activity and keeps a transcript line'
   })
   assert.equal(session.activityFor(card)?.status, 'Running')
   assert.equal(session.activityFor({ runId: 'r' })?.status, 'Running')
+})
+
+test('/clear starts a new transcript and /resume continues an earlier one in place', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'openrun-session-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const session = new CliSession(join(directory, 'first.jsonl'))
+  session.begin('schedule in 10 minutes "review changes"')
+  session.card({ status: 'Scheduled', title: 'review changes', taskId: 't1', runId: 'r1' })
+  session.finish()
+  session.updateOverview({ activeRuns: [{ id: 'r1', prompt: 'review changes', when: 'Running' }] })
+  assert.equal(session.activity.length, 1)
+  const first = session.file!
+
+  session.begin('/clear')
+  session.reset()
+  session.finish()
+  assert.notEqual(session.file, first)
+  assert.equal(session.entries.length, 0)
+  assert.equal(session.activity.length, 0)
+  assert.equal(session.generation, 1)
+  session.begin('create hello.txt')
+  session.finish('Opened Claude Code.')
+
+  // A session made only of slash commands is not offered.
+  appendFileSync(
+    join(directory, 'slash-only.jsonl'),
+    `${JSON.stringify({ id: 'x', at: 1, role: 'user', text: '/resume' })}\n`,
+  )
+  appendFileSync(first, 'not json\n')
+  utimesSync(first, new Date(0), new Date(0))
+  const listed = savedSessions(directory, session.file)
+  assert.deepEqual(
+    listed.map(({ file, title, requests }) => ({ file, title, requests })),
+    [{ file: first, title: 'schedule in 10 minutes "review changes"', requests: 1 }],
+  )
+
+  const second = session.file!
+  session.begin('/resume')
+  session.resume(first)
+  session.finish()
+  assert.equal(session.file, first)
+  assert.equal(session.generation, 2)
+  assert.deepEqual(
+    session.entries.map((entry) => entry.text),
+    ['schedule in 10 minutes "review changes"', 'Scheduled review changes\ndefault model'],
+  )
+  assert.equal(session.entries[1]!.card?.runId, 'r1')
+  // The earlier session's finished run returns to Activity from recent results.
+  session.updateOverview({
+    recentRuns: [{ id: 'r1', prompt: 'review changes', when: 'Succeeded', startedAt: 1 }],
+  })
+  assert.deepEqual(
+    session.activity.map((item) => [item.runId, item.status]),
+    [['r1', 'Succeeded']],
+  )
+  session.log('user', 'runs')
+  assert.equal(readFileSync(first, 'utf8').trim().split('\n').at(-1)!.includes('"runs"'), true)
+  assert.deepEqual(
+    savedSessions(directory, session.file).map((row) => row.file),
+    [second],
+  )
 })

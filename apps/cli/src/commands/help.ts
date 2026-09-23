@@ -52,6 +52,11 @@ An active run must finish or be stopped first. Omit the ID to choose a run.
   openrun runs
   openrun resume <run-id>
   openrun resume <run-id> --dry-run --json`,
+  sessions: `openrun sessions [--json]
+
+List earlier CLI sessions, most recent first. In a terminal, choose one to
+continue it in Home. At Home, /resume does the same and /clear starts a new
+session. Transcripts are saved in ~/.openrun/cli-sessions/.`,
   init: `openrun init [path] [--check COMMAND]…
 
 Register a Git repository and detect its verification commands.
@@ -208,6 +213,7 @@ Commands
   now / enable / disable / rm   manage an automation by name or ID
   runtimes / projects  see available CLIs and repositories
   integrations         connect providers and configure event triggers
+  sessions             list earlier CLI sessions; /resume at Home continues one
 
 Advanced
   worker               status, start, stop and logs
@@ -227,6 +233,7 @@ The left panel keeps your requests and results; the right Activity panel shows
 each task once, updating its status as it is scheduled, runs and finishes. Click a
 run in Activity, or select it with Shift+Tab and Enter, to review its changes.
 Narrow terminals stack the panels. Transcripts are saved in ~/.openrun/cli-sessions/.
+Type /clear to start a new session, or /resume to pick an earlier one and continue it.
 The input stays available while a request is being prepared; further requests queue
 in order. Inline counts below it show schedules, runs today, active runs and integrations.
 Shift+Tab moves focus from the input to Activity, then the chat; PageUp/PageDown scroll the chat and Shift+PageUp/PageDown scroll
