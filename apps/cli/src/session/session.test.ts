@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { CliSession, savedSessions } from './session.ts'
+import { CliSession, readSessionFile, savedSessions } from './session.ts'
 
 test('multiple requests and an asynchronous failure preserve chronological history and FIFO delivery', () => {
   const session = new CliSession(null)
@@ -265,4 +265,26 @@ test('/clear starts a new transcript and /resume continues an earlier one in pla
     savedSessions(directory, session.file).map((row) => row.file),
     [second],
   )
+})
+
+test('commands and picker answers never make a session look like a request', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'openrun-cli-answers-'))
+  const session = new CliSession(join(directory, 'current.jsonl'))
+  session.begin('create a.css')
+  session.finish('Scheduled a.css')
+  session.begin('create b.css')
+  session.finish('Scheduled b.css')
+  // Choosing another session logs the pick, a title, in the session being left.
+  const leaving = new CliSession(join(directory, 'leaving.jsonl'))
+  leaving.begin('/resume')
+  leaving.log('assistant', 'Resume a CLI session')
+  leaving.answer('create a.css')
+  leaving.begin('ls')
+  leaving.finish()
+  leaving.resume(session.file!)
+  assert.deepEqual(
+    savedSessions(directory).map(({ title, requests }) => ({ title, requests })),
+    [{ title: 'create a.css', requests: 2 }],
+  )
+  assert.equal(readSessionFile(join(directory, 'leaving.jsonl'))[2]!.answer, true)
 })

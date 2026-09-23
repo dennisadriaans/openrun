@@ -14,6 +14,7 @@ export type TaskRowView = TaskChoice & {
   model?: string
   effort?: string
   nextRunAt?: number | null
+  lastRunAt?: number | null
   webhookIntegrationId?: string
   readinessBlockers?: { message: string }[]
 }
@@ -41,8 +42,14 @@ type Dashboard = {
   }[]
 }
 
+/** A one-off the scheduler disabled after firing it: done, not paused. */
+export function spentOnce(task: TaskRowView): boolean {
+  return Boolean(task.fireOnce && !task.enabled && task.lastRunAt)
+}
+
 /** Use the worker's readiness and timestamps, including for remote targets. */
 export function taskTiming(task: TaskRowView): string {
+  if (spentOnce(task)) return `Ran ${scheduleTime(task.lastRunAt!)}`
   if (!task.enabled) return 'Paused'
   if (task.readinessBlockers?.length)
     return `Needs attention · ${task.readinessBlockers[0]!.message}`

@@ -43,20 +43,23 @@ Options${RUN_OPTIONS}
 
 For launch, --in is a local directory. --json requires --dry-run.
 Use openrun run for a managed run that continues after the terminal closes.`,
-  resume: `openrun resume [run-id]
+  continue: `openrun continue [run-id]
 
 Continue a finished Open Run conversation in its native Codex or Claude Code CLI.
 Uses the saved session ID and execution directory on this machine.
 An active run must finish or be stopped first. Omit the ID to choose a run.
+openrun resume <run-id> still works.
 
   openrun runs
-  openrun resume <run-id>
-  openrun resume <run-id> --dry-run --json`,
-  sessions: `openrun sessions [--json]
+  openrun continue <run-id>
+  openrun continue <run-id> --dry-run --json`,
+  resume: `openrun resume [--json]
 
-List earlier CLI sessions, most recent first. In a terminal, choose one to
-continue it in Home. At Home, /resume does the same and /clear starts a new
-session. Transcripts are saved in ~/.openrun/cli-sessions/.`,
+Choose an earlier CLI session and continue it in Home. From a script, or with
+--json, lists saved sessions most recent first (alias: sessions). At Home,
+resume and /resume do the same, and clear or /clear starts a new session.
+Transcripts are saved in ~/.openrun/cli-sessions/.
+With a run ID, resume continues that run: see openrun continue --help.`,
   init: `openrun init [path] [--check COMMAND]…
 
 Register a Git repository and detect its verification commands.
@@ -77,7 +80,7 @@ Once: at 16:40 · in 20 minutes · tomorrow at 9
 Recurring: every day at 9 · every monday · every 15 minutes · hourly
 Times use the local timezone. Keep the machine awake for schedules to fire.
 Use explicit --runtime, --model, --effort and --prompt options to work offline.
-After a run finishes, openrun resume <run-id> opens its native conversation.
+After a run finishes, openrun continue <run-id> opens its native conversation.
 
 Options${RUN_OPTIONS}
   --name NAME          automation name (default: derived from prompt)
@@ -189,7 +192,8 @@ Help and the operation list work without starting a worker.
 }
 
 export function cliHelp(command = ''): string {
-  if (command) return `${HELP[command]}\n\nGlobal options${GLOBAL_OPTIONS}`
+  if (command)
+    return `${HELP[command === 'sessions' ? 'resume' : command]}\n\nGlobal options${GLOBAL_OPTIONS}`
   return `openrun — run and schedule local coding agents
 
 Get started in your repository
@@ -202,7 +206,7 @@ Get started in your repository
 
 Commands
   launch / [request]   open a native agent with the model and effort you describe
-  resume               continue a saved run in its native agent
+  continue             continue a saved run in its native agent
   init                 register a repository and detect checks
   run                  start a conversation now
   schedule             schedule an automation
@@ -213,7 +217,8 @@ Commands
   now / enable / disable / rm   manage an automation by name or ID
   runtimes / projects  see available CLIs and repositories
   integrations         connect providers and configure event triggers
-  sessions             list earlier CLI sessions; /resume at Home continues one
+  resume               resume an earlier CLI session (alias: sessions)
+  clear                start a new CLI session
 
 Advanced
   worker               status, start, stop and logs
@@ -233,7 +238,8 @@ The left panel keeps your requests and results; the right Activity panel shows
 each task once, updating its status as it is scheduled, runs and finishes. Click a
 run in Activity, or select it with Shift+Tab and Enter, to review its changes.
 Narrow terminals stack the panels. Transcripts are saved in ~/.openrun/cli-sessions/.
-Type /clear to start a new session, or /resume to pick an earlier one and continue it.
+Every Home command also works with a slash: /ls is ls, and / alone lists them all.
+Type clear to start a new session, or resume to pick an earlier one and continue it.
 The input stays available while a request is being prepared; further requests queue
 in order. Inline counts below it show schedules, runs today, active runs and integrations.
 Shift+Tab moves focus from the input to Activity, then the chat; PageUp/PageDown scroll the chat and Shift+PageUp/PageDown scroll

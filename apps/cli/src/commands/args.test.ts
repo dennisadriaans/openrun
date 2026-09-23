@@ -45,7 +45,10 @@ test('implicit requests retain all their words and known commands keep their mea
     '--',
     'fix the schedule page',
   ])
-  assert.throws(() => readCliArgs(['resume']), /run ID/)
+  assert.throws(() => readCliArgs(['continue']), /run ID/)
+  // Without an ID, resume picks up a CLI session; with one it still continues that run.
+  assert.equal(readCliArgs(['resume']).command, 'resume')
+  assert.deepEqual(readCliArgs(['resume', 'run_1']).flags.rest, ['run_1'])
   assert.equal(readCliArgs(['resume', 'run_1', '--dry-run', '--json']).flags.dryRun, true)
 })
 

@@ -19,6 +19,7 @@ const COMMANDS = new Set([
   'schedule',
   'run',
   'launch',
+  'continue',
   'resume',
   'sessions',
   'ls',
@@ -255,8 +256,8 @@ export function readCliArgs(
       )
     }
   }
-  if (flags.dryRun && !['schedule', 'run', 'launch', 'resume', 'api'].includes(command))
-    throw new Error('--dry-run is supported by launch, resume, schedule, run and api only.')
+  if (flags.dryRun && !['schedule', 'run', 'launch', 'continue', 'resume', 'api'].includes(command))
+    throw new Error('--dry-run is supported by launch, continue, schedule, run and api only.')
 
   if (command === 'worker' && !['status', 'start', 'stop', 'logs'].includes(action ?? 'status'))
     throw new Error(`Unknown worker command: ${action}. Run "openrun worker --help".`)
@@ -282,6 +283,7 @@ export function readCliArgs(
     login: 0,
     show: 1,
     review: 1,
+    continue: 1,
     resume: 1,
     cancel: 1,
     worker: 1,
@@ -292,10 +294,10 @@ export function readCliArgs(
     throw new Error(`Unexpected argument. Run "openrun ${command} --help" for usage.`)
   if (
     (!interactive || flags.json || flags.yes) &&
-    ['show', 'review', 'resume', 'cancel', 'now', 'enable', 'disable', 'rm'].includes(command) &&
+    ['show', 'review', 'continue', 'cancel', 'now', 'enable', 'disable', 'rm'].includes(command) &&
     !positionals.length
   ) {
-    const required = ['show', 'review', 'resume', 'cancel'].includes(command)
+    const required = ['show', 'review', 'continue', 'cancel'].includes(command)
       ? 'a run ID'
       : 'an automation name or ID'
     throw new Error(`Pass ${required}. Run "openrun ${command} --help".`)

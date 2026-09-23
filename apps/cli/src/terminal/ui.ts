@@ -25,7 +25,7 @@ const HOME_CHOICES: Choice[] = [
   { value: 'schedule', label: 'Schedule an automation' },
   { value: 'runs', label: 'Recent runs' },
   { value: 'review', label: 'Review changes' },
-  { value: 'resume', label: 'Continue a run' },
+  { value: 'continue', label: 'Continue a run' },
   { value: 'ls', label: 'Manage automations' },
   { value: 'init', label: 'Set up a project' },
   { value: 'integrations', label: 'Manage integrations' },
@@ -33,8 +33,8 @@ const HOME_CHOICES: Choice[] = [
   { value: 'runtimes', label: 'Agents and models' },
   { value: 'worker', label: 'Background worker' },
   { value: 'api', label: 'Application operations' },
-  { value: 'sessions', label: 'Resume a CLI session', hint: '/resume' },
-  { value: 'clear', label: 'Clear the conversation', hint: '/clear' },
+  { value: 'resume', label: 'Resume a CLI session' },
+  { value: 'clear', label: 'Clear the conversation' },
   { value: 'help', label: 'Help' },
   { value: 'refresh', label: 'Refresh overview' },
   { value: 'exit', label: 'Quit' },
@@ -52,23 +52,30 @@ const HOME_ALIASES: [RegExp, string][] = [
     'clear',
   ],
   [
-    /^(?:resume|continue|reopen|open|show|list|browse)(?: an?| my| the)? (?:earlier |previous |old |past |last )?(?:cli )?(?:sessions?|chats?|conversations?)$/i,
-    'sessions',
+    /^(?:sessions|(?:resume|continue|reopen|open|show|list|browse)(?: an?| my| the)? (?:earlier |previous |old |past |last )?(?:cli )?(?:sessions?|chats?|conversations?))$/i,
+    'resume',
   ],
 ]
 
-/** Session commands keep the names other agent CLIs use for them. */
-const SLASH_COMMANDS: Record<string, string> = { '/clear': 'clear', '/resume': 'sessions' }
+/**
+ * Every Home command also answers to its slash form: "/ls" is "ls". A lone "/"
+ * lists them all. Session commands keep the names other agent CLIs use.
+ */
+function slashMatches(needle: string): Choice[] {
+  const name = needle.slice(1)
+  if (!name) return HOME_CHOICES
+  if (/\s/.test(name)) return []
+  const exact = HOME_CHOICES.filter((choice) => choice.value === name)
+  if (exact.length) return exact
+  const alias = HOME_ALIASES.find(([pattern]) => pattern.test(name))?.[1]
+  if (alias) return HOME_CHOICES.filter((choice) => choice.value === alias)
+  return HOME_CHOICES.filter((choice) => choice.value.startsWith(name))
+}
 
 export function homeMatches(value: string): Choice[] {
   const needle = value.trim().toLowerCase()
   if (!needle) return []
-  if (needle.startsWith('/')) {
-    const commands = Object.entries(SLASH_COMMANDS)
-      .filter(([name]) => name.startsWith(needle))
-      .map(([, command]) => command)
-    return HOME_CHOICES.filter((choice) => commands.includes(choice.value))
-  }
+  if (needle.startsWith('/')) return slashMatches(needle)
   const alias = HOME_ALIASES.find(([pattern]) => pattern.test(needle))?.[1]
   if (alias) return HOME_CHOICES.filter((choice) => choice.value === alias)
   const exact = HOME_CHOICES.filter(
@@ -153,10 +160,11 @@ export function inputCompletion(
   const prefix = /^openrun\s+/i.exec(value)?.[0] || ''
   const input = value.slice(prefix.length)
   if (input.startsWith('/')) {
-    const slash = Object.keys(SLASH_COMMANDS).find(
-      (command) => command.startsWith(input.toLowerCase()) && command !== input.toLowerCase(),
+    const name = input.slice(1).toLowerCase()
+    const slash = HOME_CHOICES.find(
+      (choice) => name && choice.value.startsWith(name) && choice.value !== name,
     )
-    return slash && prefix + slash
+    return slash && `${prefix}/${slash.value}`
   }
   const exact = homeMatches(input).find(
     (choice) =>
@@ -208,8 +216,10 @@ export function isCommandRequest(value: string): boolean {
     /^openrun\s+\S/i.test(text) ||
     HOME_CHOICES.some((choice) => choice.value === text.toLowerCase()) ||
     HOME_ALIASES.some(([pattern]) => pattern.test(text)) ||
-    Object.hasOwn(SLASH_COMMANDS, text.toLowerCase()) ||
-    /^(?:run|launch|schedule|resume|show|review|cancel|worker|integrations|api)\s+\S/i.test(text) ||
+    (text.startsWith('/') && slashMatches(text.toLowerCase()).length === 1) ||
+    /^(?:run|launch|schedule|continue|resume|show|review|cancel|worker|integrations|api)\s+\S/i.test(
+      text,
+    ) ||
     isImplicitRequest(text)
   )
 }
@@ -289,12 +299,12 @@ export class CliUi {
     return savedSessions(sessionsDirectory(), this.transcript.file)
   }
 
-  /** /clear: start a new transcript and an empty Activity list. */
+  /** clear: start a new transcript and an empty Activity list. */
   clearSession(): void {
     this.transcript.reset()
   }
 
-  /** /resume: show an earlier transcript and keep appending to it. */
+  /** resume: show an earlier transcript and keep appending to it. */
   resumeSession(file: string): void {
     this.transcript.resume(file)
   }

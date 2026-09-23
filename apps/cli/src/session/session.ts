@@ -26,6 +26,8 @@ export type TimelineEntry = {
   role: 'user' | 'assistant' | 'system'
   text: string
   card?: StatusCard
+  /** A reply to a prompt, such as a picker choice: part of the chat, never a request. */
+  answer?: true
 }
 export type PendingRequest = {
   id: string
@@ -76,7 +78,7 @@ export type SavedSession = {
   title: string
   startedAt: number
   updatedAt: number
-  /** Requests typed in that session, excluding slash commands. */
+  /** Requests typed in that session, excluding commands and prompt answers. */
   requests: number
 }
 
@@ -93,6 +95,11 @@ function newSessionFile(directory: string): string {
 /** Slash commands manage the session itself; they never name one. */
 export function isSlashCommand(text: string): boolean {
   return /^\/[a-z][\w-]*$/i.test(text.trim())
+}
+
+/** Work typed at Home. Commands such as "ls" or "/resume" and prompt answers are not. */
+function isRequest(entry: TimelineEntry): boolean {
+  return entry.role === 'user' && !entry.answer && !/^\/?[a-z][\w-]*$/i.test(entry.text.trim())
 }
 
 function savedEntry(line: string): TimelineEntry | undefined {
@@ -114,6 +121,7 @@ function savedEntry(line: string): TimelineEntry | undefined {
       role: entry.role as TimelineEntry['role'],
       text: entry.text,
       ...(card && typeof card.status === 'string' && typeof card.title === 'string' && { card }),
+      ...(entry.answer === true && { answer: true as const }),
     }
   } catch {
     return undefined
@@ -160,7 +168,7 @@ export function savedSessions(
     } catch {
       continue
     }
-    const requests = entries.filter((entry) => entry.role === 'user' && !isSlashCommand(entry.text))
+    const requests = entries.filter(isRequest)
     if (!requests.length) continue
     sessions.push({
       file,
@@ -259,7 +267,7 @@ export class CliSession {
     for (const listener of this.listeners) listener()
   }
 
-  log(role: TimelineEntry['role'], message: string, card?: StatusCard): void {
+  log(role: TimelineEntry['role'], message: string, card?: StatusCard, answer = false): void {
     const text = transcriptText(message).trim()
     if (!text) return
     const entry: TimelineEntry = {
@@ -268,6 +276,7 @@ export class CliSession {
       role,
       text,
       ...(card && { card }),
+      ...(answer && { answer: true as const }),
     }
     this.entries.push(entry)
     if (role === 'assistant' && this.current) this.responded = true
@@ -292,6 +301,11 @@ export class CliSession {
 
   card(card: StatusCard): void {
     this.log('assistant', cardText(card), card)
+  }
+
+  /** What the user chose or typed in reply to a prompt. */
+  answer(message: string): void {
+    this.log('user', message, undefined, true)
   }
 
   enqueue(text: string, silent = false): void {

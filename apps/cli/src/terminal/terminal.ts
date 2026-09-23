@@ -1234,7 +1234,7 @@ export class TerminalSurface {
         menu.on(
           this.core.SelectRenderableEvents.ITEM_SELECTED,
           (_index: number, option: SelectOption) => {
-            this.session.log('user', option.name)
+            this.session.answer(option.name)
             resolve(String(option.value))
           },
         )
@@ -1290,8 +1290,7 @@ export class TerminalSurface {
             !value && !optional ? 'Enter a value, or press Esc to go back.' : validate?.(value)
           if (error) this.info(error)
           else {
-            this.session.log(
-              'user',
+            this.session.answer(
               /token|secret|password|api.?key/i.test(message) ? '[hidden]' : value,
             )
             resolve(value)

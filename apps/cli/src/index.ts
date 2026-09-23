@@ -24,7 +24,7 @@ import {
   interactiveTerminal,
   Quit,
 } from './terminal/ui.ts'
-import { watchHome, taskTiming, type TaskRowView } from './terminal/home.ts'
+import { watchHome, spentOnce, taskTiming, type TaskRowView } from './terminal/home.ts'
 import { repeatLabel, scheduleTime, scheduleTiming } from './terminal/schedule.ts'
 import { cardText } from './terminal/layout.ts'
 import {
@@ -258,8 +258,12 @@ async function cmdLaunch(ctx: Context, mode: 'auto' | 'schedule' = 'auto'): Prom
     console.log(cliHelp())
     return 0
   }
+  // The interpreter's "resume" predates the rename: it means continuing a run.
   if (action !== 'launch' && action !== 'schedule')
-    return main(action, { ...ctx, flags: { ...ctx.flags, rest: [] } })
+    return main(action === 'resume' ? 'continue' : action, {
+      ...ctx,
+      flags: { ...ctx.flags, rest: [] },
+    })
   if (action === 'schedule') return scheduleInterpreted(ctx, intent)
   return launchNative(
     {
@@ -274,7 +278,8 @@ async function cmdLaunch(ctx: Context, mode: 'auto' | 'schedule' = 'auto'): Prom
   )
 }
 
-async function cmdResume(ctx: Context): Promise<number> {
+/** continue: reopen a finished run's conversation in its native agent. */
+async function cmdContinue(ctx: Context): Promise<number> {
   if (ctx.url)
     throw new Error(
       'Resume the native session on the machine that ran it. Omit --url on that machine.',
@@ -583,11 +588,16 @@ async function cmdList(ctx: Context): Promise<number> {
             if (!task) return ':exit'
             ctx.ui.note(`${task.name}\n${task.id}\n${taskTiming(task)}`, 'Automation')
             return ctx.ui.select('Manage this automation', [
-              { value: 'now', label: 'Run now' },
-              {
-                value: task.enabled ? 'disable' : 'enable',
-                label: task.enabled ? 'Pause automation' : 'Enable automation',
-              },
+              { value: 'now', label: spentOnce(task) ? 'Run again now' : 'Run now' },
+              // A fired one-off has no future time to enable it for.
+              ...(spentOnce(task)
+                ? []
+                : [
+                    {
+                      value: task.enabled ? 'disable' : 'enable',
+                      label: task.enabled ? 'Pause automation' : 'Enable automation',
+                    },
+                  ]),
               { value: 'rm', label: 'Delete automation' },
               { value: ':exit', label: 'Back to automations' },
             ])
@@ -601,7 +611,7 @@ async function cmdList(ctx: Context): Promise<number> {
 
   console.log('')
   for (const task of tasks) {
-    const state = task.enabled ? 'on ' : 'off'
+    const state = task.enabled ? 'on  ' : spentOnce(task) ? 'done' : 'off '
     const when = taskTiming(task)
     console.log(`${BULLET}${task.id}  ${state}  ${task.name.padEnd(40)} ${when}`)
   }
@@ -683,15 +693,15 @@ async function cmdRuns(ctx: Context): Promise<number> {
               { value: ':exit', label: 'Back to recent runs' },
               { value: 'review', label: 'Review changes' },
               { value: 'refresh', label: 'Refresh conversation' },
-              { value: 'resume', label: 'Continue in the native agent' },
+              { value: 'continue', label: 'Continue in the native agent' },
               { value: 'cancel', label: 'Stop run' },
             ])
           },
           async (action) => {
             if (action === 'cancel')
               await main('cancel', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
-            if (action === 'resume')
-              await main('resume', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+            if (action === 'continue')
+              await main('continue', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
             if (action === 'review')
               await main('review', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
           },
@@ -964,7 +974,7 @@ async function cmdWhere(ctx: Context): Promise<number> {
   return 0
 }
 
-/** /clear: the old transcript stays on disk, where /resume can find it. */
+/** clear: the old transcript stays on disk, where resume can find it. */
 function cmdClear(ctx: Context): number {
   if (!ctx.ui.interactive) throw new Error('/clear clears the interactive session. Run openrun.')
   ctx.ui.clearSession()
@@ -973,7 +983,7 @@ function cmdClear(ctx: Context): number {
   return 0
 }
 
-/** /resume: choose an earlier CLI session and continue it here. */
+/** resume (or sessions): choose an earlier CLI session and continue it here. */
 async function cmdSessions(ctx: Context): Promise<number> {
   const { flags, ui } = ctx
   const sessions = ui.savedSessions()
@@ -1012,8 +1022,11 @@ async function main(command: string, ctx: Context): Promise<number> {
   switch (command) {
     case 'launch':
       return cmdLaunch(ctx)
+    case 'continue':
+      return cmdContinue(ctx)
     case 'resume':
-      return cmdResume(ctx)
+      // "openrun resume <run-id>" predates continue; without an ID it resumes a CLI session.
+      return ctx.flags.rest.length ? cmdContinue(ctx) : cmdSessions(ctx)
     case 'worker':
       return cmdWorker(ctx)
     case 'init': {

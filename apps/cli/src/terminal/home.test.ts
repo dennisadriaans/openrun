@@ -19,6 +19,10 @@ test('home uses server timestamps and readiness instead of predicting blocked cr
     'Needs attention · Agent not installed',
   )
   assert.equal(taskTiming({ ...task, enabled: 0, nextRunAt: Date.now() }), 'Paused')
+  // The scheduler disables a one-off after firing it; that is done, not paused.
+  const fired = { ...task, enabled: 0, fireOnce: 1, lastRunAt: Date.now() }
+  assert.match(taskTiming(fired), /^Ran \d/)
+  assert.equal(taskTiming({ ...fired, lastRunAt: null }), 'Paused')
   assert.equal(
     taskTiming({ ...task, cron: '', webhookIntegrationId: 'github' }),
     'On integration event',
