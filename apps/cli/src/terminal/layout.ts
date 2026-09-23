@@ -52,6 +52,43 @@ export function activityCells(
   return { status, time, prompt: fitLine(clean(item.prompt), width - used()), changes }
 }
 
+/** Neither side of the chat | Activity split shrinks below this many columns. */
+export const minPaneWidth = 24
+/** How far Ctrl+Shift+←/→ moves the divider. */
+export const splitStep = 0.05
+
+export type SplitColumns = { chat: number; activity: number }
+
+/**
+ * Chat and Activity widths for a row `width` columns wide, with one column
+ * between them for the divider. `ratio` is chat's share; the minimum width
+ * wins over it, and a row too narrow for two minimums splits evenly.
+ */
+export function splitColumns(ratio: number, width: number): SplitColumns {
+  const room = Math.max(0, Math.floor(width) - 1)
+  const share = Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : 0.5
+  const low = Math.min(minPaneWidth, Math.floor(room / 2))
+  const chat = Math.min(room - low, Math.max(low, Math.round(room * share)))
+  return { chat, activity: room - chat }
+}
+
+/**
+ * The ratio a divider dragged to column `x` asks for. `left` is where the row
+ * starts; the result is clamped the same way `splitColumns` would lay it out.
+ */
+export function splitAt(x: number, left: number, width: number): number {
+  return settledSplit((x - left) / splitRoom(width), width)
+}
+
+/** One Ctrl+Shift+←/→ step from where the divider is drawn now, not from a clamped ratio. */
+export function stepSplit(ratio: number, width: number, direction: -1 | 1): number {
+  return settledSplit(settledSplit(ratio, width) + direction * splitStep, width)
+}
+
+const splitRoom = (width: number): number => Math.max(1, Math.floor(width) - 1)
+const settledSplit = (ratio: number, width: number): number =>
+  splitColumns(ratio, width).chat / splitRoom(width)
+
 /** A glyph that reads without color: done, failed, working, waiting. */
 export function statusIcon(status: string): string {
   if (/\b(?:failed|error|blocked)\b/i.test(status)) return '✗'

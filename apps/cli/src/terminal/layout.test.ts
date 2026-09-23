@@ -6,8 +6,12 @@ import {
   cardDetail,
   cellWidth,
   fitLine,
+  minPaneWidth,
   overviewTable,
+  splitAt,
+  splitColumns,
   statusIcon,
+  stepSplit,
 } from './layout.ts'
 import { relativeTime, repeatLabel } from './schedule.ts'
 
@@ -82,4 +86,31 @@ test('a chat card says when, which model and how hard, and stops counting down o
     '✗',
     '✓',
   ])
+})
+
+test('the chat | Activity split follows the ratio but keeps both panes readable', () => {
+  assert.deepEqual(splitColumns(0.5, 99), { chat: 49, activity: 49 })
+  assert.deepEqual(splitColumns(0.7, 101), { chat: 70, activity: 30 })
+  for (const width of [72, 100, 200]) {
+    for (const ratio of [-1, 0, 0.1, 0.5, 0.9, 1, 2, Number.NaN]) {
+      const { chat, activity } = splitColumns(ratio, width)
+      assert.equal(chat + activity + 1, width, `${width} ${ratio}`)
+      assert.ok(chat >= minPaneWidth && activity >= minPaneWidth, `${width} ${ratio}`)
+    }
+  }
+  assert.deepEqual(splitColumns(0.9, 31), { chat: 15, activity: 15 })
+})
+
+test('dragging the divider asks for the ratio under the pointer, clamped to the minimum', () => {
+  assert.equal(splitColumns(splitAt(61, 1, 101), 101).chat, 60)
+  assert.equal(splitColumns(splitAt(0, 1, 101), 101).chat, minPaneWidth)
+  assert.equal(splitColumns(splitAt(500, 1, 101), 101).activity, minPaneWidth)
+})
+
+test('Ctrl+Shift+←/→ moves the divider one step from where it is drawn', () => {
+  assert.equal(splitColumns(stepSplit(0.5, 101, 1), 101).chat, 55)
+  assert.equal(splitColumns(stepSplit(0.5, 101, -1), 101).chat, 45)
+  // A ratio the minimum overrode still moves on the first press back.
+  assert.equal(splitColumns(stepSplit(0.99, 101, -1), 101).chat, 71)
+  assert.equal(splitColumns(stepSplit(0, 101, -1), 101).chat, minPaneWidth)
 })
