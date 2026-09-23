@@ -131,7 +131,10 @@ export function readSessionFile(file: string): TimelineEntry[] {
 }
 
 /** Earlier sessions, most recent first. Sessions without a typed request are skipped. */
-export function savedSessions(directory = sessionsDirectory(), exclude?: string | null): SavedSession[] {
+export function savedSessions(
+  directory = sessionsDirectory(),
+  exclude?: string | null,
+): SavedSession[] {
   let files: { file: string; modified: number }[]
   try {
     files = readdirSync(directory)

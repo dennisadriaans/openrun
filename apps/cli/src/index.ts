@@ -10,6 +10,7 @@ import {
   type GlobalFlags,
 } from './commands/args.ts'
 import { cliHelp } from './commands/help.ts'
+import type { CliSession } from './session/session.ts'
 import { launchTerminalRuntime } from './terminal/terminalRuntime.ts'
 import {
   accent,
@@ -963,6 +964,46 @@ async function cmdWhere(ctx: Context): Promise<number> {
   return 0
 }
 
+/** /clear: the old transcript stays on disk, where /resume can find it. */
+function cmdClear(ctx: Context): number {
+  if (!ctx.ui.interactive) throw new Error('/clear clears the interactive session. Run openrun.')
+  ctx.ui.clearSession()
+  ctx.ui.session = true
+  ctx.ui.info('Started a new session. Type /resume to return to an earlier one.')
+  return 0
+}
+
+/** /resume: choose an earlier CLI session and continue it here. */
+async function cmdSessions(ctx: Context): Promise<number> {
+  const { flags, ui } = ctx
+  const sessions = ui.savedSessions()
+  if (!ui.interactive || flags.json) {
+    if (flags.json) console.log(JSON.stringify(sessions, null, 2))
+    else if (!sessions.length) console.log('No earlier CLI sessions.')
+    else
+      for (const session of sessions)
+        console.log(`${scheduleTime(session.updatedAt).padEnd(14)} ${session.title}`)
+    return 0
+  }
+  if (!sessions.length) {
+    ui.info('No earlier CLI sessions yet. Requests you type are saved as you go.')
+    return 0
+  }
+  const file = await ui.select(
+    'Resume a CLI session',
+    sessions.map((session) => ({
+      value: session.file,
+      label: session.title.length > 72 ? `${session.title.slice(0, 71)}…` : session.title,
+      hint: `${scheduleTime(session.updatedAt)} · ${session.requests} ${session.requests === 1 ? 'request' : 'requests'}`,
+    })),
+  )
+  const chosen = sessions.find((session) => session.file === file)!
+  ui.resumeSession(chosen.file)
+  ui.session = true
+  ui.info(`Resumed “${chosen.title}”. New requests continue this session.`)
+  return 0
+}
+
 // ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
@@ -1251,6 +1292,10 @@ async function main(command: string, ctx: Context): Promise<number> {
     case 'where':
     case 'whoami':
       return cmdWhere(ctx)
+    case 'clear':
+      return cmdClear(ctx)
+    case 'sessions':
+      return cmdSessions(ctx)
     default:
       console.error(`Unknown command "${command}".\n`)
       console.log(cliHelp())
@@ -1327,10 +1372,14 @@ async function cmdWorker(ctx: Context): Promise<number> {
   return 0
 }
 
-async function entry(interactive: boolean, initialRequest?: string): Promise<void> {
+async function entry(
+  interactive: boolean,
+  initialRequest?: string,
+  transcript?: CliSession,
+): Promise<void> {
   let url = ''
   let restartRequest: string | undefined
-  const ui = new CliUi(interactive)
+  const ui = new CliUi(interactive, transcript)
   let home: ReturnType<typeof watchHome> | undefined
   try {
     await ui.start()
@@ -1533,7 +1582,11 @@ async function entry(interactive: boolean, initialRequest?: string): Promise<voi
     home?.stop()
     ui.close()
   }
-  if (restartRequest !== undefined) await entry(true, restartRequest)
+  if (restartRequest !== undefined) {
+    // The restart request is dispatched directly; it must not also reappear as a draft.
+    ui.sessionState.draft = ''
+    await entry(true, restartRequest, ui.sessionState)
+  }
 }
 
 const argv = process.argv.slice(2)
