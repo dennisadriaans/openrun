@@ -18,7 +18,7 @@ import {
 import { isValidCron } from '@openrun/domain/tasks/cron'
 import { pickDefaultRuntime } from '@openrun/domain/runtimes/pickRuntime'
 import { RUNTIME_PRESETS } from '@openrun/domain/runtimes/runtimePresets'
-import { formatNextRunLabel, formatScheduledRunLabel } from '@openrun/domain/tasks/schedule'
+import { scheduleTiming } from '../terminal/schedule.ts'
 import type { CliClient } from '../runtime/local.ts'
 import { editableCommand, splitCommandLine } from './args.ts'
 import { backTo, Cancelled, steps, type FlowUi } from '../terminal/ui.ts'
@@ -374,11 +374,8 @@ export async function chooseSchedule(
 }
 
 function timing(schedule: CliSchedule, remote: boolean): string {
-  if (schedule.kind === 'now') return 'Now'
-  if (schedule.kind === 'once') return `${formatScheduledRunLabel(schedule.at)} · once, then pauses`
-  return remote
-    ? `Repeats (${schedule.cron}) · server timezone`
-    : `${formatNextRunLabel(schedule.cron)} · repeats (${schedule.cron})`
+  if (remote && schedule.kind === 'recurring') return `Repeats (${schedule.cron}) · server timezone`
+  return scheduleTiming(schedule)
 }
 
 type RunDraft = { intent: CliIntent; runtime: RuntimeChoice; workspace: WorkspaceChoice }
@@ -520,8 +517,7 @@ export async function guideRun(
       ui.note(
         [
           `Task     ${intent.prompt}`,
-          `Agent    ${runtime.label || runtime.bin} · ${intent.modelHint || 'default model'}`,
-          ...(intent.effortHint ? [`Effort   ${intent.effortHint}`] : []),
+          `Model    ${intent.modelHint || 'Default model'} · ${intent.effortHint || 'default'} effort`,
           `Project  ${workspace.projectName || workspace.name} · ${workspace.branch || workspace.name}`,
           `Path     ${workspace.path}`,
           `When     ${timing(intent.schedule, remote)}`,

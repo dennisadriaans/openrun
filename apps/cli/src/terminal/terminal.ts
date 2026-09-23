@@ -9,6 +9,8 @@ import type {
   PasteEvent,
   SelectOption,
   ClipboardService,
+  StyledText,
+  TextChunk,
 } from '@opentui/core'
 import { format, stripVTControlCharacters } from 'node:util'
 import {
@@ -21,42 +23,41 @@ import {
   type Choice,
 } from './ui.ts'
 import { RequestPreview } from '../commands/preview.ts'
-import { CliSession, transcriptText } from '../session/session.ts'
-import { activityTable, cellWidth, fitLine, overviewTable } from './layout.ts'
+import { CliSession, transcriptText, type ActivityItem } from '../session/session.ts'
+import { activityLine, cellWidth, changeSummary, fitLine, overviewTable } from './layout.ts'
+import { scheduleTime } from './schedule.ts'
+import { colors, statusColor } from './palette.ts'
+import {
+  diffRows,
+  fitPath,
+  statusMark,
+  type ReviewAction,
+  type ReviewFile,
+  type ReviewView,
+  type ReviewWrite,
+} from './review.ts'
 
-const colors =
-  process.env.NO_COLOR === undefined
-    ? {
-        background: 'transparent',
-        input: '#171717',
-        text: '#ededed',
-        secondary: '#c2c2c2',
-        muted: '#a1a1a1',
-        border: '#333333',
-        button: '#ededed',
-        buttonText: '#0a0a0a',
-        notice: '#ededed',
-        healthy: '#50e3c2',
-        warning: '#f5a623',
-        failure: '#ff6369',
-      }
-    : {
-        background: 'transparent',
-        input: '#171717',
-        text: '#ffffff',
-        secondary: '#ffffff',
-        muted: '#ffffff',
-        border: '#ffffff',
-        button: '#ffffff',
-        buttonText: '#000000',
-        notice: '#ffffff',
-        healthy: '#ffffff',
-        warning: '#ffffff',
-        failure: '#ffffff',
-      }
-
-const navigationKeys = 'Ctrl+A select   Ctrl+C copy/clear   Ctrl+V paste   Esc back'
+const navigationKeys = 'Esc back   Ctrl+C clear/quit'
 const loadingFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+const activityKeys = '↑↓ choose   Enter review changes   Shift+Tab chat   Esc input'
+const reviewKeys =
+  '↑↓ file   PgUp/PgDn scroll   s pull request   c commit   p push   d discard   w whole file   r refresh   Esc back'
+const reviewWriteKeys: Record<string, ReviewWrite> = {
+  c: 'commit',
+  p: 'push',
+  s: 'ship',
+  d: 'discard',
+}
+
+type ReviewState = {
+  view: ReviewView
+  loadDiff: (path: string, whole: boolean) => Promise<string>
+  index: number
+  whole: boolean
+  diffs: Map<string, string>
+  notice?: ReviewView['notice']
+  resolve?: (action: ReviewAction) => void
+}
 
 /** One owner of terminal input/output for Home, menus, forms and results. */
 export class TerminalSurface {
@@ -65,10 +66,23 @@ export class TerminalSurface {
   private clipboard: ClipboardService
   private actions: BoxRenderable
   private promptTitle: TextRenderable
+  private panels: BoxRenderable
+  private chatPanel: BoxRenderable
+  private activityPanel: BoxRenderable
   private detailScroll: ScrollBoxRenderable
   private scheduledScroll: ScrollBoxRenderable
   private overview: TextRenderable
-  private work: TextRenderable
+  private work: BoxRenderable
+  private workSignature = ''
+  private reviewPanel: BoxRenderable
+  private reviewBody: BoxRenderable
+  private reviewHeader: TextRenderable
+  private reviewFiles: ScrollBoxRenderable
+  private reviewDiff: ScrollBoxRenderable
+  private reviewDiffText: TextRenderable
+  private reviewState?: ReviewState
+  /** Index into the reviewable Activity rows while Activity has keyboard focus. */
+  private activityCursor?: number
   private progress: TextRenderable
   private ghost?: TextRenderable
   private suggestions: TextRenderable
@@ -153,7 +167,7 @@ export class TerminalSurface {
     header.add(
       new TextRenderable(renderer, {
         content: 'Open Run',
-        fg: colors.text,
+        fg: colors.info,
         attributes: core.TextAttributes.BOLD,
         flexGrow: 1,
         height: 1,
@@ -168,6 +182,25 @@ export class TerminalSurface {
     })
     header.add(this.status)
     root.add(header)
+    this.panels = new BoxRenderable(renderer, {
+      id: 'session-panels',
+      width: '100%',
+      flexGrow: 1,
+      flexBasis: 0,
+      flexShrink: 1,
+      minHeight: 0,
+      flexDirection: 'row',
+      marginBottom: 1,
+    })
+    this.chatPanel = new BoxRenderable(renderer, {
+      id: 'chat-panel',
+      width: '50%',
+      height: '100%',
+      minWidth: 0,
+      minHeight: 0,
+      flexDirection: 'column',
+      paddingRight: 1,
+    })
     this.detailScroll = new ScrollBoxRenderable(renderer, {
       id: 'session-timeline',
       width: '100%',
@@ -184,7 +217,121 @@ export class TerminalSurface {
         trackOptions: { backgroundColor: colors.background, foregroundColor: colors.border },
       },
     })
-    root.add(this.detailScroll)
+    this.chatPanel.add(this.detailScroll)
+    this.panels.add(this.chatPanel)
+    this.activityPanel = new BoxRenderable(renderer, {
+      id: 'activity-panel',
+      width: '50%',
+      height: '100%',
+      minWidth: 0,
+      minHeight: 0,
+      flexDirection: 'column',
+      border: ['left'],
+      borderColor: colors.border,
+      paddingLeft: 1,
+    })
+    this.activityPanel.add(
+      new TextRenderable(renderer, {
+        content: 'Activity',
+        fg: colors.info,
+        height: 1,
+        flexShrink: 0,
+        attributes: core.TextAttributes.BOLD,
+        selectable: false,
+      }),
+    )
+    this.scheduledScroll = new ScrollBoxRenderable(renderer, {
+      id: 'pending-and-active',
+      width: '100%',
+      flexGrow: 1,
+      flexShrink: 1,
+      minHeight: 0,
+      scrollX: false,
+      scrollY: true,
+      contentOptions: { flexDirection: 'column', minHeight: 0, paddingRight: 1 },
+      verticalScrollbarOptions: {
+        width: 1,
+        trackOptions: { backgroundColor: colors.background, foregroundColor: colors.border },
+      },
+    })
+    this.work = new BoxRenderable(renderer, {
+      id: 'live-work',
+      width: '100%',
+      flexDirection: 'column',
+      flexShrink: 0,
+    })
+    this.scheduledScroll.add(this.work)
+    this.activityPanel.add(this.scheduledScroll)
+    this.panels.add(this.activityPanel)
+    this.reviewPanel = new BoxRenderable(renderer, {
+      id: 'review-panel',
+      width: '100%',
+      height: '100%',
+      minHeight: 0,
+      flexDirection: 'column',
+      visible: false,
+    })
+    this.reviewHeader = new TextRenderable(renderer, {
+      id: 'review-header',
+      content: '',
+      fg: colors.secondary,
+      width: '100%',
+      wrapMode: 'word',
+      flexShrink: 0,
+      marginBottom: 1,
+    })
+    this.reviewPanel.add(this.reviewHeader)
+    this.reviewBody = new BoxRenderable(renderer, {
+      id: 'review-body',
+      width: '100%',
+      flexGrow: 1,
+      flexShrink: 1,
+      minHeight: 0,
+      flexDirection: 'row',
+    })
+    this.reviewFiles = new ScrollBoxRenderable(renderer, {
+      id: 'review-files',
+      width: '30%',
+      height: '100%',
+      minWidth: 0,
+      flexShrink: 0,
+      scrollX: false,
+      scrollY: true,
+      border: ['right'],
+      borderColor: colors.border,
+      contentOptions: { flexDirection: 'column', minHeight: 0, paddingRight: 1 },
+      verticalScrollbarOptions: {
+        width: 1,
+        trackOptions: { backgroundColor: colors.background, foregroundColor: colors.border },
+      },
+    })
+    this.reviewDiff = new ScrollBoxRenderable(renderer, {
+      id: 'review-diff',
+      flexGrow: 1,
+      flexShrink: 1,
+      minWidth: 0,
+      minHeight: 0,
+      scrollX: true,
+      scrollY: true,
+      contentOptions: { flexDirection: 'column', minHeight: 0, paddingLeft: 1 },
+      verticalScrollbarOptions: {
+        width: 1,
+        trackOptions: { backgroundColor: colors.background, foregroundColor: colors.border },
+      },
+    })
+    this.reviewDiffText = new TextRenderable(renderer, {
+      id: 'review-diff-text',
+      content: '',
+      fg: colors.secondary,
+      wrapMode: 'none',
+      flexShrink: 0,
+    })
+    this.reviewDiff.add(this.reviewDiffText)
+    this.reviewBody.add(this.reviewFiles)
+    this.reviewBody.add(this.reviewDiff)
+    this.reviewPanel.add(this.reviewBody)
+    this.panels.add(this.reviewPanel)
+    root.add(this.panels)
     this.notice = new TextRenderable(renderer, {
       content: '',
       fg: colors.warning,
@@ -226,7 +373,7 @@ export class TerminalSurface {
     })
     this.progress = new TextRenderable(renderer, {
       content: '',
-      fg: colors.muted,
+      fg: colors.keyword,
       width: '100%',
       height: 1,
       flexShrink: 0,
@@ -240,34 +387,12 @@ export class TerminalSurface {
       content: '',
       fg: colors.secondary,
       width: '100%',
-      height: 2,
+      height: 1,
       flexShrink: 0,
       marginTop: 1,
       selectable: false,
     })
     root.add(this.overview)
-    this.scheduledScroll = new ScrollBoxRenderable(renderer, {
-      id: 'pending-and-active',
-      width: '100%',
-      flexShrink: 1,
-      minHeight: 0,
-      scrollX: false,
-      scrollY: true,
-      contentOptions: { flexDirection: 'column', minHeight: 0, paddingRight: 1 },
-      verticalScrollbarOptions: {
-        width: 1,
-        trackOptions: { backgroundColor: colors.background, foregroundColor: colors.border },
-      },
-    })
-    this.work = new TextRenderable(renderer, {
-      content: '',
-      fg: colors.muted,
-      width: '100%',
-      flexShrink: 0,
-      selectable: false,
-    })
-    this.scheduledScroll.add(this.work)
-    root.add(this.scheduledScroll)
     this.footer = new TextRenderable(renderer, {
       id: 'keyboard-help',
       content: '',
@@ -296,49 +421,74 @@ export class TerminalSurface {
 
   private resize = (): void => {
     this.status.visible = this.renderer.width >= 65
-    this.scheduledScroll.maxHeight = Math.max(1, Math.min(7, Math.floor(this.renderer.height / 5)))
+    const stacked = this.renderer.width < 72
+    this.panels.flexDirection = stacked ? 'column' : 'row'
+    this.chatPanel.width = stacked ? '100%' : '50%'
+    this.chatPanel.height = stacked ? '60%' : '100%'
+    this.chatPanel.paddingRight = stacked ? 0 : 1
+    this.activityPanel.width = stacked ? '100%' : '50%'
+    this.activityPanel.height = stacked ? '40%' : '100%'
+    this.activityPanel.border = stacked ? ['top'] : ['left']
+    this.activityPanel.paddingLeft = stacked ? 0 : 1
+    this.reviewBody.flexDirection = stacked ? 'column' : 'row'
+    this.reviewFiles.width = stacked ? '100%' : '30%'
+    this.reviewFiles.height = stacked
+      ? Math.min(Math.max(1, this.reviewState?.view.files.length ?? 1), 6)
+      : '100%'
+    this.reviewFiles.border = stacked ? ['bottom'] : ['right']
+    if (this.reviewState) this.renderReviewFiles()
+    this.workSignature = ''
     if (this.control instanceof this.core.SelectRenderable)
       this.control.height = this.menuHeight(this.control.options.length)
     this.renderOverview()
-    this.renderCompletion()
     this.setFooter(this.promptKeys)
+    this.renderCompletion()
   }
 
   private setFooter(message: string): void {
     this.footer.content = fitLine(message, this.renderer.width - 2)
   }
 
+  /** Small syntax accents for command results, without changing saved transcript text. */
+  private styledText(text: string, base = colors.secondary): StyledText {
+    const chunks: TextChunk[] = []
+    const tokens =
+      /\b(?:Claude(?: Code)?|Codex|Grok|Gemini|Antigravity|fx)\b|(?:https?:\/\/|(?:\.{0,2}|~)\/)[^\s]+|`[^`\n]+`|\b\d+(?:[.:]\d+)*\b|\b(?:running|queued|scheduled|preparing|completed|succeeded|success|failed|cancelled|paused)\b/gi
+    let offset = 0
+    for (const match of text.matchAll(tokens)) {
+      chunks.push(this.core.fg(base)(text.slice(offset, match.index)))
+      const token = match[0]
+      const lower = token.toLowerCase()
+      let color = statusColor(token)
+      if (lower.startsWith('claude')) color = colors.claude
+      else if (lower === 'gemini') color = colors.gemini
+      else if (/^(codex|grok|antigravity|fx)$/.test(lower)) color = colors.text
+      else if (/^\d/.test(token)) color = colors.number
+      else if (token.startsWith('`')) color = colors.function
+      else if (token.includes('/')) color = colors.link
+      chunks.push(this.core.fg(color)(token))
+      offset = match.index + token.length
+    }
+    chunks.push(this.core.fg(base)(text.slice(offset)))
+    return new this.core.StyledText(chunks)
+  }
+
   private renderSession(): void {
     for (const entry of this.session.entries.slice(this.renderedEntries)) {
-      const who =
-        entry.role === 'user' ? 'You' : entry.role === 'assistant' ? 'Open Run' : 'Activity'
-      const at = new Date(entry.at).toLocaleTimeString(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      })
       const bubble = new this.core.BoxRenderable(this.renderer, {
         id: entry.id,
         width: '100%',
         flexDirection: 'column',
         flexShrink: 0,
         marginBottom: 1,
-        paddingLeft: entry.role === 'user' ? 2 : 0,
+        backgroundColor: entry.role === 'user' ? colors.input : colors.background,
       })
       bubble.add(
         new this.core.TextRenderable(this.renderer, {
-          content: `${at}  ${who}`,
-          fg: entry.role === 'user' ? colors.text : colors.muted,
-          width: '100%',
-          flexShrink: 0,
-          attributes: this.core.TextAttributes.BOLD,
-        }),
-      )
-      bubble.add(
-        new this.core.TextRenderable(this.renderer, {
-          content: entry.text,
+          content: entry.role === 'user' ? entry.text : this.styledText(entry.text),
           fg: entry.role === 'user' ? colors.text : colors.secondary,
           width: '100%',
+          wrapMode: 'word',
           flexShrink: 0,
         }),
       )
@@ -350,25 +500,140 @@ export class TerminalSurface {
 
   private renderOverview(): void {
     const width = Math.max(1, this.renderer.width - 2)
-    this.overview.content = overviewTable(this.session.overview, width)
+    const overview = overviewTable(this.session.overview, width)
+    this.overview.content = this.styledText(overview, colors.muted)
+    this.overview.height = overview.split('\n').length
     this.notice.content = fitLine(this.session.overview.error || '', width)
     this.notice.visible = Boolean(this.session.overview.error)
+    this.renderActivity()
+  }
+
+  /** Requests the user can open in Review: runs that exist, newest last. */
+  private get reviewableRuns(): string[] {
+    return this.session.activity.flatMap((item) => (item.runId ? [item.runId] : []))
+  }
+
+  /** One row per item, so a click or the keyboard can open the run behind it. */
+  private renderActivity(): void {
+    // Silent requests are clicks; they belong to Review, not the Activity list.
     const pending = [
-      ...(this.session.current ? [this.session.current] : []),
-      ...this.session.pending,
-    ].map((request) => ({
-      id: request.id,
-      prompt: transcriptText(request.text),
-      when: request.detail,
-    }))
-    const rows = [
-      ...pending,
-      ...(this.session.overview.activeRuns || []),
-      ...(this.session.overview.tasks || []),
-    ]
-    this.work.content = rows.length
-      ? activityTable(rows, width - 1)
-      : 'No pending schedules or active runs.'
+      ...(this.session.current && !this.session.current.silent ? [this.session.current] : []),
+      ...this.session.pending.filter((request) => !request.silent),
+    ].map(
+      (request): ActivityItem => ({
+        prompt: transcriptText(request.text),
+        status: request.detail,
+        time: scheduleTime(request.at),
+      }),
+    )
+    const rows = [...pending, ...this.session.activity]
+    const runs = this.reviewableRuns
+    if (this.activityCursor !== undefined) {
+      if (!runs.length) this.leaveActivity()
+      else this.activityCursor = Math.min(this.activityCursor, runs.length - 1)
+    }
+    const chosen = this.activityCursor === undefined ? undefined : runs[this.activityCursor]
+    const lines = rows.map((row) => transcriptText(activityLine(row)))
+    const signature = JSON.stringify([lines, chosen, rows.map((row) => row.runId)])
+    if (signature === this.workSignature) return
+    this.workSignature = signature
+    for (const child of this.work.getChildren()) child.destroyRecursively()
+    rows.forEach((row, index) => {
+      const selected = Boolean(row.runId) && row.runId === chosen
+      const box = new this.core.BoxRenderable(this.renderer, {
+        id: `activity-row-${index}`,
+        width: '100%',
+        flexDirection: 'column',
+        flexShrink: 0,
+        marginBottom: index < rows.length - 1 ? 1 : 0,
+        backgroundColor: selected ? colors.input : colors.background,
+        onMouseDown: row.runId
+          ? (event) => {
+              if (event.button !== this.core.MouseButton.LEFT) return
+              this.openReview(row.runId!)
+            }
+          : undefined,
+        onMouseOver: row.runId
+          ? () => {
+              box.backgroundColor = colors.input
+              this.setFooter('Click to review this run’s changes')
+            }
+          : undefined,
+        onMouseOut: row.runId
+          ? () => {
+              box.backgroundColor = selected ? colors.input : colors.background
+              this.setFooter(this.activityCursor === undefined ? this.promptKeys : activityKeys)
+            }
+          : undefined,
+      })
+      box.add(
+        new this.core.TextRenderable(this.renderer, {
+          content: this.styledText(
+            `${lines[index]}${selected ? '   ↵ review' : ''}`,
+            row.runId ? colors.secondary : colors.muted,
+          ),
+          width: '100%',
+          wrapMode: 'word',
+          flexShrink: 0,
+          selectable: false,
+        }),
+      )
+      this.work.add(box)
+    })
+    if (chosen) {
+      const index = rows.findIndex((row) => row.runId === chosen)
+      if (index >= 0) this.scheduledScroll.scrollChildIntoView(`activity-row-${index}`)
+    }
+  }
+
+  private focusActivity(): boolean {
+    const runs = this.reviewableRuns
+    if (!runs.length) return false
+    this.reading = false
+    this.activityCursor = runs.length - 1
+    this.control?.blur()
+    this.setFooter(activityKeys)
+    this.renderActivity()
+    return true
+  }
+
+  private leaveActivity(): void {
+    if (this.activityCursor === undefined) return
+    this.activityCursor = undefined
+    this.workSignature = ''
+    this.control?.focus()
+    this.setFooter(this.promptKeys)
+  }
+
+  private activityKey(key: KeyEvent): boolean {
+    const runs = this.reviewableRuns
+    const cursor = this.activityCursor ?? 0
+    if (key.name === 'up' || key.name === 'down') {
+      this.activityCursor = Math.max(
+        0,
+        Math.min(runs.length - 1, cursor + (key.name === 'up' ? -1 : 1)),
+      )
+      this.renderActivity()
+    } else if (['return', 'kpenter', 'linefeed'].includes(key.name)) {
+      const runId = runs[cursor]
+      if (runId) this.openReview(runId)
+    } else if (key.name === 'escape') {
+      this.leaveActivity()
+      this.renderActivity()
+    } else return false
+    key.preventDefault()
+    key.stopPropagation()
+    return true
+  }
+
+  /** A click or Enter on an Activity row becomes a `review` request, without a chat echo. */
+  private openReview(runId: string): void {
+    if (this.reviewState || this.closed) return
+    this.leaveActivity()
+    const request = `review ${runId}`
+    this.session.enqueue(request, true)
+    if (this.requesting) this.homeAction?.(request)
+    else this.rejectPrompt?.(new CommandRequest(request, true))
   }
 
   private renderCompletion(): void {
@@ -388,6 +653,8 @@ export class TerminalSurface {
     this.ghost.content = fitLine(suffix, this.renderer.width - used - 7)
     this.ghost.visible = Boolean(suffix) && used < this.renderer.width - 8
     if (this.completion) this.suggestions.visible = false
+    if (this.requesting && !this.reading && this.activityCursor === undefined)
+      this.setFooter(this.completion ? `Tab/Enter accept   ${navigationKeys}` : this.promptKeys)
   }
 
   private acceptCompletion(): boolean {
@@ -439,6 +706,7 @@ export class TerminalSurface {
     )
     if (!text) return
     this.interruptedAt = 0
+    this.leaveActivity()
     this.setFooter(this.promptKeys)
     if (this.control instanceof this.core.InputRenderable) {
       this.reading = false
@@ -545,6 +813,8 @@ export class TerminalSurface {
       return
     }
     this.interruptedAt = 0
+    if (this.reviewState?.resolve && this.reviewKey(key)) return
+    if (this.activityCursor !== undefined && this.activityKey(key)) return
     this.setFooter(this.promptKeys)
     if (
       this.pendingRequestInput &&
@@ -587,9 +857,16 @@ export class TerminalSurface {
       key.stopPropagation()
       this.acceptCompletion()
     } else if (key.name === 'tab' && key.shift) {
+      // Focus cycles input → Activity → chat → input; Activity is skipped until a run exists.
       key.preventDefault()
       key.stopPropagation()
-      this.reading = !this.reading
+      if (this.activityCursor !== undefined) {
+        this.leaveActivity()
+        this.renderActivity()
+        this.reading = true
+      } else if (this.reading) this.reading = false
+      else if (!this.focusActivity()) this.reading = true
+      if (this.activityCursor !== undefined) return
       if (this.reading) this.detailScroll.focus()
       else this.control?.focus()
       this.setFooter(this.reading ? '↑↓ scroll   Shift+Tab input   Esc back' : this.promptKeys)
@@ -666,6 +943,7 @@ export class TerminalSurface {
   }
 
   private clearControl(): void {
+    this.leaveActivity()
     this.stopLoading()
     this.preview.cancel()
     if (this.requesting && this.control instanceof this.core.InputRenderable)
@@ -691,8 +969,8 @@ export class TerminalSurface {
       flexShrink: 0,
       border: true,
       borderStyle: 'rounded',
-      borderColor: colors.border,
-      focusedBorderColor: colors.border,
+      borderColor: isInput ? colors.info : colors.border,
+      focusedBorderColor: colors.info,
       backgroundColor: isInput ? colors.input : colors.background,
       paddingX: 1,
       paddingY: 0,
@@ -700,6 +978,7 @@ export class TerminalSurface {
       onMouseDown: (event) => {
         if (event.button !== this.core.MouseButton.LEFT) return
         this.reading = false
+        this.leaveActivity()
         this.control?.focus()
         this.setFooter(this.promptKeys)
       },
@@ -714,6 +993,7 @@ export class TerminalSurface {
     this.clearControl()
     this.unreadOutput = false
     this.promptTitle.content = fitLine(message, this.renderer.width - 2)
+    this.promptTitle.visible = true
     this.session.log('assistant', message)
     this.promptKeys = `↑↓ move   Enter select   Type to ask   ${navigationKeys}`
     this.setFooter(this.promptKeys)
@@ -738,7 +1018,7 @@ export class TerminalSurface {
       textColor: colors.secondary,
       focusedTextColor: colors.secondary,
       selectedBackgroundColor: colors.background,
-      selectedTextColor: colors.secondary,
+      selectedTextColor: colors.info,
       descriptionColor: colors.muted,
       selectedDescriptionColor: colors.muted,
     })
@@ -779,6 +1059,7 @@ export class TerminalSurface {
     this.clearControl()
     this.unreadOutput = false
     this.promptTitle.content = fitLine(message, this.renderer.width - 2)
+    this.promptTitle.visible = true
     this.session.log('assistant', message)
     this.promptKeys = `Enter continue   Ctrl+Enter use as value   ${navigationKeys}`
     this.setFooter(this.promptKeys)
@@ -790,7 +1071,7 @@ export class TerminalSurface {
       focusedBackgroundColor: colors.background,
       textColor: colors.text,
       focusedTextColor: colors.text,
-      cursorColor: colors.text,
+      cursorColor: colors.info,
       selectionBg: colors.button,
       selectionFg: colors.buttonText,
     })
@@ -835,6 +1116,257 @@ export class TerminalSurface {
     }
   }
 
+  /**
+   * The run's changes take the place of both panels, like the web's diff panel:
+   * where it worked, what it touched, each file's diff, and the git writes.
+   * Resolves with the chosen action; the pane stays up until `endReview`.
+   */
+  async review(
+    view: ReviewView,
+    loadDiff: (path: string, whole: boolean) => Promise<string>,
+  ): Promise<ReviewAction> {
+    if (this.closed) throw new Quit()
+    this.clearControl()
+    this.unreadOutput = false
+    const previous = this.reviewState?.view.runId === view.runId ? this.reviewState : undefined
+    const previousPath = previous?.view.files[previous.index]?.path
+    const kept = view.files.findIndex((file) => file.path === previousPath)
+    this.reviewState = {
+      view,
+      loadDiff,
+      index: kept >= 0 ? kept : Math.min(previous?.index ?? 0, Math.max(0, view.files.length - 1)),
+      whole: previous?.whole ?? false,
+      diffs: new Map(),
+      notice: view.notice,
+    }
+    this.chatPanel.visible = false
+    this.activityPanel.visible = false
+    this.reviewPanel.visible = true
+    this.promptTitle.visible = false
+    this.promptKeys = reviewKeys
+    this.setFooter(this.promptKeys)
+    this.resize()
+    this.renderReviewHeader()
+    this.renderReviewFiles()
+    this.loadReviewDiff()
+    try {
+      return await new Promise<ReviewAction>((resolve, reject) => {
+        this.rejectPrompt = reject
+        this.reviewState!.resolve = resolve
+      })
+    } finally {
+      if (this.reviewState) this.reviewState.resolve = undefined
+      this.rejectPrompt = undefined
+      this.startLoading()
+    }
+  }
+
+  endReview(): void {
+    if (!this.reviewState) return
+    this.reviewState = undefined
+    this.reviewPanel.visible = false
+    this.chatPanel.visible = true
+    this.activityPanel.visible = true
+    this.promptTitle.visible = true
+    for (const child of this.reviewFiles.getChildren()) child.destroyRecursively()
+    this.reviewDiffText.content = ''
+    this.workSignature = ''
+    this.resize()
+    this.renderActivity()
+  }
+
+  private reviewKey(key: KeyEvent): boolean {
+    const state = this.reviewState!
+    const letter = key.ctrl || key.meta || key.super ? '' : key.name
+    const write = reviewWriteKeys[letter]
+    if (key.name === 'up' || key.name === 'down' || letter === 'k' || letter === 'j') {
+      const step = key.name === 'up' || letter === 'k' ? -1 : 1
+      const next = Math.max(0, Math.min(state.view.files.length - 1, state.index + step))
+      if (next !== state.index) this.selectReviewFile(next)
+    } else if (key.name === 'pageup' || key.name === 'pagedown' || key.name === 'space') {
+      this.reviewDiff.scrollBy(key.name === 'pageup' ? -1 : 1, 'viewport')
+    } else if (key.name === 'home' || key.name === 'end') {
+      this.reviewDiff.scrollTo(key.name === 'home' ? 0 : this.reviewDiff.scrollHeight)
+    } else if (letter === 'w') {
+      state.whole = !state.whole
+      this.loadReviewDiff()
+    } else if (write) {
+      const blocked = state.view.blocked[write]
+      if (blocked) {
+        state.notice = { text: blocked, tone: 'error' }
+        this.renderReviewHeader()
+      } else state.resolve?.(write)
+    } else if (letter === 'r') state.resolve?.('refresh')
+    else if (key.name === 'escape' || letter === 'q') state.resolve?.('back')
+    else return false
+    key.preventDefault()
+    key.stopPropagation()
+    return true
+  }
+
+  private selectReviewFile(index: number): void {
+    const state = this.reviewState
+    if (!state) return
+    state.index = index
+    this.renderReviewFiles()
+    this.loadReviewDiff()
+  }
+
+  private renderReviewHeader(): void {
+    const state = this.reviewState
+    if (!state) return
+    const { view } = state
+    const fg = this.core.fg
+    const chunks: TextChunk[] = [
+      this.core.bold(fg(colors.text)(transcriptText(view.title).replace(/\s+/g, ' '))),
+      fg(colors.muted)('\n'),
+      fg(statusColor(view.status))(view.status),
+      fg(colors.muted)(' · '),
+      fg(colors.link)(view.directory),
+      fg(colors.muted)(' · '),
+      fg(colors.keyword)(view.branch),
+      fg(colors.muted)('\n'),
+      fg(colors.secondary)(view.summary),
+    ]
+    if (view.pullRequest)
+      chunks.push(
+        fg(colors.muted)(' · '),
+        fg(statusColor(view.pullRequest.state))(
+          `PR #${view.pullRequest.number} ${view.pullRequest.state}`,
+        ),
+        fg(colors.muted)(' '),
+        fg(colors.link)(view.pullRequest.url),
+      )
+    if (state.notice)
+      chunks.push(
+        fg(colors.muted)('\n'),
+        fg(
+          state.notice.tone === 'error'
+            ? colors.failure
+            : state.notice.tone === 'ok'
+              ? colors.healthy
+              : colors.info,
+        )(transcriptText(state.notice.text)),
+      )
+    this.reviewHeader.content = new this.core.StyledText(chunks)
+  }
+
+  private renderReviewFiles(): void {
+    const state = this.reviewState
+    if (!state) return
+    for (const child of this.reviewFiles.getChildren()) child.destroyRecursively()
+    if (!state.view.files.length) {
+      this.reviewFiles.add(
+        new this.core.TextRenderable(this.renderer, {
+          content: 'No file changes',
+          fg: colors.muted,
+          width: '100%',
+          selectable: false,
+        }),
+      )
+      return
+    }
+    // The files pane is 30% wide beside the diff, less its border and padding.
+    const stacked = this.renderer.width < 72
+    const width = Math.floor((this.renderer.width - 2) * (stacked ? 1 : 0.3)) - 3
+    const markColor = (file: ReviewFile) =>
+      ({ A: colors.healthy, D: colors.failure, R: colors.info })[statusMark(file.status)] ??
+      colors.warning
+    state.view.files.forEach((file, index) => {
+      const selected = index === state.index
+      const stats = file.binary ? 'binary' : `+${file.additions} −${file.deletions}`
+      const name = fitPath(
+        transcriptText(file.oldPath ? `${file.oldPath} → ${file.path}` : file.path),
+        width - stats.length - 3,
+      )
+      this.reviewFiles.add(
+        new this.core.TextRenderable(this.renderer, {
+          id: `review-file-${index}`,
+          content: new this.core.StyledText([
+            this.core.fg(markColor(file))(`${statusMark(file.status)} `),
+            this.core.fg(selected ? colors.text : colors.secondary)(name),
+            this.core.fg(colors.muted)(` ${stats}`),
+          ]),
+          width: '100%',
+          wrapMode: 'none',
+          flexShrink: 0,
+          selectable: false,
+          bg: selected ? colors.input : colors.background,
+          onMouseDown: (event) => {
+            if (event.button === this.core.MouseButton.LEFT) this.selectReviewFile(index)
+          },
+        }),
+      )
+    })
+    this.reviewFiles.scrollChildIntoView(`review-file-${state.index}`)
+  }
+
+  private loadReviewDiff(): void {
+    const state = this.reviewState
+    const file = state?.view.files[state.index]
+    this.reviewDiff.scrollTo(0)
+    if (!state || !file) {
+      this.reviewDiffText.content = new this.core.StyledText([
+        this.core.fg(colors.muted)(
+          state?.view.blocked.commit && !state.view.files.length
+            ? 'The agent left no changes in this directory.'
+            : '',
+        ),
+      ])
+      return
+    }
+    const key = `${state.whole ? 'whole' : 'hunks'}:${file.path}`
+    const cached = state.diffs.get(key)
+    if (cached !== undefined) {
+      this.renderDiff(file, cached, state.whole)
+      return
+    }
+    this.renderDiff(file, undefined, state.whole)
+    state
+      .loadDiff(file.path, state.whole)
+      .then((raw) => {
+        state.diffs.set(key, raw)
+        if (this.reviewState === state && state.view.files[state.index] === file)
+          this.renderDiff(file, raw, state.whole)
+      })
+      .catch((error: unknown) => {
+        if (this.reviewState !== state || state.view.files[state.index] !== file) return
+        this.reviewDiffText.content = new this.core.StyledText([
+          this.core.fg(colors.failure)(
+            `Could not load this diff: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        ])
+      })
+  }
+
+  private renderDiff(file: ReviewFile, raw: string | undefined, whole: boolean): void {
+    const fg = this.core.fg
+    const chunks: TextChunk[] = [
+      this.core.bold(fg(colors.text)(transcriptText(file.path))),
+      fg(colors.muted)(
+        ` · ${file.status} · ${changeSummary({ files: 1, additions: file.additions, deletions: file.deletions }).replace(/^1 file /, '')}${whole ? ' · whole file' : ''}\n\n`,
+      ),
+    ]
+    if (raw === undefined) chunks.push(fg(colors.muted)('Loading diff…'))
+    else {
+      const color = {
+        hunk: colors.info,
+        add: colors.healthy,
+        delete: colors.failure,
+        context: colors.secondary,
+        note: colors.muted,
+      }
+      const sign = { hunk: '', add: '+', delete: '−', context: ' ', note: '' }
+      for (const row of diffRows(raw)) {
+        if (row.number) chunks.push(fg(colors.muted)(`${row.number} `))
+        chunks.push(
+          fg(color[row.kind])(`${sign[row.kind]}${sign[row.kind] ? ' ' : ''}${row.text}\n`),
+        )
+      }
+    }
+    this.reviewDiffText.content = new this.core.StyledText(chunks)
+  }
+
   /** The composer remains editable while the dispatcher processes previous requests. */
   async homeRequest(history: readonly string[], initial = ''): Promise<string> {
     if (this.closed) throw new Quit()
@@ -843,7 +1375,7 @@ export class TerminalSurface {
       this.clearControl()
       this.requesting = true
       this.promptTitle.content = 'What should Open Run do?'
-      this.promptKeys = `Tab/Enter accept   Enter send   ↑↓ history   Shift+Tab timeline   ${navigationKeys}`
+      this.promptKeys = `Enter send   Tab complete   ↑↓ history   ${navigationKeys}`
       this.setFooter(this.promptKeys)
       const input = new this.core.InputRenderable(this.renderer, {
         width: '100%',
@@ -853,7 +1385,7 @@ export class TerminalSurface {
         focusedBackgroundColor: colors.background,
         textColor: colors.text,
         focusedTextColor: colors.text,
-        cursorColor: colors.text,
+        cursorColor: colors.info,
         selectionBg: colors.button,
         selectionFg: colors.buttonText,
         placeholder: 'Ask for a task, or type a command…',

@@ -4,15 +4,22 @@ import type { TerminalSurface } from './terminal.ts'
 import { openrunHome } from '@openrun/runtime/paths'
 import { CommandHistory } from '../session/history.ts'
 import { isImplicitRequest } from '../commands/natural.ts'
-import { CliSession, type HomeOverview } from '../session/session.ts'
+import {
+  CliSession,
+  type HomeOverview,
+  type OverviewRow,
+  type RunChanges,
+} from '../session/session.ts'
+import type { ReviewAction, ReviewView } from './review.ts'
 
 export type Choice = { value: string; label: string; hint?: string }
-export type ScheduledTaskView = { id: string; prompt: string; when: string }
+export type ScheduledTaskView = OverviewRow
 const HOME_CHOICES: Choice[] = [
   { value: 'launch', label: 'Open a coding agent' },
   { value: 'run', label: 'Run a task' },
   { value: 'schedule', label: 'Schedule an automation' },
   { value: 'runs', label: 'Recent runs' },
+  { value: 'review', label: 'Review changes' },
   { value: 'resume', label: 'Continue a run' },
   { value: 'ls', label: 'Manage automations' },
   { value: 'init', label: 'Set up a project' },
@@ -27,6 +34,7 @@ const HOME_CHOICES: Choice[] = [
 ]
 const HOME_ALIASES: [RegExp, string][] = [
   [/^(?:show|list|view|see)(?: me)? (?:recent |active )?runs?$/i, 'runs'],
+  [/^(?:show|view|see|inspect)(?: me)?(?: the| my)? (?:changes|diffs?|edits)$/i, 'review'],
   [/^(?:show|list|manage|view)(?: my)? (?:automations|schedules)$/i, 'ls'],
   [/^(?:show|list|manage|view)(?: my)? projects$/i, 'projects'],
   [/^(?:show|list|manage|view)(?: my)? (?:agents|models|runtimes)$/i, 'runtimes'],
@@ -153,10 +161,13 @@ export class RequestInput extends Error {
 }
 export class CommandRequest extends Error {
   readonly request: string
+  /** Opened by a click rather than typed: kept out of chat and command history. */
+  readonly silent: boolean
 
-  constructor(request: string) {
+  constructor(request: string, silent = false) {
     super(request)
     this.request = request
+    this.silent = silent
   }
 }
 
@@ -167,7 +178,7 @@ export function isCommandRequest(value: string): boolean {
     /^openrun\s+\S/i.test(text) ||
     HOME_CHOICES.some((choice) => choice.value === text.toLowerCase()) ||
     HOME_ALIASES.some(([pattern]) => pattern.test(text)) ||
-    /^(?:run|launch|schedule|resume|show|cancel|worker|integrations|api)\s+\S/i.test(text) ||
+    /^(?:run|launch|schedule|resume|show|review|cancel|worker|integrations|api)\s+\S/i.test(text) ||
     isImplicitRequest(text)
   )
 }
@@ -273,18 +284,40 @@ export class CliUi {
     })
   }
 
-  runStarted(id: string, prompt: string): void {
+  runStarted(run: OverviewRow): void {
     if (!this.interactive) return
     const runs = this.transcript.overview.activeRuns || []
-    if (runs.some((run) => run.id === id)) return
+    if (runs.some((row) => row.id === run.id)) return
     this.overview({
-      activeRuns: [...runs, { id, prompt, when: 'Running' }],
+      activeRuns: [...runs, run],
       running: (this.transcript.overview.running ?? 0) + 1,
     })
   }
 
   runChanged(id: string, status: string): void {
     this.transcript.runChanged(id, status)
+  }
+
+  takeRunsAwaitingChanges(): string[] {
+    return this.interactive ? this.transcript.takeRunsAwaitingChanges() : []
+  }
+
+  runChanges(id: string, changes: RunChanges): void {
+    this.transcript.runChanges(id, changes)
+  }
+
+  /** Show a run's changes in place of the panels until `endReview`. */
+  async review(
+    view: ReviewView,
+    loadDiff: (path: string, whole: boolean) => Promise<string>,
+  ): Promise<ReviewAction> {
+    if (!this.interactive) throw new Error('Review needs an interactive terminal.')
+    await this.start()
+    return this.terminal!.review(view, loadDiff)
+  }
+
+  endReview(): void {
+    this.terminal?.endReview()
   }
 
   done(message: string): void {
@@ -386,7 +419,7 @@ export class CliUi {
         return await show(initial)
       } catch (error) {
         if (!(error instanceof RequestInput)) {
-          if (error instanceof CommandRequest) {
+          if (error instanceof CommandRequest && !error.silent) {
             this.history().remember(error.request)
           }
           throw error

@@ -8,7 +8,7 @@ import {
   defaultEffort,
   modelsForKind,
 } from '@openrun/domain/runtimes/models'
-import { deriveTaskName, parseCliSchedule } from './cliSchedule.ts'
+import { deriveTaskName, parseCliSchedule, type CliSchedule } from './cliSchedule.ts'
 import { nativeModelsForBin } from '@openrun/runtime/runtimes/modelCatalog'
 import { checkRuntimeInstalled } from '@openrun/runtime/runtimes/runtimePath'
 import { openrunHome } from '@openrun/runtime/paths'
@@ -20,6 +20,7 @@ import {
   requestAction,
   resolveNativeModel,
   scheduleFromText,
+  splitScheduledTask,
   type NativeCatalog,
   type NativeRuntime,
   type LaunchPreference,
@@ -180,7 +181,27 @@ async function readNativeIntent(
       (field) => !(field === 'model' && known.model) && !(field === 'effort' && known.hasEffort),
     )
   }
-  if (interpreted.clarify.includes('action') && (known || isImplicitRequest(text))) {
+  // The time is usually stated at either end. Split it locally before asking,
+  // so neither the task nor the time needs to be typed again.
+  const unsettled =
+    !localRequest &&
+    explicit.prompt === undefined &&
+    (interpreted.action === 'launch' || interpreted.action === 'schedule') &&
+    (interpreted.clarify.includes('prompt') ||
+      interpreted.clarify.includes('schedule') ||
+      interpreted.intent.schedule.kind === 'now') &&
+    (mode === 'schedule' || requestAction(text, mode) === 'schedule')
+  const split = unsettled ? splitScheduledTask(localAgent?.prompt || text) : undefined
+  if (split) {
+    interpreted.intent.prompt = split.prompt
+    interpreted.intent.schedule = split.schedule
+    interpreted.intent.name = deriveTaskName(split.prompt)
+    interpreted.scheduleText = split.scheduleText
+    interpreted.clarify = interpreted.clarify.filter(
+      (field) => field !== 'prompt' && field !== 'schedule',
+    )
+  }
+  if (interpreted.clarify.includes('action') && (known || split || isImplicitRequest(text))) {
     const action = requestAction(text, mode)
     if (action) {
       interpreted.action = interpreted.intent.schedule.kind !== 'now' ? 'schedule' : action
@@ -221,6 +242,14 @@ function selectedCatalog(
   )
 }
 
+function readSchedule(text = ''): CliSchedule | undefined {
+  try {
+    return scheduleFromText(text)
+  } catch {
+    return undefined
+  }
+}
+
 /** Read-only: report missing choices instead of opening prompts or starting work. */
 export async function previewNativeIntent(
   words: string[],
@@ -235,10 +264,10 @@ export async function previewNativeIntent(
   )
   if (!['launch', 'schedule'].includes(interpreted.action)) return interpreted
   const { intent } = interpreted
-  const clarify = interpreted.clarify.filter((field) => explicit[field] === undefined)
+  let clarify = interpreted.clarify.filter((field) => explicit[field] === undefined)
   if (!available.length) throw new Error('Install and sign in to a supported coding agent first.')
   const catalog = selectedCatalog(intent, available, saved)
-  if (!catalog || (clarify.includes('model') && !explicit.runtime && !explicit.model)) {
+  if (!catalog) {
     clarify.push('agent')
   } else {
     const requestedRuntime = Boolean(intent.runtimeHint)
@@ -252,7 +281,10 @@ export async function previewNativeIntent(
       intent.modelHint = saved.model
     const model = resolveNativeModel(intent.modelHint, catalog.models)
     if (intent.modelHint && !model) clarify.push('model')
-    if (model) intent.modelHint = model.slug
+    if (model) {
+      intent.modelHint = model.slug
+      clarify = clarify.filter((field) => field !== 'model')
+    }
     if (intent.effortHint)
       intent.effortHint =
         resolveNativeEffort(intent.effortHint, catalog.models) ?? intent.effortHint
@@ -264,6 +296,7 @@ export async function previewNativeIntent(
             ? defaultEffort(model)
             : ''
     const effortModel = model ?? catalog.models.find((row) => row.preferred) ?? catalog.models[0]
+    clarify = clarify.filter((field) => field !== 'effort')
     if (intent.effortHint && !effortModel?.efforts.some((row) => row.value === intent.effortHint))
       clarify.push('effort')
   }
@@ -280,14 +313,25 @@ export async function prepareNativeIntent(
   ui: CliUi,
   mode: 'auto' | 'schedule' = 'auto',
 ): Promise<InterpretedIntent> {
-  const { interpreted, available, saved, explicit, hasExplicitEffort } = await readNativeIntent(
-    words,
-    mode,
-    {
-      info: (message) => ui.info(message),
-      recover: ui.interactive,
-    },
-  )
+  const input = await readNativeIntent(words, mode, {
+    info: (message) => ui.info(message),
+    recover: ui.interactive,
+  })
+  return completeNativeIntent(input, ui, mode)
+}
+
+/** Ask only for unresolved fields, then return directly to launch or scheduling. */
+export async function completeNativeIntent(
+  {
+    interpreted,
+    available,
+    saved,
+    explicit,
+    hasExplicitEffort,
+  }: Awaited<ReturnType<typeof readNativeIntent>>,
+  ui: Pick<CliUi, 'interactive' | 'select' | 'text'>,
+  mode: 'auto' | 'schedule' = 'auto',
+): Promise<InterpretedIntent> {
   let { action } = interpreted
   const { intent, clarify } = interpreted
   if (action !== 'launch' && action !== 'schedule' && !clarify.includes('action'))
@@ -302,11 +346,10 @@ export async function prepareNativeIntent(
       'Install and sign in to a supported agent (Codex, Claude Code, Grok, Gemini, Antigravity or fx), then try again.',
     )
   let catalog = selectedCatalog(intent, available, saved)
-  if (!catalog || (clarify.includes('model') && !explicit.runtime && !explicit.model)) {
+  if (!catalog) {
     const runtime = await ui.select(
       'Which agent?',
       available.map((row) => ({ value: row.runtime, label: NATIVE_RUNTIMES[row.runtime].label })),
-      catalog?.runtime,
     )
     catalog = available.find((row) => row.runtime === runtime)!
   }
@@ -320,17 +363,13 @@ export async function prepareNativeIntent(
   )
     intent.modelHint = saved.model
   let model = resolveNativeModel(intent.modelHint, catalog.models)
-  if ((intent.modelHint && !model) || (clarify.includes('model') && !explicit.model)) {
+  if ((intent.modelHint && !model) || (clarify.includes('model') && !model && !explicit.model)) {
     if (!ui.interactive)
       throw new Error(`Unknown model: ${intent.modelHint}. Use an available model ID with --model.`)
-    intent.modelHint = await ui.select(
-      'Which model?',
-      [
-        { value: '', label: 'Agent default' },
-        ...catalog.models.map((row) => ({ value: row.slug, label: row.name })),
-      ],
-      model?.slug,
-    )
+    intent.modelHint = await ui.select('Which model?', [
+      { value: '', label: 'Agent default' },
+      ...catalog.models.map((row) => ({ value: row.slug, label: row.name })),
+    ])
     model = resolveNativeModel(intent.modelHint, catalog.models)
   }
   if (model) intent.modelHint = model.slug
@@ -345,10 +384,7 @@ export async function prepareNativeIntent(
           ? defaultEffort(model)
           : ''
   const efforts = effortModel?.efforts ?? []
-  if (
-    (intent.effortHint && !efforts.some((row) => row.value === intent.effortHint)) ||
-    (clarify.includes('effort') && !explicit.effort)
-  ) {
+  if (intent.effortHint && !efforts.some((row) => row.value === intent.effortHint)) {
     if (!ui.interactive)
       throw new Error(
         `Unsupported effort for ${effortModel?.name || NATIVE_RUNTIMES[catalog.runtime].label}: ${intent.effortHint}. ${efforts.length ? `Choose ${efforts.map((row) => row.value || 'default').join(', ')}.` : 'Use the agent default (omit --effort).'}`,
@@ -358,8 +394,10 @@ export async function prepareNativeIntent(
       ...efforts.map((row) => ({ value: row.value, label: row.label })),
     ])
   }
+  // A known value is used as-is; only missing ones are asked for. A prefilled
+  // question would otherwise cost an extra Enter for an answer we already have.
   if (
-    (clarify.includes('prompt') && explicit.prompt === undefined) ||
+    (clarify.includes('prompt') && explicit.prompt === undefined && !intent.prompt) ||
     (action === 'schedule' && !intent.prompt)
   )
     intent.prompt = await ui.text(
@@ -368,15 +406,23 @@ export async function prepareNativeIntent(
       undefined,
       action === 'launch',
     )
-  if (action === 'schedule' && (intent.schedule.kind === 'now' || clarify.includes('schedule'))) {
-    const when = await ui.text('When should it run?', 'in 10 minutes', (value) => {
-      try {
-        scheduleFromText(value)
-      } catch (error) {
-        return (error as Error).message
-      }
-    })
-    intent.schedule = scheduleFromText(when)
+  if (action === 'schedule' && intent.schedule.kind === 'now') {
+    const stated = readSchedule(interpreted.scheduleText)
+    if (stated) intent.schedule = stated
+    else
+      intent.schedule = scheduleFromText(
+        await ui.text(
+          'When should it run?',
+          interpreted.scheduleText || 'in 10 minutes',
+          (value) => {
+            try {
+              scheduleFromText(value)
+            } catch (error) {
+              return (error as Error).message
+            }
+          },
+        ),
+      )
   }
   intent.name = explicit.name || deriveTaskName(intent.prompt)
   return { action, intent, clarify: [] }

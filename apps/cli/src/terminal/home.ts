@@ -1,9 +1,9 @@
-import { formatScheduledRunLabel } from '@openrun/domain/tasks/schedule'
 import type { TaskChoice } from '../commands/cliResolve.ts'
 import { unavailable, type CliClient } from '../runtime/local.ts'
 import type { CliUi } from './ui.ts'
 import { watchActivity } from '../session/activity.ts'
-import type { HomeOverview } from '../session/session.ts'
+import { runStatusLabel, type HomeOverview } from '../session/session.ts'
+import { scheduleTime } from './schedule.ts'
 
 export type TaskRowView = TaskChoice & {
   prompt?: string
@@ -11,17 +11,34 @@ export type TaskRowView = TaskChoice & {
   fireOnce?: number
   scheduledAt?: number
   runtimeId?: string
+  model?: string
+  effort?: string
   nextRunAt?: number | null
   webhookIntegrationId?: string
   readinessBlockers?: { message: string }[]
 }
 
-type DashboardRun = { id: string; taskName?: string; status: string }
+type DashboardRun = {
+  id: string
+  taskId?: string | null
+  taskName?: string
+  prompt?: string
+  model?: string
+  effort?: string
+  status: string
+  startedAt?: number
+}
 type Dashboard = {
   stats: { running: number; runsToday: number }
   activeRuns?: DashboardRun[]
   recentRuns?: DashboardRun[]
-  pending?: { id: string; taskName: string }[]
+  pending?: {
+    id: string
+    taskId?: string
+    taskName: string
+    prompt?: string
+    queuedAt?: number
+  }[]
 }
 
 /** Use the worker's readiness and timestamps, including for remote targets. */
@@ -29,10 +46,7 @@ export function taskTiming(task: TaskRowView): string {
   if (!task.enabled) return 'Paused'
   if (task.readinessBlockers?.length)
     return `Needs attention · ${task.readinessBlockers[0]!.message}`
-  if (task.nextRunAt) {
-    const when = formatScheduledRunLabel(task.nextRunAt)?.replace(/^Scheduled /, '')
-    return `${when}${task.fireOnce ? ' · once' : ''}`
-  }
+  if (task.nextRunAt) return scheduleTime(task.nextRunAt)
   if (task.webhookIntegrationId) return 'On integration event'
   return task.cron?.trim() ? 'No next run scheduled' : 'Manual only'
 }
@@ -55,6 +69,8 @@ export async function showHome(client: CliClient, ui: Pick<CliUi, 'overview'>): 
       id: task.id,
       prompt: task.prompt?.trim() || task.name,
       when: taskTiming(task),
+      model: task.model ?? '',
+      effort: task.effort ?? '',
     }))
   }
   if (dashboardResult.status === 'fulfilled') {
@@ -66,13 +82,42 @@ export async function showHome(client: CliClient, ui: Pick<CliUi, 'overview'>): 
         dashboard.activeRuns ??
         dashboard.recentRuns?.filter((run) => run.status === 'running') ??
         []
-      ).map((run) => ({ id: run.id, prompt: run.taskName || run.id, when: 'Running' })),
-      ...(dashboard.pending ?? []).map((run) => ({
-        id: run.id,
-        prompt: run.taskName,
-        when: 'Queued run',
-      })),
+      ).map((active) => {
+        const run = { ...dashboard.recentRuns?.find((row) => row.id === active.id), ...active }
+        return {
+          id: run.id,
+          taskId: run.taskId,
+          startedAt: run.startedAt,
+          prompt: run.prompt || run.taskName || 'Untitled task',
+          when: runStatusLabel(run.status),
+          time: run.startedAt ? scheduleTime(run.startedAt) : undefined,
+          model: run.model,
+          effort: run.effort,
+        }
+      }),
+      ...(dashboard.pending ?? []).map((run) => {
+        const task = tasks?.find((task) => task.id === run.taskId)
+        return {
+          id: run.id,
+          taskId: run.taskId,
+          prompt: run.prompt || task?.prompt || run.taskName,
+          when: 'Queued',
+          time: run.queuedAt ? scheduleTime(run.queuedAt) : undefined,
+          model: task ? (task.model ?? '') : undefined,
+          effort: task ? (task.effort ?? '') : undefined,
+        }
+      }),
     ]
+    overview.recentRuns = (dashboard.recentRuns ?? []).map((run) => ({
+      id: run.id,
+      taskId: run.taskId,
+      startedAt: run.startedAt,
+      prompt: run.prompt || run.taskName || 'Untitled task',
+      when: runStatusLabel(run.status),
+      time: run.startedAt ? scheduleTime(run.startedAt) : undefined,
+      model: run.model,
+      effort: run.effort,
+    }))
   }
   if (integrationsResult.status === 'fulfilled')
     overview.integrations = integrationsResult.value.filter((row) => row.enabled).length
@@ -91,7 +136,8 @@ export async function showHome(client: CliClient, ui: Pick<CliUi, 'overview'>): 
 /** Live for the entire session, including while a request is being saved. */
 export function watchHome(
   client: CliClient,
-  ui: Pick<CliUi, 'overview' | 'status' | 'runChanged'>,
+  ui: Pick<CliUi, 'overview' | 'status' | 'runChanged'> &
+    Partial<Pick<CliUi, 'takeRunsAwaitingChanges' | 'runChanges'>>,
   {
     url = '',
     token = '',
@@ -105,6 +151,26 @@ export function watchHome(
   let again = false
   let revision = 0
   let debounce: ReturnType<typeof setTimeout> | undefined
+  // A finished run's file changes are read once, so Activity can say what there is to review.
+  const loadChanges = () => {
+    for (const runId of ui.takeRunsAwaitingChanges?.() ?? []) {
+      void client.call('runs.getWorkspace', { runId }).then(
+        (result) => {
+          const workspace = result as {
+            files?: unknown[]
+            totals?: { additions: number; deletions: number }
+          } | null
+          if (active && workspace?.files)
+            ui.runChanges?.(runId, {
+              files: workspace.files.length,
+              additions: workspace.totals?.additions ?? 0,
+              deletions: workspace.totals?.deletions ?? 0,
+            })
+        },
+        () => {},
+      )
+    }
+  }
   const refresh = async (source = client) => {
     if (!active) return
     if (loading) {
@@ -119,6 +185,7 @@ export function watchHome(
           if (active && startedAtRevision === revision) ui.overview(overview)
         },
       })
+      loadChanges()
     } finally {
       loading = false
       if (again && active) {
@@ -142,7 +209,10 @@ export function watchHome(
     token,
     onChange: schedule,
     onEvent: (event) => {
-      if (event.type === 'run_changed') ui.runChanged(event.runId, event.status)
+      if (event.type === 'run_changed') {
+        ui.runChanged(event.runId, event.status)
+        loadChanges()
+      }
     },
     onHealthy: (value) => {
       healthy = value

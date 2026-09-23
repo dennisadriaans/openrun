@@ -23,6 +23,7 @@ const COMMANDS = new Set([
   'ls',
   'runs',
   'show',
+  'review',
   'cancel',
   'now',
   'enable',
@@ -279,6 +280,7 @@ export function readCliArgs(
     where: 0,
     login: 0,
     show: 1,
+    review: 1,
     resume: 1,
     cancel: 1,
     worker: 1,
@@ -289,10 +291,10 @@ export function readCliArgs(
     throw new Error(`Unexpected argument. Run "openrun ${command} --help" for usage.`)
   if (
     (!interactive || flags.json || flags.yes) &&
-    ['show', 'resume', 'cancel', 'now', 'enable', 'disable', 'rm'].includes(command) &&
+    ['show', 'review', 'resume', 'cancel', 'now', 'enable', 'disable', 'rm'].includes(command) &&
     !positionals.length
   ) {
-    const required = ['show', 'resume', 'cancel'].includes(command)
+    const required = ['show', 'review', 'resume', 'cancel'].includes(command)
       ? 'a run ID'
       : 'an automation name or ID'
     throw new Error(`Pass ${required}. Run "openrun ${command} --help".`)

@@ -1,5 +1,25 @@
 import { stripVTControlCharacters } from 'node:util'
-import type { HomeOverview, OverviewRow } from '../session/session.ts'
+import type { ActivityItem, HomeOverview, RunChanges } from '../session/session.ts'
+
+/** "2 files +12 −3", or "No file changes" — the same words in Activity and Review. */
+export function changeSummary(changes: RunChanges): string {
+  if (!changes.files) return 'No file changes'
+  return `${changes.files} file${changes.files === 1 ? '' : 's'} +${changes.additions} −${changes.deletions}`
+}
+
+/** One inline summary per activity item; the renderer wraps it to fit. */
+export function activityLine(item: ActivityItem): string {
+  return [
+    item.status,
+    `${item.time || '—'}${item.nextTime ? ` (next ${item.nextTime})` : ''}`,
+    item.model === undefined ? '—' : item.model || 'Default model',
+    item.effort === undefined ? '—' : `${item.effort || 'default'} effort`,
+    item.prompt,
+    ...(item.changes ? [changeSummary(item.changes)] : []),
+  ]
+    .map((value) => value.replace(/\s+/g, ' ').trim())
+    .join(' · ')
+}
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 function cells(value: string): number {
@@ -52,34 +72,16 @@ export function overviewTable(view: HomeOverview, width: number): string {
     ['Active runs', view.running],
     ['Integrations', view.integrations],
   ] as const
-  if (width < 52) {
-    const half = Math.max(1, Math.floor((width - 2) / 2))
-    return [0, 2]
-      .map((index) =>
-        metrics
-          .slice(index, index + 2)
-          .map(([label, count]) => fitLine(`${label} ${count ?? '—'}`, half, true))
-          .join('  '),
-      )
-      .join('\n')
+  const lines: string[] = []
+  let line = ''
+  for (const [label, count] of metrics) {
+    const metric = fitLine(`${label}: ${count ?? '—'}`, width)
+    if (line && cellWidth(`${line}   ${metric}`) > width) {
+      lines.push(line)
+      line = ''
+    }
+    line = line ? `${line}   ${metric}` : metric
   }
-  const column = Math.floor((width - 9) / 4)
-  return [
-    metrics.map(([label]) => fitLine(label, column, true)).join(' │ '),
-    metrics.map(([, value]) => fitLine(String(value ?? '—'), column, true)).join(' │ '),
-  ].join('\n')
-}
-
-export function activityTable(rows: OverviewRow[], width: number): string {
-  if (width < 45)
-    return rows
-      .flatMap((row) => [fitLine(row.prompt, width), fitLine(`  ${row.when}`, width)])
-      .join('\n')
-  const stateWidth = Math.min(32, Math.floor(width * 0.4))
-  return rows
-    .map(
-      (row) =>
-        `${fitLine(row.when, stateWidth, true)}  ${fitLine(row.prompt, width - stateWidth - 2)}`,
-    )
-    .join('\n')
+  if (line) lines.push(line)
+  return lines.join('\n')
 }

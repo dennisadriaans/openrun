@@ -128,15 +128,26 @@ export function parseLocalAgent(argv: readonly string[], catalogs: NativeCatalog
   }
   const anchored = groups.filter((group) => {
     const fields = [group.runtime, group.model, group.effort].filter((value) => value !== undefined)
+    const before = words.slice(0, group.start).join(' ')
+    // A model can finish a complete task without an effort control. Keep
+    // incomplete prose such as "write a sonnet" or "explain haiku" literal.
+    const task = TASK_START.exec(before)
+    const trailingModel =
+      group.model &&
+      group.end === words.length &&
+      task &&
+      before.slice(task[0].length).trim() &&
+      !/\b(?:a|an|the|about|called|named|containing|contents|says|of|to|with)\s*$/i.test(before)
     return (
       (group.runtime || group.model) &&
       (group.explicit ||
         group.start === 0 ||
         fields.length > 1 ||
+        trailingModel ||
         (group.runtime && group.end === words.length))
     )
   })
-  // A bare "sonnet" or "low" in prose is not a control. Once an agent is
+  // A model mention or bare "low" inside prose is not a control. Once an agent is
   // named, controls at either end can complete it: "low <task> claude sonnet".
   const chosen = anchored.length
     ? groups.filter(
@@ -245,9 +256,17 @@ export function isImplicitRequest(text: string): boolean {
   }
 }
 
+/**
+ * Split a leading or trailing time from a task the interpreter already chose to
+ * schedule. Unlike the local shortcut, the task need not start with a verb.
+ */
+export function splitScheduledTask(text: string, now = new Date()) {
+  return scheduledTask(text, [text], now, false)
+}
+
 /** Keep task text intact while accepting execution times before or after it. */
-function scheduledTask(text: string, words: readonly string[], now: Date) {
-  if (words.length === 1 && /\s/.test(words[0]!)) return undefined
+function scheduledTask(text: string, words: readonly string[], now: Date, requireTask = true) {
+  if (requireTask && words.length === 1 && /\s/.test(words[0]!)) return undefined
   let tokens: ReturnType<typeof commandLineTokens>
   try {
     if (requestAction(text) !== 'schedule') return undefined
@@ -272,15 +291,16 @@ function scheduledTask(text: string, words: readonly string[], now: Date) {
       continue
     if (index > 0) {
       const prompt = task(text.slice(0, token.start))
-      if (!TASK_START.test(prompt)) continue
+      if (requireTask ? !TASK_START.test(prompt) : !prompt) continue
       const scheduleText = text.slice(token.start).trim()
       try {
         return { prompt, schedule: scheduleFromText(scheduleText, now), scheduleText }
       } catch {}
     } else {
-      for (let end = 1; end < tokens.length; end++) {
+      // Longest time first, so "in 10 minutes" is not read as "in 10".
+      for (let end = tokens.length - 1; end >= 1; end--) {
         const prompt = task(text.slice(tokens[end]!.start))
-        if (!TASK_START.test(prompt)) continue
+        if (requireTask ? !TASK_START.test(prompt) : !prompt) continue
         const scheduleText = text.slice(0, tokens[end]!.start).trim()
         try {
           return { prompt, schedule: scheduleFromText(scheduleText, now), scheduleText }
@@ -327,7 +347,7 @@ export function parseLocalRequest(
     if (!scheduled && (intent.schedule.kind === 'now' || !intent.prompt || intent.runtimeHint))
       return undefined
   } else {
-    if (!selection) return undefined
+    if (!selection && !scheduled) return undefined
     if (remaining.length) {
       if (
         (!scheduled && !TASK_START.test(prompt)) ||
@@ -442,14 +462,14 @@ export function readInterpretation(
       clarify = clarify.filter((field) => field !== 'action')
     } else clarify.push('action')
   }
+  let overlapping = false
   if (result.prompt && result.schedule) {
     const promptSpan = record(result.prompt)
     const scheduleSpan = record(result.schedule)
-    if (
+    overlapping =
       Number(promptSpan.start) < Number(scheduleSpan.end) &&
       Number(scheduleSpan.start) < Number(promptSpan.end)
-    )
-      clarify.push('prompt', 'schedule')
+    if (overlapping) clarify.push('prompt', 'schedule')
   }
   let schedule: CliSchedule = { kind: 'now' }
   if (action === 'schedule') {
@@ -460,6 +480,13 @@ export function readInterpretation(
     }
     if (!prompt) clarify.push('prompt')
   }
+  // Valid source spans already supply these fields. An overlapping pair is
+  // still ambiguous and must be resolved before either value can be used.
+  clarify = clarify.filter(
+    (field) =>
+      (field !== 'prompt' || !prompt || overlapping) &&
+      (field !== 'schedule' || schedule.kind === 'now' || overlapping),
+  )
   return {
     action,
     intent: {

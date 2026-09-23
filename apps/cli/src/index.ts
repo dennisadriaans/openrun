@@ -24,6 +24,17 @@ import {
   Quit,
 } from './terminal/ui.ts'
 import { watchHome, taskTiming, type TaskRowView } from './terminal/home.ts'
+import { scheduleTime, scheduleTiming } from './terminal/schedule.ts'
+import { activityLine } from './terminal/layout.ts'
+import {
+  reviewView,
+  statusMark,
+  type ReviewNotice,
+  type ReviewPullRequest,
+  type ReviewView,
+  type ReviewWrite,
+  type RunWorkspaceView,
+} from './terminal/review.ts'
 import {
   guideRun,
   manageRuntimes,
@@ -65,7 +76,6 @@ import {
   type TaskChoice,
   type WorkspaceChoice,
 } from './commands/cliResolve.ts'
-import { formatNextRunLabel, formatScheduledRunLabel } from '@openrun/domain/tasks/schedule'
 import { isLoopbackHost } from '@openrun/domain/security/serverAccess'
 import { openrunEnv } from '@openrun/domain/cloud/openrunEnv'
 
@@ -157,17 +167,6 @@ function runtimeLabel(runtime: RuntimeChoice): string {
     : runtime.bin || runtime.label
 }
 
-/** `Scheduled Wed, Jan 21, 4:40 PM GMT+1 · then pauses`, reusing the UI's words. */
-function scheduleLabel(intent: CliIntent): string {
-  const { schedule } = intent
-  if (schedule.kind === 'now') return 'immediately, nothing armed'
-  if (schedule.kind === 'once') {
-    const when = formatScheduledRunLabel(schedule.at) ?? `at ${new Date(schedule.at).toISOString()}`
-    return `${when} · then pauses`
-  }
-  return `${formatNextRunLabel(schedule.cron) ?? 'next run unknown'} · cron "${schedule.cron}"`
-}
-
 function printIntent(
   heading: string,
   name: string,
@@ -179,7 +178,7 @@ function printIntent(
   console.log(`\n${heading}  ${name}\n`)
   console.log(field('Runtime', runtimeLabel(runtime)))
   console.log(field('Workspace', `${workspaceLabel(workspace)}   ${workspace.path}`))
-  console.log(field('Fires', scheduleLabel(intent)))
+  console.log(field('Fires', scheduleTiming(intent.schedule)))
   if (intent.modelHint) console.log(field('Model', intent.modelHint))
   if (intent.effortHint) console.log(field('Effort', intent.effortHint))
   if (intent.openPr) console.log(field('Ships', 'branch, commit, push, open a pull request'))
@@ -422,12 +421,19 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
       throw new Error(
         `Could not confirm schedule: ${error instanceof Error ? error.message : String(error)}`,
       )
-    })) as { id: string; name: string } | null
+    })) as TaskRowView | null
   if (!saved?.id)
     throw new Error(
       'The worker did not confirm a saved automation. Check automations before retrying.',
     )
-  ctx.ui.scheduleSaved({ id: saved.id, prompt, when: scheduleLabel(intent) })
+  const summary = {
+    status: 'Scheduled',
+    time: taskTiming(saved),
+    model: intent.modelHint,
+    effort: intent.effortHint || '',
+    prompt,
+  }
+  ctx.ui.scheduleSaved({ id: saved.id, when: summary.time, ...summary })
   ctx.ui.rememberRuntime(runtime.id)
 
   if (ctx.flags.json) {
@@ -437,16 +443,14 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
 
   if (ctx.ui.interactive) {
     ctx.ui.session = true
-    ctx.ui.done(
-      `Scheduled · ${saved?.name ?? name}\n${scheduleLabel(intent)}\n${runtimeLabel(runtime)} · ${intent.modelHint || 'default model'} · ${intent.effortHint || 'default effort'}\n${workspace.path}\n\nNext: openrun runs\nContinue a finished run: openrun resume <run-id>\nPause: openrun disable ${saved?.id ?? ''}`,
-    )
+    // Activity owns the status, time and model; chat only confirms where to look.
+    ctx.ui.done('Scheduled. Follow it in Activity.')
     return 0
   }
   printIntent('Scheduled', saved?.name ?? name, intent, runtime, workspace, prompt)
   console.log(
     `\n${BULLET}${ctx.url ? `${ctx.url}/tasks/${saved?.id ?? ''}` : `Automation: ${saved?.id ?? ''}`}\n`,
   )
-  if (saved) console.log(`Next: openrun automations list\nPause: openrun disable ${saved.id}\n`)
   return 0
 }
 
@@ -496,7 +500,16 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     model: intent.modelHint,
     effort: intent.effortHint || '',
   })) as { runId: string } | null
-  if (started?.runId) ctx.ui.runStarted(started.runId, deriveTaskName(intent.prompt))
+  const startedAt = Date.now()
+  const summary = {
+    status: 'Running',
+    time: scheduleTime(startedAt),
+    model: intent.modelHint,
+    effort: intent.effortHint || '',
+    prompt,
+  }
+  if (started?.runId)
+    ctx.ui.runStarted({ id: started.runId, when: summary.status, startedAt, ...summary })
   ctx.ui.rememberRuntime(runtime.id)
 
   if (ctx.flags.json) {
@@ -504,8 +517,11 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     return 0
   }
   if (ctx.ui.interactive) {
+    // A one-shot run exits to the shell, where there is no Activity panel to follow.
     ctx.ui.done(
-      `Running with ${runtime.label || runtime.bin} · ${workspaceLabel(workspace)}\n\nRead the conversation: openrun show ${started?.runId ?? ''}`,
+      ctx.ui.session
+        ? 'Started. Follow it in Activity; select it there to review its changes.'
+        : activityLine(summary),
     )
     return 0
   }
@@ -570,11 +586,7 @@ async function cmdList(ctx: Context): Promise<number> {
   console.log('')
   for (const task of tasks) {
     const state = task.enabled ? 'on ' : 'off'
-    const when = !task.enabled
-      ? 'paused'
-      : task.fireOnce
-        ? (formatScheduledRunLabel(task.scheduledAt ?? 0) ?? '')
-        : (formatNextRunLabel(task.cron ?? '') ?? 'manual only')
+    const when = taskTiming(task)
     console.log(`${BULLET}${task.id}  ${state}  ${task.name.padEnd(40)} ${when}`)
   }
   console.log('')
@@ -651,6 +663,7 @@ async function cmdRuns(ctx: Context): Promise<number> {
             await main('show', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
             return ctx.ui.select('Run actions', [
               { value: ':exit', label: 'Back to recent runs' },
+              { value: 'review', label: 'Review changes' },
               { value: 'refresh', label: 'Refresh conversation' },
               { value: 'resume', label: 'Continue in the native agent' },
               { value: 'cancel', label: 'Stop run' },
@@ -661,6 +674,8 @@ async function cmdRuns(ctx: Context): Promise<number> {
               await main('cancel', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
             if (action === 'resume')
               await main('resume', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
+            if (action === 'review')
+              await main('review', { ...ctx, flags: { ...ctx.flags, rest: [id] } })
           },
         )
       },
@@ -678,6 +693,163 @@ async function cmdRuns(ctx: Context): Promise<number> {
   }
   console.log('')
   return 0
+}
+
+type ShipResult = {
+  commits: { message: string; sha: string }[]
+  branch: string
+  url: string
+  planFallbackReason?: string
+}
+
+/** One git write from Review. Confirms outward-facing and destructive steps first. */
+async function reviewWrite(
+  ctx: Context,
+  runId: string,
+  action: ReviewWrite,
+  view: ReviewView,
+): Promise<ReviewNotice> {
+  const done = (text: string): ReviewNotice => {
+    ctx.ui.info(text)
+    return { text, tone: 'ok' }
+  }
+  const files = `${view.files.length} changed file${view.files.length === 1 ? '' : 's'}`
+  if (action === 'commit') {
+    const message = await ctx.ui.text('Commit message', '')
+    ctx.ui.progress('Committing')
+    const result = (await ctx.client.call('git.commitChanges', { runId, message })) as {
+      sha: string
+    }
+    return done(`Committed ${result.sha}: ${message}`)
+  }
+  if (action === 'push') {
+    if (!(await ctx.ui.confirm(`Push ${view.branch.split(' ')[0]} to origin?`)))
+      return { text: 'Push cancelled.', tone: 'info' }
+    ctx.ui.progress('Pushing')
+    const result = (await ctx.client.call('git.pushChanges', { runId })) as { branch: string }
+    return done(`Pushed ${result.branch}.`)
+  }
+  if (action === 'discard') {
+    if (!(await ctx.ui.confirm(`Discard all ${files}? This cannot be undone.`, false)))
+      return { text: 'Nothing discarded.', tone: 'info' }
+    ctx.ui.progress('Discarding changes')
+    await ctx.client.call('git.discardChanges', { runId })
+    return done(`Discarded ${files} from “${view.title}”.`)
+  }
+  const mode = await ctx.ui.select('Open a pull request', [
+    {
+      value: 'plan',
+      label: 'Commit, push and open the pull request',
+      hint: 'The run’s agent groups the changes into conventional commits and writes the PR.',
+    },
+    {
+      value: 'single',
+      label: 'Same, as one commit',
+      hint: 'Faster: skips the agent and commits everything together.',
+    },
+    { value: 'cancel', label: 'Cancel' },
+  ])
+  if (mode === 'cancel') return { text: 'No pull request opened.', tone: 'info' }
+  ctx.ui.progress('Opening pull request')
+  const result = (await ctx.client.call('git.shipRun', {
+    runId,
+    skipPlan: mode === 'single',
+  })) as ShipResult
+  const count = result.commits.length
+  return done(
+    `${count ? `${count} commit${count === 1 ? '' : 's'} pushed to ${result.branch}` : `Pushed ${result.branch}`}, pull request opened: ${result.url}${result.planFallbackReason ? ` (one commit: ${result.planFallbackReason})` : ''}`,
+  )
+}
+
+/** Where a run worked, what it changed, each file's diff, and the git writes the web offers. */
+async function cmdReview(ctx: Context): Promise<number> {
+  let id = ctx.flags.rest[0]
+  let run = id ? ((await ctx.client.call('runs.get', { id })) as RunRowView | null) : null
+  if (!run && ctx.ui.interactive && !ctx.flags.json) {
+    if (id) ctx.ui.info(`Run not found: ${id}`)
+    const runs = (await listOf<RunRowView>(ctx.client, 'runs.list', { limit: 30 })).filter(
+      (row) => row.status !== 'queued',
+    )
+    if (!runs.length) {
+      ctx.ui.done('No runs to review yet. Start one with openrun run.')
+      return 0
+    }
+    id = await ctx.ui.select(
+      'Whose changes would you like to review?',
+      runs.map((row) => ({
+        value: row.id,
+        label: row.taskName || row.id,
+        hint: `${row.status} · ${row.cwd ?? row.id}`,
+      })),
+    )
+    run = runs.find((row) => row.id === id) ?? null
+  }
+  if (!id || !run) throw new Error(id ? `Run not found: ${id}` : 'Usage: openrun review <run-id>')
+  const runId = id
+
+  if (!ctx.ui.interactive || ctx.flags.json) {
+    const workspace = (await ctx.client.call('runs.getWorkspace', {
+      runId,
+    })) as RunWorkspaceView | null
+    if (ctx.flags.json) {
+      console.log(JSON.stringify({ run, workspace }, null, 2))
+      return 0
+    }
+    const view = reviewView({ run, workspace })
+    console.log(`\n${view.title}\n`)
+    console.log(field('Run', run.id))
+    console.log(field('Status', view.status))
+    console.log(field('Directory', run.cwd || '—'))
+    console.log(field('Branch', view.branch))
+    console.log(field('Changes', view.summary))
+    if (view.files.length) console.log('')
+    for (const file of view.files)
+      console.log(
+        `${BULLET}${statusMark(file.status)}  ${file.oldPath ? `${file.oldPath} → ` : ''}${file.path}  ${file.binary ? 'binary' : `+${file.additions} −${file.deletions}`}`,
+      )
+    for (const file of view.files) {
+      const { diff } = (await ctx.client.call('git.getFileDiff', { runId, path: file.path })) as {
+        diff: string
+      }
+      if (diff.trim()) console.log(`\n${diff.trimEnd()}`)
+    }
+    console.log('')
+    return 0
+  }
+
+  let notice: ReviewNotice | undefined
+  try {
+    for (;;) {
+      ctx.ui.progress('Reading changes')
+      const [fresh, workspace, pullRequest] = await Promise.all([
+        ctx.client.call('runs.get', { id: runId }) as Promise<RunRowView | null>,
+        ctx.client.call('runs.getWorkspace', { runId }) as Promise<RunWorkspaceView | null>,
+        // `gh` may be missing or signed out; the rest of Review still works.
+        (
+          ctx.client.call('runs.getPullRequest', { runId }) as Promise<ReviewPullRequest | null>
+        ).catch(() => null),
+      ])
+      const view = reviewView({ run: fresh ?? run, workspace, pullRequest, notice })
+      notice = undefined
+      const action = await ctx.ui.review(view, async (path, whole) => {
+        const result = (await ctx.client.call('git.getFileDiff', { runId, path, whole })) as {
+          diff: string
+        }
+        return result.diff
+      })
+      if (action === 'back') return 0
+      if (action === 'refresh') continue
+      try {
+        notice = await reviewWrite(ctx, runId, action, view)
+      } catch (error) {
+        if (error instanceof Back || error instanceof Cancelled) continue
+        if (error instanceof CommandRequest || error instanceof Quit) throw error
+        notice = { text: explain(error, ctx.url), tone: 'error' }
+      }
+    }
+  } finally {
+    ctx.ui.endReview()
+  }
 }
 
 /** Look up the automation a one-word argument names, then act on it. */
@@ -939,6 +1111,8 @@ async function main(command: string, ctx: Context): Promise<number> {
       else printConversation(run, conversation as ConversationView | null)
       return 0
     }
+    case 'review':
+      return cmdReview(ctx)
     case 'api': {
       let [id, payload] = ctx.flags.rest
       const operations = OPERATIONS.filter((op) => op.clients.includes('desktop'))

@@ -7,10 +7,11 @@ import {
   requestAction,
   resolveNativeModel,
   scheduleFromText,
+  splitScheduledTask,
   textFromSpan,
   type NativeCatalog,
 } from './natural.ts'
-import { nativeArgs } from './native.ts'
+import { completeNativeIntent, nativeArgs } from './native.ts'
 import { readCliArgs, readCliLine } from './args.ts'
 import { CLAUDE_MODELS, CODEX_MODELS } from '@openrun/domain/runtimes/models'
 
@@ -585,4 +586,88 @@ test('native resume uses CLI effort values and does not repeat prompt-injected e
     '--model',
     'claude-opus-5',
   ])
+})
+
+test('a lone model after a timed task selects it without interpretation', () => {
+  const now = new Date(2026, 8, 22, 14, 0)
+  for (const model of ['heiku', 'haiku', 'Haiku']) {
+    const result = parseLocalRequest(
+      [`create new task foo.html contents "test" in 10 seconds ${model}`],
+      catalogs,
+      'auto',
+      now,
+    )
+    assert.equal(result?.action, 'schedule', model)
+    assert.equal(result.intent.prompt, 'create new task foo.html contents "test"')
+    assert.equal(result.intent.runtimeHint, 'claude')
+    assert.equal(result.intent.modelHint, 'claude-haiku-4-5')
+    assert.equal(result.scheduleText, 'in 10 seconds')
+    assert.deepEqual(result.clarify, [])
+  }
+  for (const request of ['write a haiku', 'explain haiku', 'create a poem about haiku'])
+    assert.equal(parseLocalAgent([request], catalogs).selection, undefined, request)
+})
+
+test('an interpreted task splits its stated time locally, even without a leading verb', () => {
+  const now = new Date(2026, 8, 22, 14, 0)
+  const split = splitScheduledTask('foo.html contents "test" in 10 seconds', now)
+  assert.equal(split?.prompt, 'foo.html contents "test"')
+  assert.equal(split.scheduleText, 'in 10 seconds')
+  assert.equal(split.schedule.kind, 'once')
+  assert.equal(splitScheduledTask('in 10 minutes review the diff', now)?.prompt, 'review the diff')
+  assert.equal(splitScheduledTask('foo.html contents "test"', now), undefined)
+})
+
+test('known values are used without asking, so the request submits on the first Enter', async () => {
+  const blank = parseLocalRequest(['create a file sonnet low'], catalogs, 'auto')!
+  const ui = {
+    interactive: true,
+    select: async (message: string) => assert.fail(`asked: ${message}`),
+    text: async (message: string) => assert.fail(`asked: ${message}`),
+  }
+  const result = await completeNativeIntent(
+    {
+      interpreted: {
+        action: 'schedule',
+        intent: { ...blank.intent, prompt: 'create foo.html', schedule: { kind: 'now' } },
+        // Ambiguous spans mark both fields even when each value is usable.
+        clarify: ['prompt', 'schedule', 'effort'],
+        scheduleText: 'in 10 minutes',
+      },
+      available: catalogs,
+      saved: undefined,
+      explicit: {},
+      hasExplicitEffort: true,
+    },
+    ui,
+  )
+  assert.equal(result.action, 'schedule')
+  assert.equal(result.intent.prompt, 'create foo.html')
+  assert.equal(result.intent.schedule.kind, 'once')
+  assert.equal(result.intent.modelHint, 'claude-sonnet-5')
+  assert.equal(result.intent.effortHint, 'low')
+
+  const asked: string[] = []
+  await completeNativeIntent(
+    {
+      interpreted: {
+        action: 'schedule',
+        intent: { ...blank.intent, prompt: 'create foo.html', schedule: { kind: 'now' } },
+        clarify: ['schedule'],
+        scheduleText: 'whenever',
+      },
+      available: catalogs,
+      saved: undefined,
+      explicit: {},
+      hasExplicitEffort: true,
+    },
+    {
+      ...ui,
+      text: async (message: string) => {
+        asked.push(message)
+        return 'in 10 minutes'
+      },
+    },
+  )
+  assert.deepEqual(asked, ['When should it run?'], 'an unreadable time is still asked for')
 })

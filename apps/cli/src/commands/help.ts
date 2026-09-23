@@ -108,6 +108,12 @@ List recent runs (default: 15).
 
 Read a run's status, prompt and conversation. Add --json for the full record.
 Omit the ID to choose from recent runs.`,
+  review: `openrun review [run-id]
+
+See where a run worked and what it changed: the directory, branch, each changed
+file and its diff. In the terminal interface you can commit, push, open a pull
+request or discard the changes. Scripts get the file list and diffs; add --json
+for the workspace record. Omit the ID to choose from recent runs.`,
   cancel: `openrun cancel [run-id]
 
 Stop an active run. Omit the ID to choose a run, then confirm.`,
@@ -198,6 +204,7 @@ Commands
   automations          list and manage automations (alias: ls)
   runs                 list recent runs
   show / cancel        inspect or cancel a run
+  review               see a run's changed files and diffs; commit or open a PR
   now / enable / disable / rm   manage an automation by name or ID
   runtimes / projects  see available CLIs and repositories
   integrations         connect providers and configure event triggers
@@ -216,12 +223,14 @@ input; Enter again submits it. Ctrl+A selects all; Ctrl+C copies selected text a
 Ctrl+V pastes. Terminal Copy/Paste shortcuts also work.
 Esc or Ctrl+C without a selection clears the input. Esc on an empty input restores
 the previous field or menu; type quit or press Ctrl+C twice to quit.
-The chat timeline keeps your requests, results and run activity in order, including
-when you return from a native agent. Transcripts are saved in ~/.openrun/cli-sessions/.
+The left panel keeps your requests and results; the right Activity panel shows
+each task once, updating its status as it is scheduled, runs and finishes. Click a
+run in Activity, or select it with Shift+Tab and Enter, to review its changes.
+Narrow terminals stack the panels. Transcripts are saved in ~/.openrun/cli-sessions/.
 The input stays available while a request is being prepared; further requests queue
-in order. Live schedules, active runs, runs today and enabled integrations stay below
-it. Shift+Tab focuses the timeline; PageUp/PageDown scroll it and Shift+PageUp/PageDown
-scroll the pending panel. Automatic native launches use Codex --yolo and Claude Code
+in order. Inline counts below it show schedules, runs today, active runs and integrations.
+Shift+Tab moves focus from the input to Activity, then the chat; PageUp/PageDown scroll the chat and Shift+PageUp/PageDown scroll
+Activity. Automatic native launches use Codex --yolo and Claude Code
 --dangerously-skip-permissions, allowing commands without approval prompts.
 Running work continues
 after you leave. The interface uses Bun 1.3+ or Node.js 26.4+ automatically;

@@ -20,12 +20,20 @@ export function getDashboard() {
       .prepare("SELECT COUNT(*) AS n FROM runs WHERE startedAt >= ? AND status = 'success'")
       .get(dayAgo) as { n: number }
   ).n
-  // The CLI needs every active run, even when newer finished runs fill the recent list.
+  // Include task identity and run settings for the CLI's live activity rows.
   const activeRuns = db
     .prepare(
-      "SELECT id, taskName, status FROM runs WHERE status = 'running' ORDER BY startedAt ASC",
+      "SELECT id, taskId, taskName, status, startedAt, model, effort FROM runs WHERE status = 'running' ORDER BY startedAt ASC",
     )
-    .all() as { id: string; taskName: string; status: string }[]
+    .all() as {
+    id: string
+    taskId: string | null
+    taskName: string
+    status: string
+    startedAt: number
+    model: string
+    effort: string
+  }[]
   const running = activeRuns.length
 
   const upcoming = scheduled
@@ -34,6 +42,21 @@ export function getDashboard() {
     .slice(0, 6)
 
   const recentRuns = listRuns({ limit: 8 })
+  const runIds = [...new Set([...activeRuns, ...recentRuns].map((run) => run.id))]
+  const prompts = new Map(
+    runIds.length
+      ? (
+          db
+            .prepare(
+              `SELECT r.id, (SELECT content FROM messages
+                 WHERE runId = r.id AND role = 'user'
+                 ORDER BY createdAt ASC LIMIT 1) AS prompt
+               FROM runs r WHERE r.id IN (${runIds.map(() => '?').join(',')})`,
+            )
+            .all(...runIds) as { id: string; prompt: string | null }[]
+        ).map((run) => [run.id, run.prompt ?? ''])
+      : [],
+  )
 
   // Runs that finished today and are waiting on a human — the queue the
   // dashboard should actually be pointing at.
@@ -59,8 +82,8 @@ export function getDashboard() {
       queued: tasks.reduce((n, t) => n + t.queuedCount, 0),
     },
     upcoming,
-    recentRuns,
-    activeRuns,
+    recentRuns: recentRuns.map((run) => ({ ...run, prompt: prompts.get(run.id) ?? '' })),
+    activeRuns: activeRuns.map((run) => ({ ...run, prompt: prompts.get(run.id) ?? '' })),
     pending: listPendingRuns(),
   }
 }
