@@ -47,6 +47,7 @@ pnpm ship "feat(x): y" # branch off main, commit, push, open the PR
 pnpm release:plan    # read-only: what would the next release be?
 pnpm release:prepare # write the version + changelog onto release/vX.Y.Z (--dry-run to rehearse)
 pnpm release:publish # tag HEAD and create the GitHub Release (CI runs this)
+pnpm release:cli:plan # read-only: the CLI's own next npm release (cli-vX.Y.Z)
 ```
 
 `pnpm test` runs `node --experimental-strip-types --test` across `apps/`, `packages/` and `scripts/` —
@@ -249,9 +250,10 @@ open a second EventSource in a hook.
 | Bind address, access token, "who may call this" | `packages/domain/src/security/serverAccess.ts` (rules) · `packages/runtime/src/security/accessToken.ts` (values + enforcement) · `apps/web/src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
 | Secrets at rest (local DB) | `packages/runtime/src/security/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
 | Open-core boundary (what is free vs. commercial) | `packages/domain/src/cloud/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
-| Release pipeline: version maths, cadence, notes | `scripts/release/` (`semver.ts`, `conventional.ts`, `plan.ts`, `cadence.ts`, `notes.ts`) — all pure, all tested; IO in `scripts/release/index.ts`; runbook in `RELEASING.md` |
+| Release pipeline: version maths, cadence, notes | `scripts/release/` (`semver.ts`, `conventional.ts`, `plan.ts`, `cadence.ts`, `notes.ts`) — all pure, all tested; IO in `scripts/release/index.ts` over `io.ts`; runbook in `RELEASING.md` |
 | Why CI rejected a PR title, or a missing changelog entry | `scripts/release/conventional.ts` (`validateCommitTitle`) → `scripts/check-title.ts`; `scripts/check-changelog.ts`; the `pr-title` workflow and the `changelog` job in `ci.yml` |
 | Cutting a release, or why one did not happen | `RELEASING.md`; `release.cadence` in `package.json`; `.github/workflows/release-prepare.yml` + `release-publish.yml` |
+| Releasing the CLI to npm (independent of the app) | `RELEASING.md` "Releasing the CLI"; the `release` field in `apps/cli/package.json` (name, tag prefix, bundled paths) → `scripts/release/cli.ts` (pure) → `scripts/release/cliRelease.ts` (IO) → `scripts/package-cli.ts`; published by `.github/workflows/release-cli.yml` on a `cli-v*` tag |
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |
 | Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `apps/web/src/components/ui.tsx` |
 | Design tokens | `apps/web/src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |

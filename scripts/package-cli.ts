@@ -1,15 +1,19 @@
-/** Build the npm CLI package from the same source and version as the web app. */
+/** Build the npm CLI package. Its name, version and bundled workspaces come from apps/cli/package.json. */
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { createRequire } from 'node:module'
+import { cliWorkspaces, readCliReleaseConfig } from './release/cli.ts'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const name = '@dennisadriaans/openrun'
+const cli = JSON.parse(readFileSync(join(root, 'apps/cli/package.json'), 'utf8')) as {
+  version: string
+}
+const config = readCliReleaseConfig(cli)
+const name = config.package
 
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
-  version: string
   description: string
   homepage: string
   repository: { type: string; url: string }
@@ -20,13 +24,7 @@ const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as
   devDependencies: Record<string, string>
 }
 const versions = { ...manifest.dependencies, ...manifest.devDependencies }
-for (const workspace of [
-  'apps/cli',
-  'apps/worker',
-  'packages/runtime',
-  'packages/domain',
-  'packages/contracts',
-]) {
+for (const workspace of cliWorkspaces(config)) {
   const pkg = JSON.parse(readFileSync(join(root, workspace, 'package.json'), 'utf8'))
   Object.assign(versions, pkg.dependencies, pkg.devDependencies)
 }
@@ -91,7 +89,7 @@ writeFileSync(
   `${JSON.stringify(
     {
       name,
-      version: manifest.version,
+      version: cli.version,
       description: manifest.description,
       homepage: manifest.homepage,
       repository: manifest.repository,
@@ -116,5 +114,5 @@ writeFileSync(
   join(output, 'README.md'),
   readFileSync(join(root, 'npm', 'README.md'), 'utf8').replaceAll('NPM_PACKAGE_NAME', name),
 )
-console.log(`Prepared ${name}@${manifest.version} in ${output}`)
+console.log(`Prepared ${name}@${cli.version} in ${output}`)
 console.log(`Create the tarball: npm pack ${output}`)

@@ -10,63 +10,31 @@
 // a PR whose parent SHA freezes the release contents, and publishing runs in CI
 // against that exact tested commit. A laptop is never the release authority.
 
-import { execFileSync } from 'node:child_process'
-import {
-  appendFileSync,
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { parseCadence, isReleaseDue } from './cadence.ts'
 import { isReleaseCommitSubject } from './conventional.ts'
+import {
+  addSummary,
+  git,
+  gitQuiet,
+  ReleaseError,
+  remoteTagTarget,
+  ROOT,
+  run,
+  runLive,
+  setOutput,
+} from './io.ts'
 import { extractRelease, insertRelease, renderReleaseNotes, splitChangelog } from './notes.ts'
 import type { Fragment } from './notes.ts'
 import { planRelease, summariseCounts } from './plan.ts'
 import type { ReleasePlan } from './plan.ts'
 import { highestVersion, toTag } from './semver.ts'
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CHANGELOG = join(ROOT, 'CHANGELOG.md')
 const FRAGMENTS = join(ROOT, 'changelog.d')
 const PACKAGE = join(ROOT, 'package.json')
-
-class ReleaseError extends Error {}
-
-// ---------------------------------------------------------------- process IO
-
-function run(
-  command: string,
-  args: string[],
-  options: { allowFailure?: boolean; input?: string } = {},
-): string {
-  try {
-    return execFileSync(command, args, {
-      cwd: ROOT,
-      encoding: 'utf8',
-      input: options.input,
-      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      // A release changelog can exceed execFileSync's default 1 MiB capture.
-      maxBuffer: 32 * 1024 * 1024,
-    }).trim()
-  } catch (error) {
-    if (options.allowFailure) return ''
-    const detail = error instanceof Error ? error.message : String(error)
-    throw new ReleaseError(`\`${command} ${args.join(' ')}\` failed:\n${detail}`)
-  }
-}
-
-const git = (...args: string[]) => run('git', args)
-const gitQuiet = (...args: string[]) => run('git', args, { allowFailure: true })
-
-/** Streams a command's output rather than capturing it, for the verify gates. */
-function runLive(command: string, args: string[]): void {
-  execFileSync(command, args, { cwd: ROOT, stdio: 'inherit' })
-}
 
 // ------------------------------------------------------------------ repo state
 
@@ -90,12 +58,6 @@ function latestTag(): string | null {
 
 function tagExists(tag: string): boolean {
   return gitQuiet('tag', '--list', tag) === tag
-}
-
-function remoteTagTarget(tag: string): string | null {
-  const peeled = gitQuiet('ls-remote', '--tags', 'origin', `refs/tags/${tag}^{}`)
-  const direct = peeled || gitQuiet('ls-remote', '--tags', 'origin', `refs/tags/${tag}`)
-  return direct.split(/\s+/)[0] || null
 }
 
 function tagPublishedAt(tag: string | null): Date | null {
@@ -177,20 +139,6 @@ function resolvePlan(options: { allowMajor?: boolean } = {}): Resolved {
 }
 
 // --------------------------------------------------------------- GH plumbing
-
-/** Sets a GitHub Actions step output when running in CI; a no-op locally. */
-function setOutput(key: string, value: string): void {
-  const file = process.env.GITHUB_OUTPUT
-  if (!file) return
-  // A multi-line value needs a heredoc with a delimiter the value cannot contain.
-  const delimiter = `ghadelim_${Math.random().toString(36).slice(2)}`
-  appendFileSync(file, `${key}<<${delimiter}\n${value}\n${delimiter}\n`)
-}
-
-function addSummary(markdown: string): void {
-  const file = process.env.GITHUB_STEP_SUMMARY
-  if (file) appendFileSync(file, `${markdown}\n`)
-}
 
 /**
  * Commits the staged release files through GitHub's `createCommitOnBranch`
@@ -313,7 +261,7 @@ function commandPlan(argv: string[]): number {
 
 function verify(): void {
   console.log('\n→ Verifying (lint · typecheck · test · build)\n')
-  runLive('pnpm', ['exec', 'biome', 'ci', 'src', 'scripts'])
+  runLive('pnpm', ['exec', 'biome', 'ci', 'apps', 'packages', 'scripts'])
   runLive('pnpm', ['typecheck'])
   runLive('pnpm', ['test'])
   runLive('pnpm', ['build'])

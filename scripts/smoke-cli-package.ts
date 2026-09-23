@@ -5,9 +5,13 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { readCliReleaseConfig } from './release/cli.ts'
 
 const exec = promisify(execFile)
 const root = resolve(import.meta.dirname, '..')
+const { package: name } = readCliReleaseConfig(
+  JSON.parse(readFileSync(join(root, 'apps/cli/package.json'), 'utf8')),
+)
 const scratch = mkdtempSync(join(tmpdir(), 'openrun-package-'))
 const install = join(scratch, 'install')
 mkdirSync(install)
@@ -31,13 +35,17 @@ try {
     ],
     { cwd: scratch, maxBuffer: 4 * 1024 * 1024 },
   )
-  const installed = join(install, 'node_modules/@dennisadriaans/openrun')
+  const installed = join(install, 'node_modules', name)
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'))
   assert.ok(
     Object.keys(manifest.dependencies).every((name) => !name.startsWith('@openrun/')),
     'internal packages must be bundled',
   )
   assert.ok(!manifest.dependencies.react, 'the CLI must not install the web framework')
+  const version = spawnSync(process.execPath, [join(installed, 'bin/openrun.js'), '--version'], {
+    encoding: 'utf8',
+  })
+  assert.equal(version.stdout.trim(), manifest.version, version.stderr)
   const env = {
     ...process.env,
     OPENRUN_TEST_CLI_ENTRY: join(installed, 'bin/openrun.js'),

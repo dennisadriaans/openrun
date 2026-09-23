@@ -4,6 +4,20 @@
   "version": "0.3.0",
   "type": "module",
   "license": "AGPL-3.0-only",
+  "release": {
+    "package": "@dennisadriaans/openrun",
+    "tagPrefix": "cli-v",
+    "paths": [
+      "apps/cli",
+      "apps/worker",
+      "packages/contracts",
+      "packages/domain",
+      "packages/runtime",
+      "npm",
+      "scripts/package-cli.ts",
+      "package.json"
+    ]
+  },
   "dependencies": {
     "@openrun/contracts": "workspace:*",
     "@openrun/domain": "workspace:*",

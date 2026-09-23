@@ -133,35 +133,68 @@ Every step is safe to re-run.
 If a release lands broken, ship a `fix` and let the next release cut a patch.
 Never move a published tag.
 
-## Prepare the npm CLI package
+## Releasing the CLI
 
-The CLI is distributed as `@dennisadriaans/openrun` and installs the `openrun`
-command. The package includes compiled JavaScript for the CLI, background worker,
-and MCP helper, plus their runtime dependencies. The web app remains a separate
-source installation.
+The `openrun` command ships to npm as `@dennisadriaans/openrun` on its **own**
+track. It does not wait for an app release, and an app release does not publish
+it.
 
-From the release checkout, prepare the package and create its tarball:
+| | App | CLI |
+| --- | --- | --- |
+| Version | root `package.json` | `apps/cli/package.json` |
+| Tag | `vX.Y.Z` | `cli-vX.Y.Z` |
+| Notes | `CHANGELOG.md` (from `changelog.d/`) | `apps/cli/CHANGELOG.md` |
+| Release PR | `chore(release): vX.Y.Z` | `chore(release): cli-vX.Y.Z` |
+| Published by | `Release · publish` | `Release · CLI` (on the tag) |
 
-```bash
-pnpm cli:package
-npm pack ./dist/npm --pack-destination ./dist
-```
+`apps/cli/package.json` holds a `release` field — the npm name, the tag prefix,
+and the paths the package is built from. It is the one definition:
+`pnpm cli:package` bundles those workspaces, and the planner counts only commits
+that touch those paths, so a web-only `feat` never bumps the CLI. A test fails
+if the CLI starts bundling a workspace the list does not name.
 
-`dist/npm/package.json` takes its version from the app's `package.json`. Do not
-choose a separate CLI version. The package manifest contains no development or
-installation hooks; users need Node.js and npm, without pnpm or a web build.
-Source maps include the source of each bundled module.
+The version rules are the app's rules, applied to that filtered range: `feat`
+is minor, `fix`/`perf`/`revert` are patch, below 1.0 a breaking change is a
+minor, and a range with nothing releasable is no release. App and CLI release
+commits never count. Until the first `cli-v*` tag exists, the range starts at
+the app tag the last CLI was published from (`v0.3.0`).
 
-To publish an approved release artifact with an npm account that can publish
-under `@dennisadriaans`:
+| Command | What it does |
+| --- | --- |
+| `pnpm release:cli:plan` | Read-only. The CLI range, its commits and the next version (`--json` for tools) |
+| `pnpm release:cli:prepare` | Write the version and a `apps/cli/CHANGELOG.md` section. No git; `--version=`, `--notes-file=`, `--dry-run` |
+| `pnpm release:cli:publish` | On the tagged commit only: package, smoke-test, `npm publish`, then the GitHub Release |
 
-```bash
-npm publish ./dist/npm --access public
-```
+The guided path is the private release tool (`pnpm release`, target *CLI*). By
+hand, it is the same four steps:
 
-The first publication may require `npm login` and npm's account authorization.
-Keep the root package `private: true`; publish only the generated package.
+1. `pnpm release:cli:prepare` on a `release/cli-vX.Y.Z` branch; commit as
+   `chore(release): cli-vX.Y.Z` and open the PR.
+2. Squash-merge it once CI is green.
+3. Tag the merged commit on `main`: `git tag -a cli-vX.Y.Z <sha> -m "Open Run CLI cli-vX.Y.Z"`
+   and push the tag.
+4. The tag starts **Release · CLI**, which verifies the commit, publishes to npm
+   with provenance, and creates a GitHub Release with the tarball attached. That
+   release is never marked *latest*, so the app's release stays the headline.
 
-`Release · publish` currently creates the tag and GitHub Release. It does not
-automatically publish to npm. Build and publish the CLI from that same release
-SHA, after the tag exists.
+Prereleases (`0.5.0-beta.1`) publish under the `next` dist-tag, so
+`npm install -g @dennisadriaans/openrun` keeps getting the stable version.
+
+`publish` refuses to run anywhere except on the commit its tag names, and it
+skips npm or the GitHub Release when either already exists. A failed publish is
+fixed by re-running the workflow (**Actions → Release · CLI → Run workflow**,
+with the tag). The same command works from a laptop logged in to npm, as a last
+resort: check out the tag, then `pnpm release:cli:publish`.
+
+### One-time npm setup
+
+Prefer npm trusted publishing, which needs no stored token: on npmjs.com, add a
+trusted publisher for `@dennisadriaans/openrun` with repository
+`dennisadriaans/openrun`, workflow `release-cli.yml`, and environment `npm`.
+Until that exists, an `NPM_TOKEN` repository secret (an automation token) works
+too. The `npm` environment is created on the first run; add required reviewers
+there to put a human in front of every publish.
+
+The root package stays `private: true`; only the generated `dist/npm` is
+published. `pnpm cli:package` then `pnpm cli:smoke` builds and verifies it
+locally without publishing anything.

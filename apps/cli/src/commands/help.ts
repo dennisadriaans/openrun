@@ -251,7 +251,7 @@ scripts and the worker need Node.js 22.12+.
 The worker starts automatically. Enter confirms sensible defaults; ↑↓ changes
 choices. Run now or choose a schedule, with a summary before starting work.
 Use --yes to skip prompts, --json for scripts, NO_COLOR=1 to disable colors.
-Use openrun <command> --help for examples.
+Use openrun <command> --help for examples. openrun --version prints the installed version.
 
 Global options${GLOBAL_OPTIONS}`
 }

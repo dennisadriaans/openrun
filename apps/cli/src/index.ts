@@ -1603,6 +1603,12 @@ async function entry(
 }
 
 const argv = process.argv.slice(2)
+if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')) {
+  // `../package.json` is apps/cli/package.json from source and the published
+  // manifest from bin/openrun.js, so both report the CLI's own version.
+  console.log(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
+  process.exit(0)
+}
 let interactive = interactiveTerminal() && !requestsUnattended(argv)
 try {
   if (readCliArgs(argv, interactive).help) interactive = false
