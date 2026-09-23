@@ -124,3 +124,41 @@ test('Enter accepts a suggestion without dispatching it and editing a busy draft
     terminal.close(undefined, false)
   }
 })
+
+test('the chat | Activity divider follows a drag and Ctrl+Shift+←/→ without touching the draft', {
+  skip: !canRender,
+}, async () => {
+  const core = await import('@opentui/core')
+  const { createTestRenderer } = await import('@opentui/core/testing')
+  const screen = await createTestRenderer({
+    width: 100,
+    height: 24,
+    exitOnCtrlC: false,
+    autoFocus: false,
+  })
+  const session = new CliSession(null)
+  const terminal = Reflect.construct(TerminalSurface, [
+    screen.renderer,
+    core,
+    session,
+  ]) as TerminalSurface
+  const divider = () => screen.renderer.root.findDescendantById('split-divider')!.screenX
+  try {
+    void terminal.homeRequest([]).catch(() => {})
+    await screen.renderOnce()
+    assert.equal(divider(), 50)
+    await screen.mockMouse.drag(50, 4, 70, 4)
+    await screen.renderOnce()
+    assert.equal(divider(), 70)
+    await screen.mockMouse.drag(70, 4, 0, 4)
+    await screen.renderOnce()
+    assert.equal(divider(), 25, 'chat keeps its minimum width')
+    await screen.mockInput.typeText('abc')
+    screen.mockInput.pressArrow('right', { ctrl: true, shift: true })
+    await screen.renderOnce()
+    assert.equal(divider(), 30)
+    assert.equal(session.draft, 'abc')
+  } finally {
+    terminal.close(undefined, false)
+  }
+})

@@ -38,7 +38,10 @@ import {
   changeSummary,
   fitLine,
   overviewTable,
+  splitAt,
+  splitColumns,
   statusIcon,
+  stepSplit,
 } from './layout.ts'
 import { scheduleTime } from './schedule.ts'
 import { colors, statusColor } from './palette.ts'
@@ -55,6 +58,7 @@ import {
 const navigationKeys = 'Esc back   Ctrl+C clear/quit'
 const loadingFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const activityKeys = '↑↓ choose   Enter details   Shift+Tab chat   Esc input'
+const dividerKeys = 'Drag to resize   Ctrl+Shift+←/→ resize'
 const reviewKeys =
   '↑↓ file   PgUp/PgDn scroll   s pull request   c commit   p push   d discard   w whole file   r refresh   Esc back'
 const reviewWriteKeys: Record<string, ReviewWrite> = {
@@ -86,6 +90,10 @@ export class TerminalSurface {
   private activityPanel: BoxRenderable
   /** The user can fold Activity away; chat then takes the full width. */
   private activityShown = true
+  /** Chat's share of a side-by-side row; the divider and Ctrl+Shift+←/→ move it. */
+  private split = 0.5
+  private divider: BoxRenderable
+  private draggingDivider = false
   private activityToggle: TextRenderable
   /** Chat cards whose status follows Activity; see `renderCards`. */
   private cards: {
@@ -236,10 +244,18 @@ export class TerminalSurface {
       minHeight: 0,
       flexDirection: 'row',
       marginBottom: 1,
+      // A drag starts on the divider but is captured by whatever cell it first
+      // crosses, so the row follows it: drag events bubble up to here.
+      onMouseDrag: (event) => {
+        if (!this.draggingDivider) return
+        this.setSplit(splitAt(event.x, this.panels.screenX, this.panels.width))
+      },
+      onMouseDragEnd: () => this.releaseDivider(),
+      onMouseUp: () => this.releaseDivider(),
     })
     this.chatPanel = new BoxRenderable(renderer, {
       id: 'chat-panel',
-      width: '50%',
+      width: '100%',
       height: '100%',
       minWidth: 0,
       minHeight: 0,
@@ -264,14 +280,38 @@ export class TerminalSurface {
     })
     this.chatPanel.add(this.detailScroll)
     this.panels.add(this.chatPanel)
+    // The line between chat and Activity is the handle, so it is its own renderable.
+    this.divider = new BoxRenderable(renderer, {
+      id: 'split-divider',
+      width: 1,
+      height: '100%',
+      flexShrink: 0,
+      border: ['left'],
+      borderColor: colors.border,
+      onMouseDown: (event) => {
+        if (event.button !== this.core.MouseButton.LEFT) return
+        event.preventDefault()
+        this.draggingDivider = true
+        this.divider.borderColor = colors.info
+      },
+      onMouseOver: () => {
+        this.divider.borderColor = colors.info
+        this.setFooter(dividerKeys)
+      },
+      onMouseOut: () => {
+        if (this.draggingDivider) return
+        this.divider.borderColor = colors.border
+        this.setFooter(this.activityCursor === undefined ? this.promptKeys : activityKeys)
+      },
+    })
+    this.panels.add(this.divider)
     this.activityPanel = new BoxRenderable(renderer, {
       id: 'activity-panel',
-      width: '50%',
+      width: '100%',
       height: '100%',
       minWidth: 0,
       minHeight: 0,
       flexDirection: 'column',
-      border: ['left'],
       borderColor: colors.border,
       paddingLeft: 1,
     })
@@ -469,17 +509,19 @@ export class TerminalSurface {
     const stacked = this.renderer.width < 72
     const reviewing = Boolean(this.reviewState)
     const split = this.activityShown && !reviewing
+    const columns = splitColumns(this.split, this.renderer.width - 2)
     this.chatPanel.visible = !reviewing
     this.activityPanel.visible = split
+    this.divider.visible = split && !stacked
     this.reviewPanel.visible = reviewing
     this.renderActivityToggle()
     this.panels.flexDirection = stacked ? 'column' : 'row'
-    this.chatPanel.width = stacked || !split ? '100%' : '50%'
+    this.chatPanel.width = stacked || !split ? '100%' : columns.chat
     this.chatPanel.height = stacked && split ? '60%' : '100%'
     this.chatPanel.paddingRight = stacked || !split ? 0 : 1
-    this.activityPanel.width = stacked ? '100%' : '50%'
+    this.activityPanel.width = stacked ? '100%' : columns.activity
     this.activityPanel.height = stacked ? '40%' : '100%'
-    this.activityPanel.border = stacked ? ['top'] : ['left']
+    this.activityPanel.border = stacked ? ['top'] : false
     this.activityPanel.paddingLeft = stacked ? 0 : 1
     this.reviewBody.flexDirection = stacked ? 'column' : 'row'
     this.reviewFiles.width = stacked ? '100%' : '30%'
@@ -494,6 +536,30 @@ export class TerminalSurface {
     this.renderOverview()
     this.setFooter(this.promptKeys)
     this.renderCompletion()
+  }
+
+  private setSplit(ratio: number): void {
+    if (ratio === this.split) return
+    this.split = ratio
+    this.resize()
+    this.setFooter(dividerKeys)
+  }
+
+  private releaseDivider(): void {
+    if (!this.draggingDivider) return
+    this.draggingDivider = false
+    this.divider.borderColor = colors.border
+    this.setFooter(this.activityCursor === undefined ? this.promptKeys : activityKeys)
+  }
+
+  /** Ctrl+Shift+←/→ moves the divider; arrows alone and with Ctrl/Alt stay the input's. */
+  private splitKey(key: KeyEvent): boolean {
+    if (!key.ctrl || !key.shift || (key.name !== 'left' && key.name !== 'right')) return false
+    key.preventDefault()
+    key.stopPropagation()
+    if (this.divider.visible)
+      this.setSplit(stepSplit(this.split, this.renderer.width - 2, key.name === 'left' ? -1 : 1))
+    return true
   }
 
   private renderActivityToggle(): void {
@@ -718,11 +784,11 @@ export class TerminalSurface {
       else this.activityCursor = Math.min(this.activityCursor, runs.length - 1)
     }
     const chosen = this.activityCursor === undefined ? undefined : runs[this.activityCursor]
-    // Root padding, the panel's border and padding, the scrollbar and its gutter.
+    // Root padding, the panel's padding, the scrollbar and its gutter.
     const width =
       this.renderer.width < 72
         ? this.renderer.width - 4
-        : Math.floor((this.renderer.width - 2) / 2) - 4
+        : splitColumns(this.split, this.renderer.width - 2).activity - 3
     const columns = activityColumns(rows)
     const cells = rows.map((row) =>
       activityCells({ ...row, prompt: transcriptText(row.prompt) }, columns, width),
@@ -1009,6 +1075,7 @@ export class TerminalSurface {
       return
     }
     this.interruptedAt = 0
+    if (this.splitKey(key)) return
     if (this.reviewState?.resolve && this.reviewKey(key)) return
     if (this.activityCursor !== undefined && this.activityKey(key)) return
     this.setFooter(this.promptKeys)
