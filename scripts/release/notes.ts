@@ -28,6 +28,8 @@ export type NotesInput = {
   fragments: readonly Fragment[]
   /** Bullets rescued from a hand-maintained `## Unreleased` section. */
   carried?: readonly string[]
+  /** Hand-written markdown placed verbatim under the heading, above the bullets. */
+  summary?: string
   /** `https://github.com/owner/repo`, for PR and compare links. */
   repoUrl?: string
   /** Previous tag, for the compare link. Omitted on a first release. */
@@ -48,6 +50,9 @@ export function renderReleaseNotes(input: NotesInput): string {
   if (plan.breaking.length > 0) {
     lines.push(renderBreaking(plan), '')
   }
+
+  const summary = input.summary?.trim()
+  if (summary) lines.push(summary, '')
 
   const prose = [
     ...(input.carried ?? []).map((text) => text.trim()).filter(Boolean),

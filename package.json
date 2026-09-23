@@ -51,6 +51,9 @@
     "release:plan": "node --experimental-strip-types scripts/release/index.ts plan",
     "release:prepare": "node --experimental-strip-types scripts/release/index.ts prepare",
     "release:publish": "node --experimental-strip-types scripts/release/index.ts publish",
+    "release:cli:plan": "node --experimental-strip-types scripts/release/cliRelease.ts plan",
+    "release:cli:prepare": "node --experimental-strip-types scripts/release/cliRelease.ts prepare",
+    "release:cli:publish": "node --experimental-strip-types scripts/release/cliRelease.ts publish",
     "ship": "node --experimental-strip-types scripts/ship.ts",
     "architecture:check": "node --experimental-strip-types scripts/check-architecture.ts",
     "cli:smoke": "node --experimental-strip-types scripts/smoke-cli-package.ts"
