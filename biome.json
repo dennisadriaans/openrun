@@ -12,7 +12,7 @@
       "packages/**/*.ts",
       "scripts/**/*.ts",
       "!apps/web/src/routeTree.gen.ts",
-      "!apps/web/src/vendor/**"
+      "!apps/web/src/vendor"
     ]
   },
   "formatter": {
