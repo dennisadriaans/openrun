@@ -178,3 +178,30 @@ test('a clicked review leaves no chat trail, and finished runs report their chan
   })
   assert.deepEqual(session.activity[0]?.changes, { files: 1, additions: 3, deletions: 0 })
 })
+
+test('a chat card follows its task through Activity and keeps a transcript line', () => {
+  const session = new CliSession(null)
+  const card = {
+    status: 'Scheduled',
+    title: 'testabc.txt',
+    time: '10:24:08',
+    model: 'claude-sonnet-5',
+    effort: 'low',
+    taskId: 't',
+  }
+  session.card(card)
+  assert.equal(session.entries[0]?.card, card)
+  assert.equal(
+    session.entries[0]?.text,
+    'Scheduled testabc.txt · 10:24:08\nclaude-sonnet-5 · low effort',
+  )
+  assert.equal(session.activityFor(card), undefined)
+  session.updateOverview({ tasks: [{ id: 't', prompt: 'Create testabc.txt', when: '10:24:08' }] })
+  assert.equal(session.activityFor(card)?.status, 'Scheduled')
+  session.updateOverview({
+    tasks: [],
+    activeRuns: [{ id: 'r', taskId: 't', prompt: 'Create testabc.txt', when: 'Running' }],
+  })
+  assert.equal(session.activityFor(card)?.status, 'Running')
+  assert.equal(session.activityFor({ runId: 'r' })?.status, 'Running')
+})

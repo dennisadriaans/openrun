@@ -1,5 +1,6 @@
 import { stripVTControlCharacters } from 'node:util'
-import type { ActivityItem, HomeOverview, RunChanges } from '../session/session.ts'
+import type { ActivityItem, HomeOverview, RunChanges, StatusCard } from '../session/session.ts'
+import { relativeTime } from './schedule.ts'
 
 /** "2 files +12 −3", or "No file changes" — the same words in Activity and Review. */
 export function changeSummary(changes: RunChanges): string {
@@ -7,18 +8,73 @@ export function changeSummary(changes: RunChanges): string {
   return `${changes.files} file${changes.files === 1 ? '' : 's'} +${changes.additions} −${changes.deletions}`
 }
 
-/** One inline summary per activity item; the renderer wraps it to fit. */
-export function activityLine(item: ActivityItem): string {
+const clean = (value: string): string => value.replace(/\s+/g, ' ').trim()
+
+export type ActivityColumns = { status: number; time: number }
+export type ActivityCells = { status: string; time: string; prompt: string; changes: string }
+
+/** Shared column widths, so a list of one-line rows reads as a table. */
+export function activityColumns(items: ActivityItem[]): ActivityColumns {
+  const widest = (values: string[], cap: number) =>
+    Math.min(cap, Math.max(0, ...values.map((value) => cellWidth(clean(value)))))
+  return {
+    status: widest(
+      items.map((item) => item.status),
+      12,
+    ),
+    time: widest(
+      items.map((item) => item.time || '—'),
+      14,
+    ),
+  }
+}
+
+/**
+ * One terminal row. The prompt gives up space first; on a narrow panel the
+ * changes and then the time go, so the prompt never shrinks to nothing.
+ */
+export function activityCells(
+  item: ActivityItem,
+  columns: ActivityColumns,
+  width: number,
+): ActivityCells {
+  const room = 8
+  let changes = item.changes ? changeSummary(item.changes) : ''
+  let time = fitLine(clean(item.time || '—'), columns.time, true)
+  const status = fitLine(clean(item.status), columns.status, true)
+  const used = () =>
+    cellWidth(status) +
+    (time ? cellWidth(time) + 2 : 0) +
+    2 +
+    (changes ? cellWidth(changes) + 2 : 0)
+  if (width - used() < room) changes = ''
+  if (width - used() < room) time = ''
+  return { status, time, prompt: fitLine(clean(item.prompt), width - used()), changes }
+}
+
+/** A glyph that reads without color: done, failed, working, waiting. */
+export function statusIcon(status: string): string {
+  if (/\b(?:failed|error|blocked)\b/i.test(status)) return '✗'
+  if (/\b(?:cancelled|canceled)\b/i.test(status)) return '–'
+  if (/\b(?:queued|pending|paused)\b/i.test(status)) return '○'
+  if (/\b(?:running|preparing|starting)\b/i.test(status)) return '●'
+  return '✓'
+}
+
+/** "in 10 seconds · claude-sonnet-5 · low effort": the quiet line under a chat card. */
+export function cardDetail(card: StatusCard, status = card.status, now = Date.now()): string {
+  const waiting = /^scheduled$/i.test(status)
   return [
-    item.status,
-    `${item.time || '—'}${item.nextTime ? ` (next ${item.nextTime})` : ''}`,
-    item.model === undefined ? '—' : item.model || 'Default model',
-    item.effort === undefined ? '—' : `${item.effort || 'default'} effort`,
-    item.prompt,
-    ...(item.changes ? [changeSummary(item.changes)] : []),
-  ]
-    .map((value) => value.replace(/\s+/g, ' ').trim())
-    .join(' · ')
+    ...(waiting && card.at ? [relativeTime(card.at, now)] : []),
+    ...(card.repeats ? [card.repeats] : []),
+    card.model || 'default model',
+    ...(card.effort ? [`${card.effort} effort`] : []),
+  ].join(' · ')
+}
+
+/** The transcript form of a card, and what a one-shot command prints. */
+export function cardText(card: StatusCard): string {
+  return `${card.status} ${card.title}${card.time ? ` · ${card.time}` : ''}\n${cardDetail(card)}`
 }
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })

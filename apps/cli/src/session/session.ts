@@ -1,14 +1,31 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { openrunHome } from '@openrun/runtime/paths'
+import { cardText } from '../terminal/layout.ts'
 
+/** What a request started, shown under its prompt; the status follows Activity. */
+export type StatusCard = {
+  status: string
+  title: string
+  /** Clock time on the right: when a schedule fires, or when a run started. */
+  time?: string
+  /** A one-off schedule's fire time, so "in 10 seconds" stays current. */
+  at?: number
+  /** How a recurring schedule repeats, e.g. "every day". */
+  repeats?: string
+  model?: string
+  effort?: string
+  taskId?: string
+  runId?: string
+}
 export type TimelineEntry = {
   id: string
   at: number
   role: 'user' | 'assistant' | 'system'
   text: string
+  card?: StatusCard
 }
 export type PendingRequest = {
   id: string
@@ -53,6 +70,106 @@ export type HomeOverview = {
   error?: string
 }
 
+/** A transcript from an earlier CLI session, offered by /resume. */
+export type SavedSession = {
+  file: string
+  title: string
+  startedAt: number
+  updatedAt: number
+  /** Requests typed in that session, excluding slash commands. */
+  requests: number
+}
+
+const SESSION_LIMIT = 50
+
+export function sessionsDirectory(): string {
+  return join(openrunHome(), 'cli-sessions')
+}
+
+function newSessionFile(directory: string): string {
+  return join(directory, `${randomUUID()}.jsonl`)
+}
+
+/** Slash commands manage the session itself; they never name one. */
+export function isSlashCommand(text: string): boolean {
+  return /^\/[a-z][\w-]*$/i.test(text.trim())
+}
+
+function savedEntry(line: string): TimelineEntry | undefined {
+  try {
+    const value: unknown = JSON.parse(line)
+    if (!value || typeof value !== 'object') return undefined
+    const entry = value as Partial<TimelineEntry>
+    if (
+      typeof entry.id !== 'string' ||
+      typeof entry.at !== 'number' ||
+      !['user', 'assistant', 'system'].includes(String(entry.role)) ||
+      typeof entry.text !== 'string'
+    )
+      return undefined
+    const card = entry.card && typeof entry.card === 'object' ? entry.card : undefined
+    return {
+      id: entry.id,
+      at: entry.at,
+      role: entry.role as TimelineEntry['role'],
+      text: entry.text,
+      ...(card && typeof card.status === 'string' && typeof card.title === 'string' && { card }),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** Read one transcript, skipping lines a crash or an older CLI left unreadable. */
+export function readSessionFile(file: string): TimelineEntry[] {
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .flatMap((line) => {
+      const entry = line.trim() && savedEntry(line)
+      return entry ? [entry] : []
+    })
+}
+
+/** Earlier sessions, most recent first. Sessions without a typed request are skipped. */
+export function savedSessions(directory = sessionsDirectory(), exclude?: string | null): SavedSession[] {
+  let files: { file: string; modified: number }[]
+  try {
+    files = readdirSync(directory)
+      .filter((name) => name.endsWith('.jsonl'))
+      .map((name) => join(directory, name))
+      .filter((file) => !exclude || basename(file) !== basename(exclude))
+      .flatMap((file) => {
+        try {
+          return [{ file, modified: statSync(file).mtimeMs }]
+        } catch {
+          return []
+        }
+      })
+  } catch {
+    return []
+  }
+  const sessions: SavedSession[] = []
+  for (const { file } of files.sort((a, b) => b.modified - a.modified)) {
+    if (sessions.length >= SESSION_LIMIT) break
+    let entries: TimelineEntry[]
+    try {
+      entries = readSessionFile(file)
+    } catch {
+      continue
+    }
+    const requests = entries.filter((entry) => entry.role === 'user' && !isSlashCommand(entry.text))
+    if (!requests.length) continue
+    sessions.push({
+      file,
+      title: requests[0]!.text.split('\n')[0]!.trim(),
+      startedAt: entries[0]!.at,
+      updatedAt: entries.at(-1)!.at,
+      requests: requests.length,
+    })
+  }
+  return sessions.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 export function runStatusLabel(status: string): string {
   if (status === 'error') return 'Failed'
   return status.charAt(0).toUpperCase() + status.slice(1)
@@ -80,7 +197,9 @@ export function transcriptText(text: string): string {
 export class CliSession {
   readonly entries: TimelineEntry[] = []
   readonly pending: PendingRequest[] = []
-  readonly file: string | null
+  file: string | null
+  /** Bumped when the timeline is replaced rather than appended to. */
+  generation = 0
   overview: HomeOverview = {}
   draft = ''
   current?: PendingRequest
@@ -93,8 +212,36 @@ export class CliSession {
   private saveWarningShown = false
   private changesRequested = new Set<string>()
 
-  constructor(file: string | null = join(openrunHome(), 'cli-sessions', `${randomUUID()}.jsonl`)) {
+  constructor(file: string | null = newSessionFile(sessionsDirectory())) {
     this.file = file
+  }
+
+  /** Start over in a new transcript. The request that asked for it stays in flight. */
+  reset(): void {
+    this.file = this.file && newSessionFile(dirname(this.file))
+    this.replace([])
+  }
+
+  /** Continue an earlier transcript: show it, and append new entries to the same file. */
+  resume(file: string): void {
+    const entries = readSessionFile(file)
+    this.file = file
+    this.replace(entries)
+  }
+
+  private replace(entries: TimelineEntry[]): void {
+    this.entries.splice(0, this.entries.length, ...entries)
+    this.activityItems.clear()
+    this.runStates.clear()
+    this.changesRequested.clear()
+    this.openedAt = Date.now()
+    this.saveWarningShown = false
+    // Runs the earlier session started return to Activity once the worker reports them.
+    for (const { card } of entries) if (card?.runId) this.runStates.set(card.runId, card.status)
+    // The request that replaced the timeline must not add "Completed." to the new one.
+    this.responded = true
+    this.generation++
+    this.changed()
   }
 
   subscribe(listener: () => void): () => void {
@@ -106,10 +253,16 @@ export class CliSession {
     for (const listener of this.listeners) listener()
   }
 
-  log(role: TimelineEntry['role'], message: string): void {
+  log(role: TimelineEntry['role'], message: string, card?: StatusCard): void {
     const text = transcriptText(message).trim()
     if (!text) return
-    const entry = { id: randomUUID(), at: Date.now(), role, text }
+    const entry: TimelineEntry = {
+      id: randomUUID(),
+      at: Date.now(),
+      role,
+      text,
+      ...(card && { card }),
+    }
     this.entries.push(entry)
     if (role === 'assistant' && this.current) this.responded = true
     if (this.file) {
@@ -129,6 +282,10 @@ export class CliSession {
       }
     }
     this.changed()
+  }
+
+  card(card: StatusCard): void {
+    this.log('assistant', cardText(card), card)
   }
 
   enqueue(text: string, silent = false): void {
@@ -255,6 +412,15 @@ export class CliSession {
 
   get activity(): ActivityItem[] {
     return [...this.activityItems.values()]
+  }
+
+  /** The Activity item a chat card stands for, once the worker has reported it. */
+  activityFor(card: Pick<StatusCard, 'taskId' | 'runId'>): ActivityItem | undefined {
+    if (card.taskId) {
+      const task = this.activityItems.get(`task:${card.taskId}`)
+      if (task) return task
+    }
+    return card.runId ? this.activity.find((item) => item.runId === card.runId) : undefined
   }
 
   /** Finished runs whose changes have not been asked for yet; each is returned once. */

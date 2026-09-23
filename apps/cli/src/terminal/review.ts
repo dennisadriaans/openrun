@@ -9,6 +9,7 @@ import {
 } from '@openrun/domain/workspaces/gitActionGate'
 import { runStatusLabel } from '../session/session.ts'
 import { changeSummary } from './layout.ts'
+import { scheduleTime } from './schedule.ts'
 
 /** `runs.getWorkspace` as it arrives over IPC or HTTP. */
 export type ReviewFile = {
@@ -26,7 +27,15 @@ export type RunWorkspaceView = {
   gh: { installed: boolean; authenticated: boolean }
   baseBranch?: string
 }
-export type ReviewRun = { id: string; taskName?: string; status?: string; cwd?: string }
+export type ReviewRun = {
+  id: string
+  taskName?: string
+  status?: string
+  cwd?: string
+  model?: string
+  effort?: string
+  startedAt?: number
+}
 export type ReviewPullRequest = { number: number; url: string; state: string }
 
 export type ReviewAction = 'back' | 'refresh' | 'commit' | 'push' | 'ship' | 'discard'
@@ -37,6 +46,8 @@ export type ReviewView = {
   runId: string
   title: string
   status: string
+  /** "claude-sonnet-5 · low effort · started 10:24", what the run was asked to use. */
+  details: string
   directory: string
   branch: string
   summary: string
@@ -83,6 +94,11 @@ export function reviewView(input: {
     runId: run.id,
     title: run.taskName?.trim() || run.id,
     status: run.status ? runStatusLabel(run.status) : 'Unknown',
+    details: [
+      run.model || 'default model',
+      `${run.effort || 'default'} effort`,
+      ...(run.startedAt ? [`started ${scheduleTime(run.startedAt)}`] : []),
+    ].join(' · '),
     directory: displayPath(run.cwd ?? ''),
     files,
     ...(input.pullRequest ? { pullRequest: input.pullRequest } : {}),

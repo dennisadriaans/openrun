@@ -36,6 +36,12 @@ test('a review names where the run worked and what it changed', () => {
   assert.equal(view.status, 'Success')
   assert.equal(view.branch, 'main @ abc1234')
   assert.equal(view.summary, '1 file +3 −0')
+  assert.equal(view.details, 'default model · default effort')
+  assert.equal(
+    reviewView({ run: { id: 'r2', model: 'claude-sonnet-5', effort: 'low' }, workspace: null })
+      .details,
+    'claude-sonnet-5 · low effort',
+  )
   assert.deepEqual(view.blocked, { commit: null, discard: null, push: null, ship: null })
   assert.equal(statusMark(view.files[0]!.status), 'A')
   assert.equal(displayPath('/home/me/dev/site', '/home/me'), '~/dev/site')

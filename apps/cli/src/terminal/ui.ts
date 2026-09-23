@@ -9,7 +9,9 @@ import {
   type HomeOverview,
   type OverviewRow,
   type RunChanges,
+  type StatusCard,
 } from '../session/session.ts'
+import { cardText } from './layout.ts'
 import type { ReviewAction, ReviewView } from './review.ts'
 
 export type Choice = { value: string; label: string; hint?: string }
@@ -324,6 +326,12 @@ export class CliUi {
     if (!this.session) this.exitMessage = message
     if (this.terminal) this.terminal.info(message)
     else console.error(message)
+  }
+
+  /** What a request started, attached under its prompt in the chat. */
+  statusCard(card: StatusCard): void {
+    if (this.terminal) this.transcript.card(card)
+    else console.error(cardText(card))
   }
 
   status(message: string): void {

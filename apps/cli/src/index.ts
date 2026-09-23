@@ -24,8 +24,8 @@ import {
   Quit,
 } from './terminal/ui.ts'
 import { watchHome, taskTiming, type TaskRowView } from './terminal/home.ts'
-import { scheduleTime, scheduleTiming } from './terminal/schedule.ts'
-import { activityLine } from './terminal/layout.ts'
+import { repeatLabel, scheduleTime, scheduleTiming } from './terminal/schedule.ts'
+import { cardText } from './terminal/layout.ts'
 import {
   reviewView,
   statusMark,
@@ -443,8 +443,18 @@ async function cmdSchedule(ctx: Context, intent: CliIntent): Promise<number> {
 
   if (ctx.ui.interactive) {
     ctx.ui.session = true
-    // Activity owns the status, time and model; chat only confirms where to look.
-    ctx.ui.done('Scheduled. Follow it in Activity.')
+    // The card sits under the prompt that asked for it and follows the task's status.
+    ctx.ui.statusCard({
+      status: summary.status,
+      title: saved.name || name,
+      time: summary.time,
+      ...(intent.schedule.kind === 'once'
+        ? { at: intent.schedule.at }
+        : { repeats: repeatLabel(intent.schedule.cron) }),
+      model: summary.model,
+      effort: summary.effort,
+      taskId: saved.id,
+    })
     return 0
   }
   printIntent('Scheduled', saved?.name ?? name, intent, runtime, workspace, prompt)
@@ -517,12 +527,17 @@ async function cmdRun(ctx: Context, intent: CliIntent): Promise<number> {
     return 0
   }
   if (ctx.ui.interactive) {
-    // A one-shot run exits to the shell, where there is no Activity panel to follow.
-    ctx.ui.done(
-      ctx.ui.session
-        ? 'Started. Follow it in Activity; select it there to review its changes.'
-        : activityLine(summary),
-    )
+    const card = {
+      status: summary.status,
+      title: deriveTaskName(intent.prompt),
+      time: summary.time,
+      model: summary.model,
+      effort: summary.effort,
+      ...(started?.runId ? { runId: started.runId } : {}),
+    }
+    // A one-shot run exits to the shell, where there is no chat to keep the card in.
+    if (ctx.ui.session) ctx.ui.statusCard(card)
+    else ctx.ui.done(cardText(card))
     return 0
   }
   console.log(`\nStarted in ${workspaceLabel(workspace)} on ${runtimeLabel(runtime)}`)
@@ -600,6 +615,8 @@ type RunRowView = {
   startedAt?: number
   createdAt?: number
   cwd?: string
+  model?: string
+  effort?: string
   error?: string
 }
 
@@ -799,6 +816,7 @@ async function cmdReview(ctx: Context): Promise<number> {
     console.log(`\n${view.title}\n`)
     console.log(field('Run', run.id))
     console.log(field('Status', view.status))
+    console.log(field('Model', view.details))
     console.log(field('Directory', run.cwd || '—'))
     console.log(field('Branch', view.branch))
     console.log(field('Changes', view.summary))

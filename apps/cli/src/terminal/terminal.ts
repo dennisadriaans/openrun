@@ -23,8 +23,23 @@ import {
   type Choice,
 } from './ui.ts'
 import { RequestPreview } from '../commands/preview.ts'
-import { CliSession, transcriptText, type ActivityItem } from '../session/session.ts'
-import { activityLine, cellWidth, changeSummary, fitLine, overviewTable } from './layout.ts'
+import {
+  CliSession,
+  transcriptText,
+  type ActivityItem,
+  type StatusCard,
+  type TimelineEntry,
+} from '../session/session.ts'
+import {
+  activityCells,
+  activityColumns,
+  cardDetail,
+  cellWidth,
+  changeSummary,
+  fitLine,
+  overviewTable,
+  statusIcon,
+} from './layout.ts'
 import { scheduleTime } from './schedule.ts'
 import { colors, statusColor } from './palette.ts'
 import {
@@ -39,7 +54,7 @@ import {
 
 const navigationKeys = 'Esc back   Ctrl+C clear/quit'
 const loadingFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-const activityKeys = '↑↓ choose   Enter review changes   Shift+Tab chat   Esc input'
+const activityKeys = '↑↓ choose   Enter details   Shift+Tab chat   Esc input'
 const reviewKeys =
   '↑↓ file   PgUp/PgDn scroll   s pull request   c commit   p push   d discard   w whole file   r refresh   Esc back'
 const reviewWriteKeys: Record<string, ReviewWrite> = {
@@ -69,6 +84,19 @@ export class TerminalSurface {
   private panels: BoxRenderable
   private chatPanel: BoxRenderable
   private activityPanel: BoxRenderable
+  /** The user can fold Activity away; chat then takes the full width. */
+  private activityShown = true
+  private activityToggle: TextRenderable
+  /** Chat cards whose status follows Activity; see `renderCards`. */
+  private cards: {
+    card: StatusCard
+    box: BoxRenderable
+    icon: TextRenderable
+    title: TextRenderable
+    detail: TextRenderable
+  }[] = []
+  private cardTimer?: ReturnType<typeof setInterval>
+  private lastBubble?: { box: BoxRenderable; role: TimelineEntry['role'] }
   private detailScroll: ScrollBoxRenderable
   private scheduledScroll: ScrollBoxRenderable
   private overview: TextRenderable
@@ -102,6 +130,7 @@ export class TerminalSurface {
   private session: CliSession
   private unsubscribe: () => void
   private renderedEntries = 0
+  private renderedGeneration = 0
   private completion?: string
   private history: readonly string[] = []
   private homeAction?: (command: string) => void
@@ -181,6 +210,22 @@ export class TerminalSurface {
       selectable: false,
     })
     header.add(this.status)
+    this.activityToggle = new TextRenderable(renderer, {
+      id: 'activity-toggle',
+      content: '',
+      height: 1,
+      flexShrink: 0,
+      marginLeft: 2,
+      selectable: false,
+      onMouseDown: (event) => {
+        if (event.button === this.core.MouseButton.LEFT) this.toggleActivity()
+      },
+      onMouseOver: () =>
+        this.setFooter(`Click to ${this.activityShown ? 'hide' : 'show'} Activity`),
+      onMouseOut: () =>
+        this.setFooter(this.activityCursor === undefined ? this.promptKeys : activityKeys),
+    })
+    header.add(this.activityToggle)
     root.add(header)
     this.panels = new BoxRenderable(renderer, {
       id: 'session-panels',
@@ -422,10 +467,16 @@ export class TerminalSurface {
   private resize = (): void => {
     this.status.visible = this.renderer.width >= 65
     const stacked = this.renderer.width < 72
+    const reviewing = Boolean(this.reviewState)
+    const split = this.activityShown && !reviewing
+    this.chatPanel.visible = !reviewing
+    this.activityPanel.visible = split
+    this.reviewPanel.visible = reviewing
+    this.renderActivityToggle()
     this.panels.flexDirection = stacked ? 'column' : 'row'
-    this.chatPanel.width = stacked ? '100%' : '50%'
-    this.chatPanel.height = stacked ? '60%' : '100%'
-    this.chatPanel.paddingRight = stacked ? 0 : 1
+    this.chatPanel.width = stacked || !split ? '100%' : '50%'
+    this.chatPanel.height = stacked && split ? '60%' : '100%'
+    this.chatPanel.paddingRight = stacked || !split ? 0 : 1
     this.activityPanel.width = stacked ? '100%' : '50%'
     this.activityPanel.height = stacked ? '40%' : '100%'
     this.activityPanel.border = stacked ? ['top'] : ['left']
@@ -443,6 +494,25 @@ export class TerminalSurface {
     this.renderOverview()
     this.setFooter(this.promptKeys)
     this.renderCompletion()
+  }
+
+  private renderActivityToggle(): void {
+    const on = this.activityShown
+    this.activityToggle.content = new this.core.StyledText([
+      this.core.fg(on ? colors.info : colors.muted)(` ${on ? '◨' : '□'} Activity `),
+    ])
+    this.activityToggle.bg = on ? colors.input : colors.background
+    this.activityToggle.visible = !this.reviewState
+  }
+
+  private toggleActivity(): void {
+    this.activityShown = !this.activityShown
+    if (!this.activityShown) {
+      this.leaveActivity()
+      if (this.control && !this.reading) this.control.focus()
+    }
+    this.resize()
+    this.setFooter(`Click to ${this.activityShown ? 'hide' : 'show'} Activity`)
   }
 
   private setFooter(message: string): void {
@@ -474,7 +544,20 @@ export class TerminalSurface {
   }
 
   private renderSession(): void {
+    const replaced = this.renderedGeneration !== this.session.generation
+    if (replaced) {
+      // /clear and /resume replace the timeline; redraw it from the first entry.
+      for (const child of this.detailScroll.getChildren()) child.destroyRecursively()
+      this.cards = []
+      this.lastBubble = undefined
+      this.renderedEntries = 0
+      this.renderedGeneration = this.session.generation
+    }
     for (const entry of this.session.entries.slice(this.renderedEntries)) {
+      if (entry.card) {
+        this.addCard(entry, entry.card)
+        continue
+      }
       const bubble = new this.core.BoxRenderable(this.renderer, {
         id: entry.id,
         width: '100%',
@@ -493,9 +576,110 @@ export class TerminalSurface {
         }),
       )
       this.detailScroll.add(bubble)
+      this.lastBubble = { box: bubble, role: entry.role }
     }
     this.renderedEntries = this.session.entries.length
+    if (replaced) this.detailScroll.scrollTo(this.detailScroll.scrollHeight)
     this.renderOverview()
+  }
+
+  /**
+   * What a request started, tucked under the prompt that asked for it:
+   *
+   *   ✓ Scheduled  testabc.txt                    10:24:08
+   *     in 10 seconds · claude-sonnet-5 · low effort
+   */
+  private addCard(entry: TimelineEntry, card: StatusCard): void {
+    const { BoxRenderable, TextRenderable } = this.core
+    // No gap after the prompt, so the card reads as its answer rather than a new message.
+    if (this.lastBubble?.role === 'user') this.lastBubble.box.marginBottom = 0
+    const box = new BoxRenderable(this.renderer, {
+      id: entry.id,
+      width: '100%',
+      flexDirection: 'row',
+      flexShrink: 0,
+      marginBottom: 1,
+      paddingLeft: 1,
+      onMouseDown: (event) => {
+        const runId = this.session.activityFor(card)?.runId ?? card.runId
+        if (runId && event.button === this.core.MouseButton.LEFT) this.openReview(runId)
+      },
+      onMouseOver: () => {
+        if (this.session.activityFor(card)?.runId ?? card.runId)
+          this.setFooter('Click to review this run’s changes')
+      },
+      onMouseOut: () =>
+        this.setFooter(this.activityCursor === undefined ? this.promptKeys : activityKeys),
+    })
+    const icon = new TextRenderable(this.renderer, {
+      content: '',
+      width: 2,
+      flexShrink: 0,
+      selectable: false,
+    })
+    const body = new BoxRenderable(this.renderer, {
+      flexGrow: 1,
+      flexShrink: 1,
+      minWidth: 0,
+      flexDirection: 'column',
+    })
+    const head = new BoxRenderable(this.renderer, { width: '100%', flexDirection: 'row' })
+    const title = new TextRenderable(this.renderer, {
+      content: '',
+      flexGrow: 1,
+      flexShrink: 1,
+      minWidth: 0,
+      wrapMode: 'word',
+    })
+    head.add(title)
+    if (card.time)
+      head.add(
+        new TextRenderable(this.renderer, {
+          content: card.time,
+          fg: colors.muted,
+          flexShrink: 0,
+          marginLeft: 2,
+          selectable: false,
+        }),
+      )
+    const detail = new TextRenderable(this.renderer, {
+      content: '',
+      fg: colors.muted,
+      width: '100%',
+      wrapMode: 'word',
+    })
+    body.add(head)
+    body.add(detail)
+    box.add(icon)
+    box.add(body)
+    this.detailScroll.add(box)
+    this.lastBubble = { box, role: entry.role }
+    this.cards.push({ card, box, icon, title, detail })
+    this.renderCards()
+  }
+
+  /** Cards take their status from Activity, and count down while a schedule waits. */
+  private renderCards(): void {
+    const now = Date.now()
+    let waiting = false
+    for (const { card, icon, title, detail } of this.cards) {
+      const status = this.session.activityFor(card)?.status ?? card.status
+      const color = statusColor(status)
+      icon.content = new this.core.StyledText([this.core.fg(color)(statusIcon(status))])
+      title.content = new this.core.StyledText([
+        this.core.fg(color)(status),
+        this.core.fg(colors.text)(`  ${transcriptText(card.title)}`),
+      ])
+      detail.content = cardDetail(card, status, now)
+      if (card.at && card.at > now && /^scheduled$/i.test(status)) waiting = true
+    }
+    if (waiting && !this.cardTimer) {
+      this.cardTimer = setInterval(() => this.renderCards(), 1000)
+      this.cardTimer.unref()
+    } else if (!waiting && this.cardTimer) {
+      clearInterval(this.cardTimer)
+      this.cardTimer = undefined
+    }
   }
 
   private renderOverview(): void {
@@ -506,6 +690,7 @@ export class TerminalSurface {
     this.notice.content = fitLine(this.session.overview.error || '', width)
     this.notice.visible = Boolean(this.session.overview.error)
     this.renderActivity()
+    this.renderCards()
   }
 
   /** Requests the user can open in Review: runs that exist, newest last. */
@@ -533,19 +718,27 @@ export class TerminalSurface {
       else this.activityCursor = Math.min(this.activityCursor, runs.length - 1)
     }
     const chosen = this.activityCursor === undefined ? undefined : runs[this.activityCursor]
-    const lines = rows.map((row) => transcriptText(activityLine(row)))
-    const signature = JSON.stringify([lines, chosen, rows.map((row) => row.runId)])
+    // Root padding, the panel's border and padding, the scrollbar and its gutter.
+    const width =
+      this.renderer.width < 72
+        ? this.renderer.width - 4
+        : Math.floor((this.renderer.width - 2) / 2) - 4
+    const columns = activityColumns(rows)
+    const cells = rows.map((row) =>
+      activityCells({ ...row, prompt: transcriptText(row.prompt) }, columns, width),
+    )
+    const signature = JSON.stringify([cells, chosen, rows.map((row) => row.runId)])
     if (signature === this.workSignature) return
     this.workSignature = signature
     for (const child of this.work.getChildren()) child.destroyRecursively()
     rows.forEach((row, index) => {
       const selected = Boolean(row.runId) && row.runId === chosen
+      const cell = cells[index]!
       const box = new this.core.BoxRenderable(this.renderer, {
         id: `activity-row-${index}`,
         width: '100%',
         flexDirection: 'column',
         flexShrink: 0,
-        marginBottom: index < rows.length - 1 ? 1 : 0,
         backgroundColor: selected ? colors.input : colors.background,
         onMouseDown: row.runId
           ? (event) => {
@@ -556,7 +749,7 @@ export class TerminalSurface {
         onMouseOver: row.runId
           ? () => {
               box.backgroundColor = colors.input
-              this.setFooter('Click to review this run’s changes')
+              this.setFooter('Click for details: changes, model and effort')
             }
           : undefined,
         onMouseOut: row.runId
@@ -566,14 +759,17 @@ export class TerminalSurface {
             }
           : undefined,
       })
+      const fg = this.core.fg
       box.add(
         new this.core.TextRenderable(this.renderer, {
-          content: this.styledText(
-            `${lines[index]}${selected ? '   ↵ review' : ''}`,
-            row.runId ? colors.secondary : colors.muted,
-          ),
+          content: new this.core.StyledText([
+            fg(statusColor(row.status))(cell.status),
+            fg(colors.muted)(cell.time ? `  ${cell.time}  ` : '  '),
+            fg(row.runId ? colors.secondary : colors.muted)(cell.prompt),
+            fg(colors.muted)(cell.changes ? `  ${cell.changes}` : ''),
+          ]),
           width: '100%',
-          wrapMode: 'word',
+          wrapMode: 'none',
           flexShrink: 0,
           selectable: false,
         }),
@@ -588,7 +784,7 @@ export class TerminalSurface {
 
   private focusActivity(): boolean {
     const runs = this.reviewableRuns
-    if (!runs.length) return false
+    if (!runs.length || !this.activityShown) return false
     this.reading = false
     this.activityCursor = runs.length - 1
     this.control?.blur()
@@ -1139,9 +1335,6 @@ export class TerminalSurface {
       diffs: new Map(),
       notice: view.notice,
     }
-    this.chatPanel.visible = false
-    this.activityPanel.visible = false
-    this.reviewPanel.visible = true
     this.promptTitle.visible = false
     this.promptKeys = reviewKeys
     this.setFooter(this.promptKeys)
@@ -1164,9 +1357,6 @@ export class TerminalSurface {
   endReview(): void {
     if (!this.reviewState) return
     this.reviewState = undefined
-    this.reviewPanel.visible = false
-    this.chatPanel.visible = true
-    this.activityPanel.visible = true
     this.promptTitle.visible = true
     for (const child of this.reviewFiles.getChildren()) child.destroyRecursively()
     this.reviewDiffText.content = ''
@@ -1221,7 +1411,7 @@ export class TerminalSurface {
       this.core.bold(fg(colors.text)(transcriptText(view.title).replace(/\s+/g, ' '))),
       fg(colors.muted)('\n'),
       fg(statusColor(view.status))(view.status),
-      fg(colors.muted)(' · '),
+      fg(colors.muted)(` · ${view.details} · `),
       fg(colors.link)(view.directory),
       fg(colors.muted)(' · '),
       fg(colors.keyword)(view.branch),
@@ -1479,6 +1669,7 @@ export class TerminalSurface {
     if (this.requesting && this.control instanceof this.core.InputRenderable)
       this.session.draft = this.control.value
     this.stopLoading()
+    clearInterval(this.cardTimer)
     this.preview.cancel()
     void this.clipboard.dispose().catch(() => {})
     this.rejectPrompt?.(new Quit())
