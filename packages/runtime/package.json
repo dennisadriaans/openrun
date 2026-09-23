@@ -14,7 +14,7 @@
     "zigpty": "^0.2.1"
   },
   "devDependencies": {
-    "vite": "^8.2.2"
+    "vite": "^8.3.0"
   },
   "exports": {
     "./contract/dispatch": "./src/contract/dispatch.ts",
