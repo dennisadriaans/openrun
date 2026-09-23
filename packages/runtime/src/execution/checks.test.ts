@@ -172,6 +172,7 @@ setTimeout(() => {}, 60_000)
 
   it('does not resolve cancellation until the check child has closed', async () => {
     const dir = workdir()
+    const ready = join(dir, 'ready.txt')
     const controller = new AbortController()
     let settled = false
     const promise = executeCheck({
@@ -179,6 +180,7 @@ setTimeout(() => {}, 60_000)
         dir,
         'slow-stop.js',
         `process.on('SIGTERM', () => setTimeout(() => process.exit(0), 600))
+require('fs').writeFileSync(${JSON.stringify(ready)}, 'ready')
 setTimeout(() => {}, 30_000)
 `,
       ),
@@ -188,7 +190,12 @@ setTimeout(() => {}, 30_000)
     }).finally(() => {
       settled = true
     })
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // Abort only once the SIGTERM handler is installed; a fixed delay races
+    // node's startup on slow runners and the child dies on the default action.
+    while (!existsSync(ready)) {
+      assert.equal(settled, false)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
     controller.abort()
     await new Promise((resolve) => setTimeout(resolve, 150))
     assert.equal(settled, false)
