@@ -6,6 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## v0.4.0 — 2026-09-23
+
+- You no longer have to choose between opening an agent and scheduling when your request already makes that clear. Tasks without timing open the selected agent immediately; a time such as “in 10 minutes” schedules the work, including when the interpreter is uncertain about the action.
+- You no longer see colors change when hovering, focusing, or selecting elements in the CLI. Menu arrows and the input cursor still show where you are working. Clicking surrounding panels and sections no longer moves focus away from the prompt. Use Tab to focus the overview for keyboard scrolling.
+- You no longer have to keep the Activity panel open in the CLI. The Activity button next to the connection status hides it, and the chat takes the full width. Activity rows now fit on one line: status, time, prompt and file changes. Model and effort moved to the run's detail page, and a scheduled or started task now appears right under the prompt that asked for it, with its live status, when it fires, the model and the effort.
+- Launch hints no longer appear as error output. The CLI banner and informational accents use Open Run’s blue accent color and respect `NO_COLOR`.
+- Escape and a single Ctrl+C now clear the current input without leaving the prompt. Escape goes back when the input is empty; pressing Ctrl+C twice still quits. Clearing a draft also resets its preview and history position.
+- You no longer see accidental text-selection fills when clicking CLI sections. The screen and menus use your terminal's background, while inputs sit in a padded, muted wrapper. Action buttons have rounded borders and off-white faces with dark labels, and menus mark the selected option with an arrow.
+- You no longer have to retype previous CLI commands. Press Up or Down in the home input to browse command history, even after restarting Open Run. Moving past the newest command restores your draft.
+- Matching CLI suggestions no longer disappear when only one choice remains. Suggestions stay below the input as you type command names or labels, with matching for abbreviations, spacing differences and small typos.
+- You no longer have to restart the CLI to choose another action or abandon a selection. Running `openrun` opens a persistent OpenTUI Home with one request input above inline live counts for running, scheduled and automation work. Use the `integrations` and `runs` commands to see connections and recent runs. Home buttons open scheduling, recent runs and integrations with a click. Complete schedule requests submit directly. Run activity updates in place, including work started in another terminal. Escape goes back through menus and setup steps; Tab switches to scrollable output. Type `quit` or press Ctrl+C twice to leave. The interface uses Bun 1.3+ or Node.js 26.4+; scripts and the background worker continue to support Node.js 22.12+. Guided scheduling labels its final action Confirm schedule.
+- You no longer have to choose between opening an agent and scheduling when your task already says “do it in 10 seconds” and names a model and effort. The CLI keeps the original task text and schedules it with your selected agent.
+- You no longer lose selected input when copying it in the terminal. Ctrl+A selects all, Ctrl+C copies the selection, and Ctrl+V pastes at the cursor. Selection is visible, and pasted lines are separated by spaces.
+
+  You no longer need to put runtime, model and effort in a fixed order. Requests such as `create new file test-123123.html with contents '123' claude sonnet low` and `low create new file test-123123.html with contents '123' sonnet claude` select the same agent settings while preserving the quoted contents.
+- You no longer see uneven padding around the CLI input or button backgrounds that stop at the label row. The input has equal horizontal and vertical padding, space above its frame, and matching outer padding. Action button backgrounds fill their full height.
+- You no longer get asked for the agent, model and effort when a timed request ends with a model name, such as `create foo.html in 10 seconds haiku`. The model is recognized locally, including the common misspelling "heiku".
+
+  You no longer retype a task or a time you already gave. The terminal only asks for values that are missing or unreadable, so a complete request is scheduled on the first Enter instead of stopping at a prefilled question.
+- You no longer have to look above the overview to find the CLI input. Home stacks its live information, centered action buttons and request input at the bottom of the terminal, without stretching short content to fill the screen. Option menus use compact borders, a clear selection and hints beside the prompt.
+- You no longer have to submit a request to find out how the terminal understands it. A live preview below the input shows the selected action, agent, model, effort and timing, using the hosted interpreter for freeform requests after a short typing pause. Running, scheduled and automation counts also sit below the input, and the preview space stays reserved as you type.
+- You no longer see the previous question lingering after submitting a request in the terminal. An animated spinner and rotating lighthearted status lines fill the wait until the next prompt or agent session is ready.
+- Natural-language requests recognize model nicknames, spaced version numbers, runtime names and reasoning-effort labels from installed model catalogs. Model-specific effort validation keeps unsupported settings out of launches, and quoted task text stays intact. Large catalogs retain explicitly named models when preparing interpretation requests.
+- You no longer lose relevant CLI suggestions when you finish typing a command or continue typing its label. Exact commands still take priority when you press Enter.
+- You no longer have to return Home to ask for work. Type or paste a request from any CLI menu, enter a complete task in a form, or use the shared request input with history and suggestions. Escape restores the previous field or menu selection; Ctrl+Enter keeps text as a field value.
+- You no longer have to live with an even split between chat and Activity in the terminal interface. Drag the line between them, or press Ctrl+Shift+← / →, to give either side more room; neither side shrinks below a readable width.
+- You no longer have to guess where a terminal run left its work. Click a run in Activity, or select it with Shift+Tab and Enter, to open Review: the directory and branch it worked in, every changed file with its line counts, and each file's diff. From Review you can commit, push, open a pull request or discard the changes, with the same checks as the web app. Finished runs show their change count in Activity, and `openrun review <run-id>` prints the files and diffs for scripts.
+- Requests ending in a runtime and model, such as `claude sonnet`, no longer require an explicit effort to resolve locally. A task followed by `in 10 seconds claude sonnet` keeps its original text and schedules directly. Rejected interpretation requests now show their HTTP status instead of claiming the service is unavailable.
+- You no longer have to open the automation list to see what is scheduled. Home shows pending tasks as chat bubbles above the input, with the task text and next run time. The list updates live and scrolls while the input stays visible.
+- You no longer lose earlier requests or the live overview when submitting work in the CLI. A chronological chat keeps requests, results and run activity together, including after returning from a coding agent, and saves a local session transcript. Further requests queue while scheduling completes; schedules, active runs, today's run count and enabled integrations remain visible below the input.
+
+  Command and history suggestions now appear inside the input. Tab or Enter accepts a suggestion before Enter submits it. The main input handles navigation and tasks, with no separate request shortcut. Keyboard help fits a single terminal row. Native Codex and Claude Code sessions launch with automatic permissions.
+- The CLI no longer loses its conversation when you close it. Type `/resume` at Home to pick an earlier session by its first request and continue it: the chat comes back, runs it started return to Activity, and new requests are added to it. Type `/clear` (or "start over") to begin a fresh session; the old one stays saved. `openrun sessions` lists saved sessions for scripts, with `--json`.
+- You no longer have to scan past background activity to follow your terminal chat. Requests and results stay on the left, with running work, queued requests, schedules and activity updates on the right. The panels share the width equally and stack on narrow terminals. Counts sit inline beneath the input, without extra next-step hints or an empty-schedules message. The terminal now uses the web workspace's accent, syntax and runtime colors.
+
+  You no longer see a chat heading, author labels or indented user messages in the terminal conversation. User input is distinguished by a muted background.
+
+  You no longer see a separate activity message for each status change. Each task updates in place as it is scheduled, runs and finishes, showing status, time, model, effort and prompt inline. Chat confirms a scheduled or started task in one line instead of repeating those details. Long items wrap to the panel width instead of cutting off the prompt.
+- You no longer see the CLI input move as suggestions appear. Suggestions and menu hints sit below the input in a reserved space that stays put while typing.
+- You no longer have to scan a wall of equally bright text in terminal menus. Headings stand out above softer option labels and summary text, while supporting descriptions stay muted. Integration options also explain what each action does.
+- You no longer need `run`, `using`, or model flags to open an agent with a task such as `create new file index-test.html with contents '123' sonnet low`. Complete task requests select the runtime, model and effort locally, preserve quoted task contents, and open the agent in your terminal from the command line or Home.
+- You no longer need to remember model and reasoning flags to open your coding agent. Try `openrun sol medium` or `openrun claude opus high`; your existing agent opens in the terminal with those settings. Natural-language requests use Open Run's hosted interpreter without an account or API key, with local choices when interpretation is unavailable. Explicit launch options work offline.
+
+  Add `schedule in 10 minutes` to save work for later with the same model and effort. When a run finishes, `openrun resume <run-id>` reopens its saved native conversation in the execution directory. Open Run's terminal interface returns after the native agent closes when launched from Home.
+- You no longer have to choose an agent or reasoning effort again when scheduling with a model nickname. `openrun schedule in 10 seconds "new file index3.html" using sol medium` selects Codex, Sol and medium effort locally, and keeps the quoted task intact. Sonnet and Opus select Claude Code. After saving, the CLI opens the live overview with the upcoming schedule count and task.
+
+  One-time runs can start from existing edits in your current checkout. Seconds are preserved in the firing time, and a time that needs clarification no longer discards an already recognized model or effort.
+
+### 🚀 Features
+
+- add drag drop windows in TUI ([#145](https://github.com/dennisadriaans/openrun/pull/145))
+- **cli:** add home and native launch flow ([#141](https://github.com/dennisadriaans/openrun/pull/141))
+
+### 💅 Refactors
+
+- organize apps and shared packages ([#143](https://github.com/dennisadriaans/openrun/pull/143))
+
+**Full changelog**: [`v0.3.0...v0.4.0`](https://github.com/dennisadriaans/openrun/compare/v0.3.0...v0.4.0)
+
 ## v0.3.0 — 2026-09-22
 
 - You no longer need to memorize runtime names, automation IDs or schedule syntax to get started from the terminal. The CLI preselects an available agent, remembers your choice, and lets you press Enter to run now or choose a schedule. Guided project setup, editable settings and recovery choices keep you moving, with compact summaries and subtle colors. Use `--yes` or `--json` for scripts.
