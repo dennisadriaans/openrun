@@ -41,7 +41,9 @@ jobs:
 
       - name: Verify release commit
         run: |
-          pnpm exec biome ci src scripts
+          pnpm exec biome ci apps packages scripts
+          pnpm architecture:check
+          pnpm contract:check
           pnpm typecheck
           pnpm test
           pnpm build

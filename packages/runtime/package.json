@@ -1,0 +1,43 @@
+{
+  "name": "@openrun/runtime",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
+    "@openrun/contracts": "workspace:*",
+    "@openrun/domain": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "cron-parser": "^4.9.0",
+    "node-cron": "^4.6.0",
+    "zigpty": "^0.2.1"
+  },
+  "devDependencies": {
+    "vite": "^8.2.2"
+  },
+  "exports": {
+    "./contract/dispatch": "./src/contract/dispatch.ts",
+    "./core": "./src/core.ts",
+    "./events/activityLive": "./src/events/activityLive.ts",
+    "./events/runLive": "./src/events/runLive.ts",
+    "./execution/executor": "./src/execution/executor.ts",
+    "./mcp/mcpOAuth": "./src/mcp/mcpOAuth.ts",
+    "./mcp/openrunTools": "./src/mcp/openrunTools.ts",
+    "./mobile/auth": "./src/mobile/auth.ts",
+    "./mobile/config": "./src/mobile/config.ts",
+    "./mobile/handlers": "./src/mobile/handlers.ts",
+    "./mobile/lan": "./src/mobile/lan.ts",
+    "./paths": "./src/paths.ts",
+    "./process/terminalSessions": "./src/process/terminalSessions.ts",
+    "./process/terminalStream": "./src/process/terminalStream.ts",
+    "./runtimes/modelCatalog": "./src/runtimes/modelCatalog.ts",
+    "./runtimes/nativeSessions": "./src/runtimes/nativeSessions.ts",
+    "./runtimes/runtimePath": "./src/runtimes/runtimePath.ts",
+    "./security/accessToken": "./src/security/accessToken.ts",
+    "./storage/db": "./src/storage/db.ts",
+    "./workspaces/attachments": "./src/workspaces/attachments.ts",
+    "./workspaces/files": "./src/workspaces/files.ts",
+    "./workspaces/git": "./src/workspaces/git.ts"
+  }
+}

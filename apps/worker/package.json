@@ -1,0 +1,18 @@
+{
+  "name": "@openrun/worker",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@openrun/domain": "workspace:*",
+    "@openrun/runtime": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./mcp": "./src/mcp.ts"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts"
+  }
+}

@@ -3,13 +3,14 @@
 
 # Security-relevant surfaces: the access guard, the workspace path boundary,
 # webhook signature verification, and the mobile trust boundary.
-/src/lib/serverAccess.ts        @dennisadriaans
-/src/server/accessToken.ts      @dennisadriaans
-/src/server/files.ts            @dennisadriaans
-/src/server/integrations/       @dennisadriaans
-/src/server/mobile/             @dennisadriaans
-/src/start.ts                   @dennisadriaans
+/packages/domain/src/security/serverAccess.ts        @dennisadriaans
+/packages/runtime/src/security/accessToken.ts      @dennisadriaans
+/packages/runtime/src/workspaces/files.ts            @dennisadriaans
+/packages/runtime/src/integrations/       @dennisadriaans
+/packages/runtime/src/mobile/             @dennisadriaans
+/apps/web/src/start.ts                   @dennisadriaans
 /scripts/start.ts               @dennisadriaans
+/apps/web/scripts/start.ts      @dennisadriaans
 
 # Licensing and community health.
 /LICENSE                @dennisadriaans

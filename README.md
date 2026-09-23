@@ -301,3 +301,13 @@ Contributors sign the [CLA](./CLA.md). Please also read the
 
 [GNU AGPLv3](./LICENSE). Everything that runs on your machine is open source and stays
 that way. Teams that cannot ship AGPL: [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md).
+
+## Developing Open Run
+
+The repository is a pnpm workspace. `apps/` contains the web, CLI and headless
+worker entry points; `packages/` contains the shared runtime, rules, API contract
+and Swift client. Existing commands such as `pnpm dev`, `pnpm cli` and `pnpm build`
+continue to work from the repository root.
+
+See [the architecture guide](docs/architecture.md) for the package map, feature
+locations, dependency rules and instructions for adding a capability.

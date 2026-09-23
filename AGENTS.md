@@ -10,15 +10,15 @@ A **TanStack Start** proof-of-concept that plans and schedules **local coding-ag
 processes. No model APIs, no cloud, no keys — it drives the CLIs the user is already logged into.
 
 The optional natural-language CLI launcher is the exception for interpretation:
-`scripts/cli/natural.ts` sends the typed request and model choices to Open Run's
+`apps/cli/src/commands/natural.ts` sends the typed request and model choices to Open Run's
 hosted interpreter, without an account or user API key. Explicit flags work
 offline. The endpoint returns selections and source spans; all agent execution
-and scheduling remain local. `scripts/cli/native.ts` owns terminal handoff and
+and scheduling remain local. `apps/cli/src/commands/native.ts` owns terminal handoff and
 native launch/resume. Never embed the hosted service credential in this repo.
 
 Each runtime has a **transport**: `cli` parses the binary's own JSON output, `acp` drives it
 over the [Agent Client Protocol](https://agentclientprotocol.com). Either way what lands in
-the DB is the same ACP-shaped event vocabulary (`lib/acp.ts`) — tool calls with a title, kind,
+the DB is the same ACP-shaped event vocabulary (`packages/domain/src/chat/acp.ts`) — tool calls with a title, kind,
 status and file locations; approvals as an options list with an outcome.
 
 A **run is a conversation, not a one-shot log**: the first turn is the automation's prompt,
@@ -37,7 +37,9 @@ pnpm token:print     # print / create the access token (`pnpm token` is pnpm's o
 pnpm cli <args>      # the local CLI, e.g. pnpm cli schedule at 16:40 "…" for claude
 pnpm preview         # vite preview
 pnpm typecheck       # tsc --noEmit
-pnpm contract:generate # rebuild every transport from src/contract/operations.ts
+pnpm architecture:check # dependency directions, exports and capability cycles
+pnpm cli:smoke       # install the packed CLI and run its integration suite
+pnpm contract:generate # rebuild every transport from packages/contracts/src/operations.ts
 pnpm contract:check    # regenerate, then fail if anything drifted (CI gate)
 pnpm test            # unit tests
 pnpm generate-routes # compatibility alias for the Vite build, which regenerates routes
@@ -47,80 +49,71 @@ pnpm release:prepare # write the version + changelog onto release/vX.Y.Z (--dry-
 pnpm release:publish # tag HEAD and create the GitHub Release (CI runs this)
 ```
 
-`pnpm test` is `node --experimental-strip-types --test "src/**/*.test.ts"` —
-**node's built-in runner, no Vitest/Jest.** Count `*.test.ts` under `src/` rather than
+`pnpm test` runs `node --experimental-strip-types --test` across `apps/`, `packages/` and `scripts/` —
+**node's built-in runner, no Vitest/Jest.** Count colocated `*.test.ts` across the workspaces rather than
 trusting a hard-coded number here.
 
 ## Architecture
 
-```
-routes/*.tsx  →  lib/queries.ts (React Query)  →  fns/index.ts (GENERATED server fns)
-                                                        ↓
-routes/api/v1/$.ts (REST + SSE, every client)  →  server/contract/dispatch.ts
-                                                        ↓ lazy import()
-                                              server/core.ts (facade, boots scheduler)
-                                                ↓            ↓                ↓
-                                          server/db.ts  server/executor.ts  server/scheduler.ts
-                                          (better-sqlite3)  (spawn CLI)      (node-cron)
-```
+Open Run is a pnpm workspace. Read `docs/architecture.md` for the dependency map
+and extension guide. Existing root commands and `scripts/` entry points remain available.
 
-**`src/contract/operations.ts` is the source of truth for the whole API surface.**
-118 operations, described once as data. `pnpm contract:generate` emits from it:
-`src/fns/index.ts`, `src/contract/generated/client.ts` (framework-free fetch client),
-`src/contract/generated/openapi.json`, and the Swift `OpenRunKit` package under
-`clients/apple/`. Never hand-edit those four; `pnpm contract:check` fails CI if you do.
-Adding a capability is: export it from `core.ts`, add a descriptor, regenerate.
+| Package | Responsibility |
+| --- | --- |
+| `apps/web` | TanStack routes, React components and feature-owned queries |
+| `apps/cli` | Terminal UI, command parsing and local/HTTP client adapters |
+| `apps/worker` | Headless process and stdio MCP entry points |
+| `packages/runtime` | Shared Node runtime, application capabilities, SQLite and integrations |
+| `packages/domain` | Browser-safe rules, resource types, events and protocol constants |
+| `packages/contracts` | Operation descriptors and generated HTTP/OpenAPI client artifacts |
+| `packages/apple/OpenRunKit` | Shared Swift client for native Apple apps |
 
-The **live path** is separate and easy to miss:
+The web reaches the runtime through lazy generated server functions or API routes;
+the CLI uses local IPC or the generated HTTP client. Both dispatch through
+`packages/runtime/src/contract/dispatch.ts` and the public `core.ts` facade.
+`bootstrap.ts` owns process startup. Feature implementations in `application/`
+never import the facade. They compose named capabilities without booting another runtime.
 
-```
-executor → server/runLive.ts + server/activityLive.ts   (in-process pub/sub)
-         → routes/api/runs/$runId/stream.ts             (SSE, one run)
-           routes/api/activity/stream.ts                (SSE, run started/finished)
-         → lib/useRunLive.ts + lib/useActivityLive.tsx  (hooks)
-         → lib/liveStream.ts                            (EventSource, watchdog, reconnect)
-         → lib/applyRunLiveEvent.ts                     (patches the React Query cache)
-```
+`packages/contracts/src/operations/` owns descriptors grouped by capability.
+`operations.ts` assembles them. `pnpm contract:generate` produces the web server
+functions, framework-free TypeScript client, OpenAPI document and Swift operations.
+Never edit generated files by hand; `pnpm contract:check` is a CI gate.
 
-HTTP polling is only the **fallback** when a stream is unhealthy. That is why hooks in
-`lib/queries.ts` read `useActivityStreamHealthy()` and set
-`refetchInterval: streamHealthy ? false : 3000`. Don't "fix" a hook by hardcoding an interval.
-
-**`EventSource` is not the judge of liveness — the heartbeat is.** A socket that dies while
-the machine sleeps stays `readyState === OPEN` and never fires `error`, which would pin
-`streamHealthy` to `true` and switch every fallback poll off for good. `lib/liveStream.ts`
-owns both constants: `SERVER_PING_MS` is the heartbeat both SSE factories import (they
-re-export it rather than declaring their own), and a stream silent past `STALE_AFTER_MS` —
-derived from it — is closed and redialled. Do not reintroduce a second copy of the period.
-Neither hook may open an `EventSource` of its own.
+Live updates flow from the executor through the runtime's `events/` SSE factories
+into `apps/web/src/lib/useRunLive.ts` and `useActivityLive.tsx`.
+`apps/web/src/lib/liveStream.ts` owns browser reconnects and the heartbeat watchdog.
+The one heartbeat definition is `packages/domain/src/live/protocol.ts`; the CLI,
+server and generated Swift client use those constants too. HTTP polling is only
+the fallback while a stream is unhealthy. Do not hardcode a polling interval or
+open a second EventSource in a hook.
 
 ## Hard rules
 
-- **`src/server/**` is server-only.** UI route components never import it — they reach it
-  exclusively through `src/fns/index.ts`, where every handler does
-  `await import('../server/core')` **lazily**. That laziness is what keeps `better-sqlite3`,
+- **`packages/runtime/src/**` is server-only.** UI route components never import it — they reach it
+  exclusively through `apps/web/src/fns/index.ts`, where every handler does
+  `await import('@openrun/runtime/contract/dispatch')` **lazily**. That laziness is what keeps `better-sqlite3`,
   `node-cron` and `child_process` out of the client bundle; a top-level static import of
-  `server/*` in `fns/index.ts` or a route component breaks the client build.
-  - Two legitimate exceptions: `src/routes/api/**` handlers are server-side and import
-    `#/server/*` directly; several UI components import **types only** from `server/*`
-    (erased at compile time) — `routes/planner.tsx`, `components/Chat.tsx`,
-    `GitActions.tsx`, `DiffPanel.tsx`, `FileTree.tsx`. Value imports of `server/*` from
+  `@openrun/runtime/*` in `apps/web/src/fns/index.ts` or a route component breaks the client build.
+  - Two legitimate exceptions: `apps/web/src/routes/api/**` handlers are server-side and import
+    declared `@openrun/runtime/*` exports directly; several UI components import **types only** from those exports
+    (erased at compile time) — `apps/web/src/routes/planner.tsx`, `apps/web/src/features/chat/Chat.tsx`,
+    `GitActions.tsx`, `DiffPanel.tsx`, `FileTree.tsx`. Value imports of the runtime from
     the client are still forbidden.
-- **`src/lib/**` is browser-safe and dependency-free.** No `node:` imports, no SQLite, no
+- **`packages/domain/src/**` is browser-safe.** Its schedule helpers use `cron-parser`; everything else is framework-free. No `node:` imports, no SQLite, no
   worktree resolution. This is deliberate: the *same* rule module runs in the browser form
   and on the server write path, so the UI can disable a control with the exact message the
-  server would have thrown. See the header comments in `lib/workspaceReady.ts`,
-  `lib/workspaceRef.ts`, `lib/runtimeBinary.ts`, `lib/cron.ts`.
-- **Gate modules answer "why is this button disabled".** `lib/runPrereqGate.ts` holds the
-  shared workspace/PATH/prompt checks; `lib/enableGate.ts` (cron + prereq),
-  `lib/runNowGate.ts`, `lib/projectGate.ts`, and `lib/gitActionGate.ts` mirror the
+  server would have thrown. See the header comments in `packages/domain/src/workspaces/workspaceReady.ts`,
+  `packages/domain/src/workspaces/workspaceRef.ts`, `packages/domain/src/runtimes/runtimeBinary.ts`, `packages/domain/src/tasks/cron.ts`.
+- **Gate modules answer "why is this button disabled".** `packages/domain/src/tasks/runPrereqGate.ts` holds the
+  shared workspace/PATH/prompt checks; `packages/domain/src/tasks/enableGate.ts` (cron + prereq),
+  `packages/domain/src/tasks/runNowGate.ts`, `packages/domain/src/workspaces/projectGate.ts`, and `packages/domain/src/workspaces/gitActionGate.ts` mirror the
   server's refuse conditions so the UI disables and explains on hover instead of
   `alert()`-ing after the click. A new refuse condition goes in the server path **and**
   the matching gate / shared prereq module, or the two drift.
-- **Access control is one decision, not seventy-one.** `src/start.ts` registers a global
-  request middleware in front of *every* server function and API route; `scripts/start.ts`
+- **Access control is one decision, not seventy-one.** `apps/web/src/start.ts` registers a global
+  request middleware in front of *every* server function and API route; `apps/web/scripts/start.ts`
   settles the bind address before the socket opens. Both apply the same tested rules from
-  `lib/serverAccess.ts`. **Never add a per-route auth check** — a new server function is
+  `packages/domain/src/security/serverAccess.ts`. **Never add a per-route auth check** — a new server function is
   covered the moment it is written, and a second mechanism is how one endpoint gets
   forgotten. There are no exemptions: every provider webhook lands on the control
   plane and arrives over the outbound relay, so nothing inbound is unauthenticated.
@@ -135,42 +128,44 @@ Neither hook may open an `EventSource` of its own.
   (those files stay plaintext because the CLI reads them). Do not log
   unwrapped secrets. Do not add `process.env` reads in client-bundled `lib/`
   modules other than `openrunEnv.ts`.
-- **Open core: no local feature may consult the edition.** `lib/edition.ts` is the seam the
-  commercial control plane attaches to, and it only ever *adds* surfaces. `lib/edition.test.ts`
-  walks `src/` and fails the build if anything outside that module references it. If you are
+- **Open core: no local feature may consult the edition.** `packages/domain/src/cloud/edition.ts` is the seam the
+  commercial control plane attaches to, and it only ever *adds* surfaces. `packages/domain/src/cloud/edition.test.ts`
+  walks `apps/` and `packages/` and fails the build if anything outside that module references it. If you are
   adding a genuine control-plane capability, add the file to `ALLOWED_EDITION_CONSUMERS` so
   the paid surface grows in a visible diff. Anything that runs on the user's machine is free,
   permanently — see `README.md` and `COMMERCIAL-LICENSE.md`.
 - **Turn events speak ACP, not a vocabulary of our own.** New agent output goes through an
-  adapter in `lib/agentEvents/` that maps it onto the shapes in `lib/acp.ts`. That subset is
-  hand-written to keep `lib/` dependency-free, and `lib/acpConformance.ts` type-checks it
+  adapter in `packages/domain/src/chat/agentEvents/` that maps it onto the shapes in `packages/domain/src/chat/acp.ts`. That subset is
+  hand-written to keep `lib/` dependency-free, and `packages/domain/src/chat/acpConformance.ts` type-checks it
   against `@agentclientprotocol/sdk` — if the spec moves, `pnpm typecheck` says so. Do not add
   a payload field that ACP already has a name for.
 - **`turn_events` rows are append-only and forward-compatible.** Payload fields are all
   optional: a row written before a field existed simply lacks it, and readers must tolerate
   `undefined` rather than assuming a backfill happened.
-- **`server/core.ts` is the only facade.** New server capability ⇒ export from `core.ts`,
-  add a descriptor to `src/contract/operations.ts`, run `pnpm contract:generate`, hook in
-  `lib/queries.ts`. Don't let a route reach past it. A descriptor naming a `core` export
-  that does not exist fails `server/contract/dispatch.test.ts`.
-  - A server module that needs to reach *back* into `core.ts` must do so with a lazy
-    `await import('../core')` — core boots the scheduler, so a static import there is
-    a cycle.
-- **`src/contract/**` is browser-safe and dependency-free**, same rule as `src/lib/**` —
+- **`packages/runtime/src/core.ts` is the application facade.** Implement a new capability in
+  `packages/runtime/src/application/`, export it from `core.ts`, add its descriptor to
+  `packages/contracts/src/operations/`, run `pnpm contract:generate`, and connect it in
+  `apps/web/src/features/<feature>/queries.ts`. Don't let a route reach past the package's
+  declared exports. A descriptor naming a `core` export
+  that does not exist fails `packages/runtime/src/contract/dispatch.test.ts`.
+  - Application modules never import `core.ts` or `bootstrap.ts`. Compose the owning
+    capability directly; keep startup in `bootstrap.ts`. A lower-level runtime module
+    that needs the facade must load it lazily to avoid a startup cycle.
+- **`packages/contracts/src/**` is browser-safe and depends only on shared domain types**, same rule as `packages/domain/src/**` —
   the descriptors ship to the browser inside the generated client.
-  `contract/contract.test.ts` walks the directory and fails the build on a `node:` import,
-  a reach into `server/`, or a third-party dependency.
+  `packages/contracts/src/contract.test.ts` walks the directory and fails the build on a `node:` import,
+  a reach into the runtime, or a third-party dependency.
 - **Ship gate *decisions*, not gate *logic*, to clients that are not TypeScript.**
-  The gate modules stay the single implementation; `lib/actions.ts` runs them on the
+  The gate modules stay the single implementation; `packages/domain/src/tasks/actions.ts` runs them on the
   server's read path and attaches the answers to the resource
   (`task.actions.runNow = { enabled, reason }`). A TypeScript client may still call the
   gates locally for an optimistic disable — same function, so they cannot disagree.
   Swift clients own no copy. Never re-derive a refuse condition in another language.
-- **Value imports in test-covered `lib/` modules carry an explicit `.ts` extension**
-  (`from './cron.ts'`) — `--experimental-strip-types` has no bundler resolution. Type-only
-  imports and untested modules may omit it. Match the file you're editing.
-- Aliases `#/*` and `@/*` both map to `./src/*`, but **only `routes/api/**` uses them**;
-  everything else imports relatively. Follow the local file.
+- **Relative source imports carry an explicit `.ts` or `.tsx` extension**
+  (`from './cron.ts'`) — `--experimental-strip-types` has no bundler resolution. Use exported `@openrun/<package>/<capability>` paths across package boundaries.
+- Aliases `#/*` and `@/*` both map to the web app's `src/*`. They never cross a
+  workspace boundary. Prefer relative imports within a feature and package exports
+  between workspaces.
 - `tsconfig` is strict plus `noUnusedLocals` / `noUnusedParameters` /
   `noFallthroughCasesInSwitch` — an unused import fails `pnpm typecheck`.
 - **The PR title is release metadata, not a label.** `main` takes squashed PRs only and
@@ -179,10 +174,10 @@ Neither hook may open an `EventSource` of its own.
   `!` ⇒ breaking, everything else ⇒ no release. Pick the type by what the change does for a
   user, not by how the diff looks — a bug fix implemented as a refactor is still `fix`.
   `.github/workflows/pr-title.yml` is a required check, and it runs the same
-  `validateCommitTitle` from `lib/release/conventional.ts` that `pnpm ship` runs locally, so
+  `validateCommitTitle` from `scripts/release/conventional.ts` that `pnpm ship` runs locally, so
   the two cannot drift.
 - **No model ever chooses a version.** Given a base version and a commit range the next
-  version is a pure function in `lib/release/`, with colocated tests. A breaking change below
+  version is a pure function in `scripts/release/`, with colocated tests. A breaking change below
   1.0 is a *minor* — reaching 1.0 is a product decision, not a side effect of a `feat!`
   merging — and past 1.0 an automatic major still needs an explicit opt-in. A range of only
   docs and chores produces **no release**, rather than a meaningless patch.
@@ -195,75 +190,75 @@ Neither hook may open an `EventSource` of its own.
 
 | Area | Files |
 | --- | --- |
-| The API surface: adding, renaming or scoping an operation | `src/contract/operations.ts` (the list) → `src/contract/types.ts` (the vocabulary); regenerate with `pnpm contract:generate` |
-| How a request reaches the facade, and how a refusal becomes a status | `server/contract/dispatch.ts`; the one REST route is `routes/api/v1/$.ts` |
-| "Why is this button disabled", sent to a non-TypeScript client | `lib/actions.ts`; attached in `core.decorate` |
-| An Apple client (iOS, macOS) | `clients/apple/OpenRunKit/` — `Generated.swift` is generated, everything else is hand-written |
-| Run/turn lifecycle, spawning a CLI, streaming stdout | `server/executor.ts` |
-| Per-CLI differences: headless invocation, session id, resume, model/effort flags | `server/resume.ts`, `lib/models.ts` |
-| Adopting a chat started in the CLI itself | `lib/nativeSessions.ts` + `server/nativeSessions.ts` (find them), `lib/nativeTranscript.ts` + `server/nativeTranscript.ts` (read one in full), `server/nativeImport.ts` (write it into a run), `executor.adoptNativeChat` (adopt without prompting); picker in `components/ComposerControls.tsx`. Automations resume saved chats in their existing workspace. |
-| Continuing a chat on another runtime (Claude ⇄ Codex handoff) | `lib/runtimeSwitch.ts` (the rules), `lib/handoffPrompt.ts` (what the new agent is told), `executor.sendFollowUp` (the switch); picker + one-time note in `components/Chat.tsx` |
-| Which models a picker offers | `server/modelCatalog.ts` (cache + refresh), `lib/modelDiscovery.ts` (per-CLI parsers); `lib/models.ts` is only the fallback seed |
-| Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `lib/models.ts`; stored as `hiddenModels` in `lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |
-| Hiding runtimes from the picker | `visibleRuntimes` / `hiddenRuntimesIn` / `toggleHiddenRuntime` in `lib/pickRuntime.ts`; stored as `hiddenRuntimes` in `lib/pickerPrefs.ts` (same display-only contract) |
-| CLI stdout → chat events | `lib/agentEvents/` — one adapter per CLI (`claude.ts`, `codex.ts`, `grok.ts`, `acp.ts`); `server/turnEvents.ts` is the server-side re-export |
-| The event vocabulary itself (ACP subset) | `lib/acp.ts` (+ `lib/acpConformance.ts` guard), shapes in `lib/turnEvents.ts` |
-| ACP transport: driving an agent over JSON-RPC | `server/acpTurn.ts`, `lib/acpTransport.ts` |
-| Verification checks, verdicts, the repair loop | `lib/checks.ts` (defs), `server/checks.ts` (runner), `lib/verdict.ts` (judgement); `executor.concludeTurn` decides *whether* a turn is verified — unattended turns only |
-| Supervised mode / tool approvals | `lib/approvals.ts` (the model), `lib/claudeControl.ts` (Claude's responder), `lib/supervisedPolicy.ts` (who may) |
-| AI SDK UI Message Stream projection (read-only) | `lib/uiMessageStream.ts`, `routes/api/runs/$runId/ui-stream.ts` |
-| Schema, migrations, seeded runtimes, `~/.openrun` paths | `server/db.ts`; shared home resolution in `server/paths.ts` |
-| Cron arming | `server/scheduler.ts`; validation/labels in `lib/cron.ts`, `lib/scheduleHealth.ts` |
-| The local CLI (`openrun schedule …`) | `scripts/openrun.ts` owns argv and printing; `scripts/cli/local.ts` connects to or starts the local worker, and `scripts/cli/integrations.ts` owns terminal setup and the temporary OAuth callback. Local calls use the same contract dispatcher as HTTP; `--url` explicitly selects the generated HTTP client. `scripts/worker.ts` boots the existing core without a web build. `server/localRuntime.ts` elects one scheduler/executor owner per database before orphan recovery and exposes authenticated loopback IPC. Never write task rows from a short-lived CLI or start a second scheduler. Parsing/resolution stay in `lib/cliSchedule.ts` and `lib/cliResolve.ts`. |
-| Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `server/workspaces.ts`; externally-created Git worktrees are registered as user-owned workspaces and are never reset or removed by Open Run. |
-| Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `lib/workspaceHealth.ts` (the codes + wording), `server/workspaceHealth.ts` (inspection, quarantine, restore) |
-| Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `lib/unattendedGate.ts` (the rules), `server/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
-| Diffs, commit/push/branch/PR, base snapshots | `server/git.ts`; UI in `components/GitActions.tsx`, `components/DiffPanel.tsx`, `lib/diff.ts` |
-| Undoing a run — files vs. the commits it made | `lib/undoRun.ts` (the rule), `git.runCommits` / `git.resetRunCommits`, `core.discardChanges`; the dialog lives in `routes/runs.$runId.tsx` |
-| How a diff line looks (git panel **and** chat edit hunks) | `components/DiffRows.tsx`; tokens from `lib/highlight.ts`; agent-supplied hunks via `lib/lineDiff.ts` |
-| Workspace file browse/edit (path-traversal trust boundary) | `server/files.ts` |
-| Webhooks (relayed from the control plane) | `server/integrations/`, `lib/integrations/`, `routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx` |
-| Connecting a provider: what the panel offers and why | `lib/cloud/providers.ts` (the gate) → `components/IntegrationConnect.tsx`; the catalog it reads comes from `server/cloud/providers.ts` |
-| Binding a connection to a workspace + runtime | `components/IntegrationAutomationSetup.tsx` (the panel after Connect) → `server/integrations/automation.ts`; refuse conditions mirrored in `lib/integrations/setupGate.ts`, event narrowing in `lib/integrations/automation.ts` |
-| "When a ticket moves to X" → events + filters | `lib/integrations/triggers.ts` — compiled on the server write path too, so the form's preview *is* the binding |
-| Named automation starting points (trigger + prompt) | `lib/integrations/recipes.ts`; gated on `ProviderMeta.emitsCommentText` and on the trigger existing |
-| Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `routes/cloud.callback.tsx` |
-| First-run account gate | `routes/welcome.tsx`; the redirect lives in `AppLayout` in `routes/__root.tsx`, the remembered skip in `server/cloud/onboarding.ts` |
-| Runtime binary on PATH, args templates, transport | `server/runtimePath.ts`, `server/userPath.ts`, `lib/runtimeBinary.ts`, `lib/argsTemplate.ts`, `lib/runtimePresets.ts`, `lib/acpTransport.ts` |
+| The API surface: adding, renaming or scoping an operation | `packages/contracts/src/operations.ts` (the list) → `packages/contracts/src/types.ts` (the vocabulary); regenerate with `pnpm contract:generate` |
+| How a request reaches the facade, and how a refusal becomes a status | `packages/runtime/src/contract/dispatch.ts`; the one REST route is `apps/web/src/routes/api/v1/$.ts` |
+| "Why is this button disabled", sent to a non-TypeScript client | `packages/domain/src/tasks/actions.ts`; attached in `application/taskQueries.ts` |
+| An Apple client (iOS, macOS) | `packages/apple/OpenRunKit/` — `Generated.swift` is generated, everything else is hand-written |
+| Run/turn lifecycle, spawning a CLI, streaming stdout | `packages/runtime/src/execution/executor.ts` |
+| Per-CLI differences: headless invocation, session id, resume, model/effort flags | `packages/runtime/src/execution/resume.ts`, `packages/domain/src/runtimes/models.ts` |
+| Adopting a chat started in the CLI itself | `packages/domain/src/runtimes/nativeSessions.ts` + `packages/runtime/src/runtimes/nativeSessions.ts` (find them), `packages/domain/src/runtimes/nativeTranscript.ts` + `packages/runtime/src/runtimes/nativeTranscript.ts` (read one in full), `packages/runtime/src/runtimes/nativeImport.ts` (write it into a run), `executor.adoptNativeChat` (adopt without prompting); picker in `apps/web/src/features/chat/ComposerControls.tsx`. Automations resume saved chats in their existing workspace. |
+| Continuing a chat on another runtime (Claude ⇄ Codex handoff) | `packages/domain/src/runs/runtimeSwitch.ts` (the rules), `packages/domain/src/runs/handoffPrompt.ts` (what the new agent is told), `executor.sendFollowUp` (the switch); picker + one-time note in `apps/web/src/features/chat/Chat.tsx` |
+| Which models a picker offers | `packages/runtime/src/runtimes/modelCatalog.ts` (cache + refresh), `packages/domain/src/runtimes/modelDiscovery.ts` (per-CLI parsers); `packages/domain/src/runtimes/models.ts` is only the fallback seed |
+| Hiding models from the picker | `visibleModels` / `hiddenModelsIn` / `toggleHiddenModel` in `packages/domain/src/runtimes/models.ts`; stored as `hiddenModels` in `apps/web/src/lib/pickerPrefs.ts` (localStorage, display-only — the server never reads it) |
+| Hiding runtimes from the picker | `visibleRuntimes` / `hiddenRuntimesIn` / `toggleHiddenRuntime` in `packages/domain/src/runtimes/pickRuntime.ts`; stored as `hiddenRuntimes` in `apps/web/src/lib/pickerPrefs.ts` (same display-only contract) |
+| CLI stdout → chat events | `packages/domain/src/chat/agentEvents/` — one adapter per CLI (`claude.ts`, `codex.ts`, `grok.ts`, `acp.ts`); `packages/runtime/src/execution/turnEvents.ts` is the server-side re-export |
+| The event vocabulary itself (ACP subset) | `packages/domain/src/chat/acp.ts` (+ `packages/domain/src/chat/acpConformance.ts` guard), shapes in `packages/domain/src/chat/turnEvents.ts` |
+| ACP transport: driving an agent over JSON-RPC | `packages/runtime/src/execution/acpTurn.ts`, `packages/domain/src/runtimes/acpTransport.ts` |
+| Verification checks, verdicts, the repair loop | `packages/domain/src/runs/checks.ts` (defs), `packages/runtime/src/execution/checks.ts` (runner), `packages/domain/src/runs/verdict.ts` (judgement); `executor.concludeTurn` decides *whether* a turn is verified — unattended turns only |
+| Supervised mode / tool approvals | `packages/domain/src/runs/approvals.ts` (the model), `packages/domain/src/chat/claudeControl.ts` (Claude's responder), `packages/domain/src/runs/supervisedPolicy.ts` (who may) |
+| AI SDK UI Message Stream projection (read-only) | `packages/domain/src/chat/uiMessageStream.ts`, `apps/web/src/routes/api/runs/$runId/ui-stream.ts` |
+| Schema, migrations, seeded runtimes, `~/.openrun` paths | `packages/runtime/src/storage/db.ts`; shared home resolution in `packages/runtime/src/paths.ts` |
+| Cron arming | `packages/runtime/src/scheduling/scheduler.ts`; validation/labels in `packages/domain/src/tasks/cron.ts`, `packages/domain/src/tasks/scheduleHealth.ts` |
+| The local CLI (`openrun schedule …`) | `scripts/openrun.ts` owns argv and printing; `apps/cli/src/runtime/local.ts` connects to or starts the local worker, and `apps/cli/src/commands/integrations.ts` owns terminal setup and the temporary OAuth callback. Local calls use the same contract dispatcher as HTTP; `--url` explicitly selects the generated HTTP client. `scripts/worker.ts` boots the existing core without a web build. `packages/runtime/src/process/localRuntime.ts` elects one scheduler/executor owner per database before orphan recovery and exposes authenticated loopback IPC. Never write task rows from a short-lived CLI or start a second scheduler. Parsing/resolution stay in `apps/cli/src/commands/cliSchedule.ts` and `apps/cli/src/commands/cliResolve.ts`. |
+| Projects, shared-checkout chats, worktrees, `resolveWorkspacePath`, `assertWorkspaceFree` | `packages/runtime/src/workspaces/workspaces.ts`; externally-created Git worktrees are registered as user-owned workspaces and are never reset or removed by Open Run. |
+| Is a workspace physically fit to run in (exists, right worktree, right branch, clean)? | `packages/domain/src/workspaces/workspaceHealth.ts` (the codes + wording), `packages/runtime/src/workspaces/workspaceHealth.ts` (inspection, quarantine, restore) |
+| Why a scheduled / webhook fire is refused (isolation, contamination, `gh` preflight) | `packages/domain/src/tasks/unattendedGate.ts` (the rules), `packages/runtime/src/execution/unattendedPreflight.ts` (the lookups); called from `scheduler.refusal`, `runQueue.drainWorkspace`, `integrations/dispatcher.ts`, `core.setTaskEnabled` / `upsertTask` |
+| Diffs, commit/push/branch/PR, base snapshots | `packages/runtime/src/workspaces/git.ts`; UI in `apps/web/src/features/git/GitActions.tsx`, `apps/web/src/features/git/DiffPanel.tsx`, `packages/domain/src/workspaces/diff.ts` |
+| Undoing a run — files vs. the commits it made | `packages/domain/src/runs/undoRun.ts` (the rule), `git.runCommits` / `git.resetRunCommits`, `core.discardChanges`; the dialog lives in `apps/web/src/routes/runs.$runId.tsx` |
+| How a diff line looks (git panel **and** chat edit hunks) | `apps/web/src/features/git/DiffRows.tsx`; tokens from `apps/web/src/lib/highlight.ts`; agent-supplied hunks via `packages/domain/src/workspaces/lineDiff.ts` |
+| Workspace file browse/edit (path-traversal trust boundary) | `packages/runtime/src/workspaces/files.ts` |
+| Webhooks (relayed from the control plane) | `packages/runtime/src/integrations/`, `lib/integrations/`, `apps/web/src/routes/integrations.tsx` (layout) · `integrations.index.tsx` · `integrations.$provider.tsx` |
+| Connecting a provider: what the panel offers and why | `packages/domain/src/cloud/providers.ts` (the gate) → `apps/web/src/features/integrations/IntegrationConnect.tsx`; the catalog it reads comes from `packages/runtime/src/cloud/providers.ts` |
+| Binding a connection to a workspace + runtime | `apps/web/src/features/integrations/IntegrationAutomationSetup.tsx` (the panel after Connect) → `packages/runtime/src/integrations/automation.ts`; refuse conditions mirrored in `packages/domain/src/integrations/setupGate.ts`, event narrowing in `packages/domain/src/integrations/automation.ts` |
+| "When a ticket moves to X" → events + filters | `packages/domain/src/integrations/triggers.ts` — compiled on the server write path too, so the form's preview *is* the binding |
+| Named automation starting points (trigger + prompt) | `packages/domain/src/integrations/recipes.ts`; gated on `ProviderMeta.emitsCommentText` and on the trigger existing |
+| Cloud client (Sign in, hosted Jira, outbound relay) | `lib/cloud/`, `server/cloud/`, `apps/web/src/routes/cloud.callback.tsx` |
+| First-run account gate | `apps/web/src/routes/welcome.tsx`; the redirect lives in `AppLayout` in `apps/web/src/routes/__root.tsx`, the remembered skip in `packages/runtime/src/cloud/onboarding.ts` |
+| Runtime binary on PATH, args templates, transport | `packages/runtime/src/runtimes/runtimePath.ts`, `packages/runtime/src/process/userPath.ts`, `packages/domain/src/runtimes/runtimeBinary.ts`, `packages/domain/src/runtimes/argsTemplate.ts`, `packages/domain/src/runtimes/runtimePresets.ts`, `packages/domain/src/runtimes/acpTransport.ts` |
 | Live updates | the modules in the live-path diagram above |
-| SSE reconnect, heartbeat watchdog, dev connection overlay | `lib/liveStream.ts`; `components/DevLiveStatus.tsx` (dev-only, mounted in `routes/__root.tsx`) |
-| Automation create/edit form (largest file, ~1300 lines) | `components/TaskForm.tsx`; project+workspace pair in `components/WorkspacePicker.tsx` |
-| Chat transcript / composer pickers | `components/Chat.tsx`, `components/ComposerControls.tsx` |
-| MCP servers: which config file, and editing it | `lib/mcpTargets.ts` (where they live per CLI) → `lib/mcp.ts` (shapes, JSON + TOML editors) → `server/mcp.ts` (the IO); UI in `routes/mcp.tsx` |
-| Signing in to an OAuth-gated MCP server | `lib/mcpOAuth.ts` (RFC 9728/8414 URL candidates, refresh skew, refusal, header) → `server/mcpOAuth.ts` (discovery, dynamic client registration, PKCE, token, fan-out, refresh timer) → `routes/api/mcp/oauth/callback.ts` (vendor redirect); UI in `routes/mcp.tsx`. One sign-in writes `Authorization: Bearer` onto the shared server — there is no per-CLI `mcp login` / pty path. |
-| One server, every CLI: the shared registry and its fan-out | `lib/mcpShared.ts` (sync states) → `server/mcpShared.ts` (`~/.openrun/mcp.json`, ownership manifest, projection into `SHARED_MCP_TARGETS`) |
-| Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
-| Slash commands | `lib/slashCommands.ts` (parsing, app commands), `server/slashCommands.ts` (discovery on disk), `components/SlashCommandMenu.tsx` |
-| Assistant prose: markdown, code fences, file chips | `components/chat/ChatMarkdown.tsx`; `lib/codeLanguage.ts`, `lib/filePathToken.ts`; `.chat-markdown` / `.chat-code` in `styles.css` |
-| Custom / MCP tool call rendering | `lib/toolCallView.ts` — `humanizeToolName`, `toolCallFields`, `formatToolResult` |
-| Command output paint (ANSI + heuristics) | `lib/terminalOutput.ts` (tokenizer) → `components/chat/TerminalOutput.tsx`; the `--term-ansi-*` slots, the `--term-*` roles, and the `.term-*` classes in `styles.css`. Paint is opt-in via `var(--term-x, currentColor)`, so a theme that maps no slots prints plain — never branch on the theme in the tokenizer |
-| Terminal palettes (Nord, Dracula, Gruvbox…) | `lib/terminalPalette.ts` (ids + boot script) → `components/chat/TerminalPalettePicker.tsx` (palette list in the run top-bar ⋯ menu while debug is on); the values are `[data-chat-theme='terminal'][data-term-palette='…']` blocks in `styles.css`, each carrying the scheme's own 16 slots plus the `--term-bg` / `--term-fg` it was drawn against |
-| Transcript rows: tool calls, sub-agents, the working line | `components/chat/` — `ToolCall.tsx`, `SubagentCall.tsx`, `EditDiff.tsx`, `WorkingIndicator.tsx`; label from `lib/turnActivity.ts` |
-| Tools Open Run offers *the agent* over MCP | `lib/openrunTools.ts` (definitions), `server/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
-| Supervised allow/deny | `components/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `lib/queries.ts` |
-| Command preview (Runtimes only) | `components/CommandPreview.tsx`; `server/commandPreview.ts`; `useCommandPreview` in `lib/queries.ts` |
-| Shared run prereqs (workspace/PATH/prompt) | `lib/runPrereqGate.ts` → `enableGate` / `runNowGate` / `lib/integrations/setupGate.ts` |
-| Starting an empty conversation (desktop composer **and** phone) | `lib/startChatGate.ts` (the rules) → `core.startChat` / `core.startRunOptions` |
-| What a paired phone may do, and the routes that enforce it | `lib/mobileScope.ts` (the one allowlist; tags are frozen, widening adds a tag) → `server/mobile/auth.ts` → `server/mobile/handlers.ts`; routes in `routes/api/mobile/**`; the app in the private tree's `ios/` |
-| What "Send test event" sends | `lib/integrations/testEvent.ts` shapes it from the connection's own bindings; `cloud/hosted.ts` `ingestTestEvent` delivers it |
-| Bind address, access token, "who may call this" | `lib/serverAccess.ts` (rules) · `server/accessToken.ts` (values + enforcement) · `src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
-| Secrets at rest (local DB) | `server/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
-| Open-core boundary (what is free vs. commercial) | `lib/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
+| SSE reconnect, heartbeat watchdog, dev connection overlay | `apps/web/src/lib/liveStream.ts`; `apps/web/src/components/DevLiveStatus.tsx` (dev-only, mounted in `apps/web/src/routes/__root.tsx`) |
+| Automation create/edit form (largest file, ~1300 lines) | `apps/web/src/features/automations/TaskForm.tsx`; project+workspace pair in `apps/web/src/features/workspaces/WorkspacePicker.tsx` |
+| Chat transcript / composer pickers | `apps/web/src/features/chat/Chat.tsx`, `apps/web/src/features/chat/ComposerControls.tsx` |
+| MCP servers: which config file, and editing it | `packages/domain/src/mcp/mcpTargets.ts` (where they live per CLI) → `packages/domain/src/mcp/mcp.ts` (shapes, JSON + TOML editors) → `packages/runtime/src/mcp/mcp.ts` (the IO); UI in `apps/web/src/routes/mcp.tsx` |
+| Signing in to an OAuth-gated MCP server | `packages/domain/src/mcp/mcpOAuth.ts` (RFC 9728/8414 URL candidates, refresh skew, refusal, header) → `packages/runtime/src/mcp/mcpOAuth.ts` (discovery, dynamic client registration, PKCE, token, fan-out, refresh timer) → `apps/web/src/routes/api/mcp/oauth/callback.ts` (vendor redirect); UI in `apps/web/src/routes/mcp.tsx`. One sign-in writes `Authorization: Bearer` onto the shared server — there is no per-CLI `mcp login` / pty path. |
+| One server, every CLI: the shared registry and its fan-out | `packages/domain/src/mcp/mcpShared.ts` (sync states) → `packages/runtime/src/mcp/mcpShared.ts` (`~/.openrun/mcp.json`, ownership manifest, projection into `SHARED_MCP_TARGETS`) |
+| Tools Open Run offers *the agent* over MCP | `packages/domain/src/mcp/openrunTools.ts` (definitions), `packages/runtime/src/mcp/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
+| Slash commands | `packages/domain/src/chat/slashCommands.ts` (parsing, app commands), `packages/runtime/src/runtimes/slashCommands.ts` (discovery on disk), `apps/web/src/features/chat/SlashCommandMenu.tsx` |
+| Assistant prose: markdown, code fences, file chips | `apps/web/src/features/chat/ChatMarkdown.tsx`; `packages/domain/src/chat/codeLanguage.ts`, `packages/domain/src/workspaces/filePathToken.ts`; `.chat-markdown` / `.chat-code` in `styles.css` |
+| Custom / MCP tool call rendering | `packages/domain/src/chat/toolCallView.ts` — `humanizeToolName`, `toolCallFields`, `formatToolResult` |
+| Command output paint (ANSI + heuristics) | `packages/domain/src/chat/terminalOutput.ts` (tokenizer) → `apps/web/src/features/chat/TerminalOutput.tsx`; the `--term-ansi-*` slots, the `--term-*` roles, and the `.term-*` classes in `styles.css`. Paint is opt-in via `var(--term-x, currentColor)`, so a theme that maps no slots prints plain — never branch on the theme in the tokenizer |
+| Terminal palettes (Nord, Dracula, Gruvbox…) | `apps/web/src/lib/terminalPalette.ts` (ids + boot script) → `apps/web/src/features/chat/TerminalPalettePicker.tsx` (palette list in the run top-bar ⋯ menu while debug is on); the values are `[data-chat-theme='terminal'][data-term-palette='…']` blocks in `styles.css`, each carrying the scheme's own 16 slots plus the `--term-bg` / `--term-fg` it was drawn against |
+| Transcript rows: tool calls, sub-agents, the working line | `apps/web/src/features/chat/` — `ToolCall.tsx`, `SubagentCall.tsx`, `EditDiff.tsx`, `WorkingIndicator.tsx`; label from `packages/domain/src/chat/turnActivity.ts` |
+| Tools Open Run offers *the agent* over MCP | `packages/domain/src/mcp/openrunTools.ts` (definitions), `packages/runtime/src/mcp/openrunTools.ts` (answers), `scripts/mcp-server.ts` (the stdio process the CLI spawns) |
+| Supervised allow/deny | `apps/web/src/features/chat/Chat.tsx`; `fns.answerApproval`; `useAnswerApproval` in `apps/web/src/features/chat/queries.ts` |
+| Command preview (Runtimes only) | `apps/web/src/features/runtimes/CommandPreview.tsx`; `packages/runtime/src/runtimes/commandPreview.ts`; `useCommandPreview` in `apps/web/src/features/runtimes/queries.ts` |
+| Shared run prereqs (workspace/PATH/prompt) | `packages/domain/src/tasks/runPrereqGate.ts` → `enableGate` / `runNowGate` / `packages/domain/src/integrations/setupGate.ts` |
+| Starting an empty conversation (desktop composer **and** phone) | `packages/domain/src/runs/startChatGate.ts` (the rules) → `core.startChat` / `core.startRunOptions` |
+| What a paired phone may do, and the routes that enforce it | `packages/domain/src/security/mobileScope.ts` (the one allowlist; tags are frozen, widening adds a tag) → `packages/runtime/src/mobile/auth.ts` → `packages/runtime/src/mobile/handlers.ts`; routes in `routes/api/mobile/**`; the app in the private tree's `ios/` |
+| What "Send test event" sends | `packages/domain/src/integrations/testEvent.ts` shapes it from the connection's own bindings; `cloud/hosted.ts` `ingestTestEvent` delivers it |
+| Bind address, access token, "who may call this" | `packages/domain/src/security/serverAccess.ts` (rules) · `packages/runtime/src/security/accessToken.ts` (values + enforcement) · `apps/web/src/start.ts` (global middleware) · `scripts/start.ts` (bind) · `SECURITY.md` |
+| Secrets at rest (local DB) | `packages/runtime/src/security/secretBox.ts` (`~/.openrun/data-key`); policy in the private tree's `SECRETS.md` |
+| Open-core boundary (what is free vs. commercial) | `packages/domain/src/cloud/edition.ts` + its test · `COMMERCIAL-LICENSE.md` |
 | Release pipeline: version maths, cadence, notes | `scripts/release/` (`semver.ts`, `conventional.ts`, `plan.ts`, `cadence.ts`, `notes.ts`) — all pure, all tested; IO in `scripts/release/index.ts`; runbook in `RELEASING.md` |
-| Why CI rejected a PR title, or a missing changelog entry | `lib/release/conventional.ts` (`validateCommitTitle`) → `scripts/check-title.ts`; `scripts/check-changelog.ts`; the `pr-title` workflow and the `changelog` job in `ci.yml` |
+| Why CI rejected a PR title, or a missing changelog entry | `scripts/release/conventional.ts` (`validateCommitTitle`) → `scripts/check-title.ts`; `scripts/check-changelog.ts`; the `pr-title` workflow and the `changelog` job in `ci.yml` |
 | Cutting a release, or why one did not happen | `RELEASING.md`; `release.cadence` in `package.json`; `.github/workflows/release-prepare.yml` + `release-publish.yml` |
 | Licensing, contributing, disclosure | `LICENSE` (AGPLv3), `NOTICE`, `CONTRIBUTING.md`, `SECURITY.md`, `CLA.md` |
-| Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `components/ui.tsx` |
-| Design tokens | `src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |
-| Chat transcript themes (Open Run / Terminal) | `lib/chatTheme.ts` (ids + what starts expanded) → `components/chat/ChatThemeProvider.tsx` (`data-chat-theme` on `<html>`) → the `--chat-*` tokens and the `[data-chat-theme='terminal']` block in `styles.css`; toggle in `components/chat/ChatDebugToggle.tsx` (Debug view in the run top-bar ⋯ menu). A theme is tokens — if a component hardcodes the look, tokenize it rather than branching on the theme in JSX |
-| Start page and `/runs/new`: the draft a run begins from | `hooks/useNewRunDraft.ts` (all the wiring), `components/NewRunSurface.tsx` (the pickers around it), `routes/index.tsx`, `routes/runs.new.tsx`; `components/chat/Composer.tsx` stays props-only |
-| Automation shortcuts on the start page | `lib/automationShortcuts.ts` (the templates) → `components/AutomationShortcuts.tsx`; seeded into the form by `routes/tasks.new.tsx` via `?shortcut=` |
-| Planner proposals → install automations | `lib/planProposals.ts`; UI in `components/PlanProposalCard.tsx`, `PlanProposalsInChat.tsx`, `routes/planner.tsx` |
+| Shared primitives (`Modal`, `StatusBadge`, `PageHeader`) | `apps/web/src/components/ui.tsx` |
+| Design tokens | `apps/web/src/styles.css` — Tailwind v4, CSS custom properties, `color-scheme: dark` |
+| Chat transcript themes (Open Run / Terminal) | `apps/web/src/lib/chatTheme.ts` (ids + what starts expanded) → `apps/web/src/features/chat/ChatThemeProvider.tsx` (`data-chat-theme` on `<html>`) → the `--chat-*` tokens and the `[data-chat-theme='terminal']` block in `styles.css`; toggle in `apps/web/src/features/chat/ChatDebugToggle.tsx` (Debug view in the run top-bar ⋯ menu). A theme is tokens — if a component hardcodes the look, tokenize it rather than branching on the theme in JSX |
+| Start page and `/runs/new`: the draft a run begins from | `apps/web/src/features/chat/useNewRunDraft.ts` (all the wiring), `apps/web/src/features/chat/NewRunSurface.tsx` (the pickers around it), `apps/web/src/routes/index.tsx`, `apps/web/src/routes/runs.new.tsx`; `apps/web/src/features/chat/Composer.tsx` stays props-only |
+| Automation shortcuts on the start page | `apps/web/src/lib/automationShortcuts.ts` (the templates) → `apps/web/src/features/automations/AutomationShortcuts.tsx`; seeded into the form by `apps/web/src/routes/tasks.new.tsx` via `?shortcut=` |
+| Planner proposals → install automations | `packages/domain/src/tasks/planProposals.ts`; UI in `apps/web/src/features/automations/PlanProposalCard.tsx`, `PlanProposalsInChat.tsx`, `apps/web/src/routes/planner.tsx` |
 
 Routes: `index.tsx` is the start page (composer + resume dropdown + automation
 shortcuts) · `mcp.tsx` MCP servers · `tasks.index.tsx` /
@@ -271,12 +266,12 @@ shortcuts) · `mcp.tsx` MCP servers · `tasks.index.tsx` /
 `runs.$runId.tsx` / `runs.new.tsx` · `integrations.tsx` /
 `integrations.index.tsx` / `integrations.$provider.tsx` · `notifications.tsx` ·
 `devices.tsx` · `runtimes.tsx` · `planner.tsx`.
-Projects live in `components/ProjectsManager.tsx` (modal from the picker), not
+Projects live in `apps/web/src/features/workspaces/ProjectsManager.tsx` (modal from the picker), not
 a standalone route.
 
 ## Conventions
 
-- **Tests** — `node:test` + `node:assert/strict`, colocated as `src/lib/foo.test.ts` beside
+- **Tests** — `node:test` + `node:assert/strict`, colocated as `packages/domain/src/foo.test.ts` beside
   `foo.ts`. Pure `lib/` logic is what's covered: gates, cron, args templates, matchers. A new
   rule module gets a colocated test.
 - **`changelog.d/`** — one markdown file per shipped change, folded into `CHANGELOG.md` at
@@ -346,8 +341,8 @@ Reference shape: <https://github.com/dennisadriaans/openrun/pull/34>.
 The gates that used to live in the template are still hard rules, enforced in
 review and by CI rather than by a checkbox: one shippable slice per PR; a
 user-facing change carries a `changelog.d/` entry in the negative-relief voice;
-a new rule module in `src/lib/` carries a colocated `*.test.ts`; a new refuse
-condition is mirrored in the matching gate module; `src/routeTree.gen.ts` is
+a new rule module in `packages/domain/src/` carries a colocated `*.test.ts`; a new refuse
+condition is mirrored in the matching gate module; `apps/web/src/routeTree.gen.ts` is
 regenerated, never hand-edited; nothing new runs off the user's machine.
 
 **Never credit an agent.** No commit, PR title, PR body, branch name, issue,
@@ -393,16 +388,16 @@ one-paragraph import, never a restatement.
 
 ## Gotchas
 
-- Four more files are **generated** from `src/contract/operations.ts`: `src/fns/index.ts`,
-  `src/contract/generated/client.ts`, `src/contract/generated/openapi.json`, and
-  `clients/apple/OpenRunKit/Sources/OpenRunKit/Generated.swift`. Never hand-edit them —
+- Four more files are **generated** from `packages/contracts/src/operations.ts`: `apps/web/src/fns/index.ts`,
+  `packages/contracts/src/generated/client.ts`, `packages/contracts/src/generated/openapi.json`, and
+  `packages/apple/OpenRunKit/Sources/OpenRunKit/Generated.swift`. Never hand-edit them —
   run `pnpm contract:generate`. The generator formats its own output with Biome, so
   `pnpm lint:fix` and the generator cannot disagree.
-- `src/routeTree.gen.ts` is **generated**. Never hand-edit it, and don't resolve conflicts in
+- `apps/web/src/routeTree.gen.ts` is **generated**. Never hand-edit it, and don't resolve conflicts in
   it by hand — regenerate with **`pnpm build`** (or `pnpm dev`). The compatibility
   command `pnpm generate-routes` also runs the Vite build. Use the Vite plugin rather
   than the standalone router CLI so the `Register` block retains the `config` entry
-  that types the `src/start.ts` instance.
+  that types the `apps/web/src/start.ts` instance.
 - Runs, automations, and the rest of app state live in `~/.openrun/openrun.db`
   (`OPENRUN_HOME` overrides the whole directory). Delete that file to reset.
   A leftover `data/openrun.db` in a checkout is moved there on first boot.
@@ -414,5 +409,5 @@ one-paragraph import, never a restatement.
 - Runs execute **real commands in a real repo with the user's own credentials**, and some
   runtimes pass `--dangerously-skip-permissions`. Treat run cwd resolution and prompt
   construction as security-relevant.
-- The Planner nav entry is commented out in `routes/__root.tsx`; the `/planner` route still
+- The Planner nav entry is commented out in `apps/web/src/routes/__root.tsx`; the `/planner` route still
   exists and uses the same empty-projects gate as Automations.

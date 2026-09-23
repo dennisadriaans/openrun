@@ -6,10 +6,10 @@
  *
  * Outputs, all committed and never hand-edited:
  *
- *   src/fns/index.ts                       TanStack server functions (web)
- *   src/contract/generated/client.ts       typed fetch client (web, Nuxt)
- *   src/contract/generated/openapi.json    the published contract
- *   clients/apple/OpenRunKit/…/Generated.swift   Swift operations + requests
+ *   apps/web/src/fns/index.ts                       TanStack server functions (web)
+ *   packages/contracts/src/generated/client.ts       typed fetch client (web, Nuxt)
+ *   packages/contracts/src/generated/openapi.json    the published contract
+ *   packages/apple/OpenRunKit/…/Generated.swift   Swift operations + requests
  *
  * Drift is caught the same way a stale `routeTree.gen.ts` is: regenerate, then
  * `git diff --exit-code`. A hand-edit or a stale commit fails CI. Pure string
@@ -18,20 +18,21 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
 
-import { API_PREFIX, operations } from '../../src/contract/index.ts'
+import { API_PREFIX, operations } from '@openrun/contracts'
 // The heartbeat period the SSE factories already share. Emitting it into Swift
 // rather than restating it there is the whole point: `liveStream.ts` owns the
 // number, and a change to it reaches the Apple clients on the next generate.
-import { SERVER_PING_MS, STALE_AFTER_MS } from '../../src/lib/liveStream.ts'
-import type { Operation } from '../../src/contract/index.ts'
+import { SERVER_PING_MS, STALE_AFTER_MS } from '@openrun/domain/live/protocol'
+import type { Operation } from '@openrun/contracts'
 
 const ROOT = join(import.meta.dirname, '..', '..')
 
 const BANNER = `/**
  * GENERATED — do not edit.
  *
- * Every operation here comes from \`src/contract/operations.ts\`. Change the
+ * Every operation here comes from \`packages/contracts/src/operations.ts\`. Change the
  * descriptor and run \`pnpm contract:generate\`; editing this file by hand is
  * undone by the next run and fails the \`contract drift\` check in CI.
  */`
@@ -55,18 +56,18 @@ const BANNER = `/**
  * typecheck.
  */
 const TYPE_SOURCES: Record<string, string> = {
-  CreateIntegrationAutomationInput: '../server/core',
-  CreateIntegrationInput: '../server/core',
-  NotifierInput: '../server/core',
-  PreviewCommandInput: '../server/core',
-  RuntimeInput: '../server/core',
-  TaskInput: '../server/core',
-  UpdateIntegrationInput: '../server/core',
-  PlanProposal: '../lib/planProposals',
-  IntegrationProviderId: '../lib/integrations/types',
-  WebhookFilters: '../lib/integrations/types',
-  CheckDef: '../lib/checks',
-  McpServerConfig: '../lib/mcp',
+  CreateIntegrationAutomationInput: '@openrun/runtime/core',
+  CreateIntegrationInput: '@openrun/runtime/core',
+  NotifierInput: '@openrun/runtime/core',
+  PreviewCommandInput: '@openrun/runtime/core',
+  RuntimeInput: '@openrun/runtime/core',
+  TaskInput: '@openrun/runtime/core',
+  UpdateIntegrationInput: '@openrun/runtime/core',
+  PlanProposal: '@openrun/domain/tasks/planProposals',
+  IntegrationProviderId: '@openrun/domain/integrations/types',
+  WebhookFilters: '@openrun/domain/integrations/types',
+  CheckDef: '@openrun/domain/runs/checks',
+  McpServerConfig: '@openrun/domain/mcp/mcp',
 }
 
 /** Import lines for exactly the types the emitted source mentions. */
@@ -84,7 +85,7 @@ function typeImportsFor(body: string): string {
 }
 
 const GENERATED_IMPORTS = `import { createServerFn } from '@tanstack/react-start'
-import { optionalShape, shape } from '../lib/validate.ts'`
+import { optionalShape, shape } from '@openrun/domain/common/validate'`
 
 const FNS_PREAMBLE = `
 /**
@@ -93,7 +94,7 @@ const FNS_PREAMBLE = `
  * \`child_process\` out of the client bundle — a top-level static import of
  * anything under \`server/\` here breaks the client build.
  */
-const dispatcher = () => import('../server/contract/dispatch')
+const dispatcher = () => import('@openrun/runtime/contract/dispatch')
 
 /**
  * Turn a dispatch result back into the throw-or-value contract React Query
@@ -116,7 +117,7 @@ async function run(id: string, data?: unknown): Promise<unknown> {
  * handlers can name \`core.ts\`'s own inferred types and every caller in
  * \`lib/queries.ts\` keeps the types it had before the contract existed.
  */
-type Core = typeof import('../server/core')
+type Core = typeof import('@openrun/runtime/core')
 type CoreResult<K extends keyof Core> = Core[K] extends (...args: never[]) => infer R
   ? Awaited<R>
   : never
@@ -190,7 +191,7 @@ function buildFns(): string {
 ${GENERATED_IMPORTS}
 ${typeImportsFor(body)}
 
-export type { PlanProposal } from '../lib/planProposals'
+export type { PlanProposal } from '@openrun/domain/tasks/planProposals'
 
 export type {
   LocalDirEntry,
@@ -201,7 +202,7 @@ export type {
   WorkspaceWithMeta,
   IntegrationPublic,
   TaskWithMeta,
-} from '../server/core'
+} from '@openrun/runtime/core'
 ${FNS_PREAMBLE}${body}`
 }
 
@@ -416,7 +417,7 @@ function buildOpenApi(): string {
       title: 'Open Run',
       version: '1.0.0',
       description:
-        'Every capability Open Run exposes. Generated from src/contract/operations.ts — ' +
+        'Every capability Open Run exposes. Generated from packages/contracts/src/operations.ts — ' +
         'the same list that generates the server functions, the typed client and OpenRunKit.',
     },
     servers: [{ url: 'http://127.0.0.1:3000', description: 'The local Open Run server' }],
@@ -546,7 +547,7 @@ public let apiPrefix = "${API_PREFIX}"
 
 /// How often the server heartbeats an SSE stream, in seconds.
 ///
-/// Generated from \`SERVER_PING_MS\` in \`src/lib/liveStream.ts\`. Do not restate
+/// Generated from \`SERVER_PING_MS\` in \`packages/domain/src/live/protocol.ts\`. Do not restate
 /// it here — the web client learned the hard way that a second copy of this
 /// number drifts, and \`SSEClient\` derives its watchdog from these two values.
 public let serverPingInterval: TimeInterval = ${SERVER_PING_MS / 1000}
@@ -565,11 +566,11 @@ ${requests}
 type Output = { path: string; contents: string }
 
 const outputs: Output[] = [
-  { path: 'src/fns/index.ts', contents: buildFns() },
-  { path: 'src/contract/generated/client.ts', contents: buildTsClient() },
-  { path: 'src/contract/generated/openapi.json', contents: buildOpenApi() },
+  { path: 'apps/web/src/fns/index.ts', contents: buildFns() },
+  { path: 'packages/contracts/src/generated/client.ts', contents: buildTsClient() },
+  { path: 'packages/contracts/src/generated/openapi.json', contents: buildOpenApi() },
   {
-    path: 'clients/apple/OpenRunKit/Sources/OpenRunKit/Generated.swift',
+    path: 'packages/apple/OpenRunKit/Sources/OpenRunKit/Generated.swift',
     contents: buildSwift(),
   },
 ]
@@ -594,7 +595,8 @@ const formattable = outputs
   .map((out) => out.path)
   .filter((path) => path.endsWith('.ts') || path.endsWith('.json'))
 
-const formatted = spawnSync('pnpm', ['exec', 'biome', 'check', '--write', ...formattable], {
+const biome = createRequire(import.meta.url).resolve('@biomejs/biome/bin/biome')
+const formatted = spawnSync(process.execPath, [biome, 'check', '--write', ...formattable], {
   cwd: ROOT,
   encoding: 'utf8',
 })

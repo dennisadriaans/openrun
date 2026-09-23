@@ -1,0 +1,103 @@
+/**
+ * Extra gates that only apply to a run nobody is watching.
+ *
+ * A scheduled or webhook-triggered run has no human to notice that it landed
+ * in the wrong checkout, inherited the previous run's half-finished edits, or
+ * spent four minutes discovering that `gh` is logged out. These three rules
+ * are what separate an AFK-safe automation from one that merely started on
+ * time:
+ *
+ * 1. **Serialization** — scheduled runs reuse their selected checkout and the
+ *    workspace queue keeps one writer there at a time. Webhooks receive a
+ *    fresh execution worktree.
+ * 2. **Health** — the worktree must physically exist, be the right worktree,
+ *    be on its configured branch, and be clean (see `workspaceHealth.ts`).
+ *    A one-time run in the user's own checkout may continue existing edits.
+ * 3. **Capability preflight** — an automation that is going to reach for
+ *    GitHub is refused up front when `gh` is missing or logged out, instead of
+ *    crashing partway through and leaving the workspace half-edited.
+ *
+ * Pure and browser-safe so Enable, the scheduler, the queue drain and the
+ * automation UI all refuse for the same reason in the same words.
+ */
+import { ghNotAuthenticatedMessage, ghNotInstalledMessage } from '../workspaces/gitActionGate.ts'
+import {
+  workspaceHealthBlockedReason,
+  type WorkspaceHealth,
+} from '../workspaces/workspaceHealth.ts'
+
+export type UnattendedGateInput = {
+  /** The executor creates a fresh checkout from a resolved commit. */
+  freshExecution?: boolean
+  resumeSessionId?: string
+  /** 'main' is the user's own checkout; 'worktree' is app-managed and disposable. */
+  workspaceKind: string
+  /** Task opt-out. False lets an automation deliberately run in the main checkout. */
+  requireIsolation: boolean
+  /** A one-time task in the user's checkout may start from its current edits. */
+  fireOnce?: boolean
+  /** Physical state of the workspace; null when it could not be inspected. */
+  health: WorkspaceHealth | null
+  /** True when this automation may open PRs or was marked as needing the gh CLI. */
+  requiresGh: boolean
+  ghInstalled: boolean
+  ghAuthenticated: boolean
+}
+
+/** Legacy wording retained for old clients that may still display the action. */
+export function sharedCheckoutMessage(): string {
+  return "Unattended runs are not allowed in the main checkout — it is shared with your editor and with every other automation, so one run's branch switch and leftover edits become the next run's starting point. Give this automation its own worktree, or turn off workspace isolation for it."
+}
+
+/** Developer-facing error when gh is required but not usable right now. */
+export function ghPreflightMessage(installed: boolean): string {
+  return installed ? ghNotAuthenticatedMessage() : ghNotInstalledMessage()
+}
+
+/** Developer-facing error when a managed worktree already has an AFK owner. */
+export function workspaceOwnerMessage(ownerName: string): string {
+  const owner = ownerName.trim() || 'another automation'
+  return `This worktree is already assigned to unattended automation "${owner}". Give this automation its own worktree before enabling or firing it.`
+}
+
+/**
+ * True when this automation is going to touch GitHub — either because its
+ * runtime is allowed to open PRs (the prompt appendix tells it to run
+ * `gh pr create`) or because the automation was explicitly marked as needing
+ * an authenticated CLI.
+ */
+export function requiresGhAuth(input: { canOpenPrs: boolean; requireGhAuth: boolean }): boolean {
+  return input.canOpenPrs || input.requireGhAuth
+}
+
+/**
+ * Reason an unattended fire would be unsafe, or `null` when it may proceed.
+ * Webhook isolation is represented by `freshExecution`; scheduled runs are
+ * serialized by the workspace queue before reaching this gate.
+ */
+export function unattendedBlockedReason(input: UnattendedGateInput): string | null {
+  const continuing = !input.freshExecution && Boolean(input.resumeSessionId?.trim())
+  const currentEdits =
+    !input.freshExecution &&
+    input.fireOnce &&
+    input.workspaceKind === 'main' &&
+    !input.requireIsolation &&
+    input.health?.code === 'dirty'
+  const inspected =
+    input.health &&
+    (currentEdits ||
+      (continuing && ['dirty', 'branch-drift', 'detached'].includes(input.health.code)))
+      ? { ...input.health, code: 'ok' as const }
+      : input.health
+  const health = workspaceHealthBlockedReason(inspected, { unattended: !input.freshExecution })
+  if (health) return health
+  if (input.requiresGh && !(input.ghInstalled && input.ghAuthenticated)) {
+    return ghPreflightMessage(input.ghInstalled)
+  }
+  return null
+}
+
+/** True when an unattended fire may proceed. */
+export function canRunUnattended(input: UnattendedGateInput): boolean {
+  return unattendedBlockedReason(input) === null
+}

@@ -27,13 +27,15 @@ Node 22+ and `pnpm` are required. Platform notes and first-run steps:
 ```bash
 pnpm lint        # Biome — formatting and lint in one pass (pnpm lint:fix applies it)
 pnpm typecheck   # tsc --noEmit — strict, plus noUnusedLocals/Parameters
+pnpm architecture:check # package dependencies, exports and capability cycles
+pnpm contract:check # regenerate and verify client artifacts
 pnpm test        # node:test, no Vitest/Jest
 pnpm build       # catches client/server bundle violations
 ```
 
-All four must pass. `pnpm build` matters more than it looks: the most common
-way to break this project is a static import of `src/server/*` from a route
-component or from `src/fns/index.ts`, which drags `better-sqlite3` and
+All checks must pass. `pnpm build` matters more than it looks: the most common
+way to break this project is a static import of `packages/runtime/src/*` from a route
+component or from `apps/web/src/fns/index.ts`, which drags `better-sqlite3` and
 `child_process` into the client bundle. Typecheck will not catch it; the build
 will.
 
@@ -42,25 +44,26 @@ will.
 These are in [AGENTS.md](./AGENTS.md) in full. A PR that breaks one will be sent
 back, so they are worth knowing up front:
 
-1. **`src/server/**` is server-only.** UI routes reach it *only* through
-   `src/fns/index.ts`, where every handler does `await import('../server/core')`
-   **lazily**. Type-only imports from `server/*` are fine; value imports are not.
-2. **`src/lib/**` is browser-safe and dependency-free.** No `node:` imports. The
+1. **`packages/runtime/src/**` is server-only.** UI routes reach it *only* through
+   `apps/web/src/fns/index.ts`, where every handler imports `@openrun/runtime/contract/dispatch`
+   **lazily**. Type-only runtime imports are fine; value imports in UI components are not.
+2. **`packages/domain/src/**` is browser-safe, with no framework or platform IO.** No `node:` imports. The
    same rule module runs in the browser and on the server write path, so the UI
    can disable a control with the exact message the server would have thrown.
 3. **Turn events speak ACP.** New agent output goes through an adapter in
-   `src/lib/agentEvents/` that maps onto the shapes in `src/lib/acp.ts`. Do not
+   `packages/domain/src/chat/agentEvents/` that maps onto the shapes in `packages/domain/src/chat/acp.ts`. Do not
    invent a payload field that the Agent Client Protocol already names.
 4. **`turn_events` rows are append-only and forward-compatible.** Every payload
    field is optional; readers tolerate `undefined` rather than assuming a
    backfill.
-5. **`src/server/core.ts` is the only facade.** New server capability ⇒ export
-   from `core.ts`, wrap in `fns/index.ts`, hook in `lib/queries.ts`.
+5. **`packages/runtime/src/core.ts` is the application facade.** Implement a capability
+   in `application/`, export it from `core.ts`, add a contract descriptor, regenerate,
+   and connect it in the web feature's `queries.ts`.
 6. **A new refuse condition goes in the server path *and* the matching gate
-   module** (`lib/runPrereqGate.ts`, `enableGate.ts`, `runNowGate.ts`,
+   module** (`packages/domain/src/tasks/runPrereqGate.ts`, `enableGate.ts`, `runNowGate.ts`,
    `projectGate.ts`, `gitActionGate.ts`) — otherwise the UI and the server drift
    and the button lies.
-7. **Never hand-edit `src/routeTree.gen.ts`.** Run `pnpm build` to regenerate it.
+7. **Never hand-edit `apps/web/src/routeTree.gen.ts`.** Run `pnpm build` to regenerate it.
 
 ## Conventions
 
@@ -73,13 +76,12 @@ back, so they are worth knowing up front:
   Each needs per-site judgement, and turning them on across the existing UI is a
   standalone contribution we would welcome — one rule per PR, not all at once.
 - **Tests** — `node:test` + `node:assert/strict`, colocated as
-  `src/lib/foo.test.ts` beside `foo.ts`. Pure `lib/` logic is what's covered:
+  `packages/domain/src/foo.test.ts` beside `foo.ts`. Pure `lib/` logic is what's covered:
   gates, cron, args templates, matchers. **A new rule module gets a colocated
   test.**
-- **Import extensions** — value imports in test-covered `lib/` modules carry an
-  explicit `.ts` extension (`from './cron.ts'`), because
-  `--experimental-strip-types` has no bundler resolution. Type-only imports and
-  untested modules may omit it. Match the file you are editing.
+- **Import extensions** — relative source imports carry an explicit `.ts` or
+  `.tsx` extension because `--experimental-strip-types` has no bundler resolution.
+  Cross-package imports use declared `@openrun/...` exports.
 - **Changelog** — add one markdown file to `changelog.d/`, written in the
   negative-relief voice the existing entries use: *"You no longer …"*. Describe
   what changed for a user, not what you refactored.
@@ -95,8 +97,8 @@ The highest-value contribution paths, in order:
 1. **A new runtime adapter.** Adding support for another headless coding-agent
    CLI. A CLI is a fit only if it is non-interactive (prompt on stdin or a
    file, then exit). TUI-only agents and IDE extensions are out of scope. The
-   four levels are: preset (`lib/runtimePresets.ts`), events
-   (`lib/agentEvents/`), resume (`server/resume.ts`), models (`lib/models.ts`).
+   four levels are: preset (`packages/domain/src/runtimes/runtimePresets.ts`), events
+   (`packages/domain/src/chat/agentEvents/`), resume (`packages/runtime/src/execution/resume.ts`), models (`packages/domain/src/runtimes/models.ts`).
    Walkthrough: [openrun.sh/docs/adding-a-runtime](https://openrun.sh/docs/adding-a-runtime).
 2. **A new webhook provider**, normalising onto the existing
    `CanonicalWebhookEvent`.
@@ -161,3 +163,5 @@ directly shapes what gets built next.
 ## Code of conduct
 
 By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+See [the architecture guide](docs/architecture.md) for package ownership, feature locations, and the steps for adding a capability. Run `pnpm architecture:check` and `pnpm contract:check` before opening a PR.
