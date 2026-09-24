@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { openrunHome } from '@openrun/runtime/paths'
@@ -28,6 +28,8 @@ export type TimelineEntry = {
   card?: StatusCard
   /** A reply to a prompt, such as a picker choice: part of the chat, never a request. */
   answer?: true
+  /** The typed request a card answers; its user entry shares this id. */
+  request?: string
 }
 export type PendingRequest = {
   id: string
@@ -122,6 +124,7 @@ function savedEntry(line: string): TimelineEntry | undefined {
       text: entry.text,
       ...(card && typeof card.status === 'string' && typeof card.title === 'string' && { card }),
       ...(entry.answer === true && { answer: true as const }),
+      ...(typeof entry.request === 'string' && { request: entry.request }),
     }
   } catch {
     return undefined
@@ -136,6 +139,11 @@ export function readSessionFile(file: string): TimelineEntry[] {
       const entry = line.trim() && savedEntry(line)
       return entry ? [entry] : []
     })
+}
+
+/** A card repeats its request's title, so the typed line above it is left out of the chat. */
+export function answeredByCard(entry: TimelineEntry, next: TimelineEntry | undefined): boolean {
+  return entry.role === 'user' && Boolean(next?.card) && next?.request === entry.id
 }
 
 /** Earlier sessions, most recent first. Sessions without a typed request are skipped. */
@@ -179,6 +187,26 @@ export function savedSessions(
     })
   }
   return sessions.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** Delete every saved transcript and return how many were removed. */
+export function deleteSavedSessions(directory = sessionsDirectory()): number {
+  let names: string[]
+  try {
+    names = readdirSync(directory).filter((name) => name.endsWith('.jsonl'))
+  } catch {
+    return 0
+  }
+  let removed = 0
+  for (const name of names) {
+    try {
+      rmSync(join(directory, name), { force: true })
+      removed++
+    } catch {
+      // A transcript that cannot be removed stays available to resume.
+    }
+  }
+  return removed
 }
 
 export function runStatusLabel(status: string): string {
@@ -267,16 +295,23 @@ export class CliSession {
     for (const listener of this.listeners) listener()
   }
 
-  log(role: TimelineEntry['role'], message: string, card?: StatusCard, answer = false): void {
+  log(
+    role: TimelineEntry['role'],
+    message: string,
+    card?: StatusCard,
+    answer = false,
+    id: string = randomUUID(),
+  ): void {
     const text = transcriptText(message).trim()
     if (!text) return
     const entry: TimelineEntry = {
-      id: randomUUID(),
+      id,
       at: Date.now(),
       role,
       text,
       ...(card && { card }),
       ...(answer && { answer: true as const }),
+      ...(card && this.current && !this.current.silent && { request: this.current.id }),
     }
     this.entries.push(entry)
     if (role === 'assistant' && this.current) this.responded = true
@@ -310,14 +345,15 @@ export class CliSession {
 
   enqueue(text: string, silent = false): void {
     if (!text.trim()) return
+    const id = randomUUID()
     this.pending.push({
-      id: randomUUID(),
+      id,
       at: Date.now(),
       text: text.trim(),
       detail: 'Queued',
       ...(silent ? { silent } : {}),
     })
-    if (!silent) this.log('user', text)
+    if (!silent) this.log('user', text, undefined, false, id)
     else this.changed()
   }
 
@@ -341,11 +377,19 @@ export class CliSession {
       } else {
         // Requests redirected from a form have already left that form's flow.
         this.current = { id: randomUUID(), at: Date.now(), text, detail: 'Preparing request' }
-        this.log('user', text)
+        this.log('user', text, undefined, false, this.current.id)
       }
       this.responded = false
     }
     this.changed()
+  }
+
+  /** Progress of a request that has not finished; undefined once it has. */
+  requestDetail(id: string): string | undefined {
+    const request =
+      [this.current, this.selected].find((row) => row?.id === id) ??
+      this.pending.find((row) => row.id === id)
+    return request?.detail
   }
 
   progress(detail: string): void {

@@ -22,6 +22,7 @@ const COMMANDS = new Set([
   'continue',
   'resume',
   'sessions',
+  'clear-history',
   'ls',
   'runs',
   'show',

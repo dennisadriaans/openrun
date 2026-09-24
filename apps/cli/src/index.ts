@@ -984,6 +984,28 @@ function cmdClear(ctx: Context): number {
   return 0
 }
 
+/** clear-history: forget typed commands and delete saved CLI sessions. Runs are kept. */
+async function cmdClearHistory(ctx: Context): Promise<number> {
+  const { flags, ui } = ctx
+  if (
+    ui.interactive &&
+    !flags.yes &&
+    !(await ui.confirm(
+      'Clear command history and delete every saved CLI session? This cannot be undone.',
+      false,
+    ))
+  )
+    return 0
+  const removed = ui.clearHistory()
+  const message = `Cleared command history and ${removed} saved ${removed === 1 ? 'session' : 'sessions'}.`
+  if (flags.json) console.log(JSON.stringify({ sessionsRemoved: removed }, null, 2))
+  else if (ui.interactive) {
+    ui.session = true
+    ui.info(message)
+  } else console.log(message)
+  return 0
+}
+
 /** resume (or sessions): choose an earlier CLI session and continue it here. */
 async function cmdSessions(ctx: Context): Promise<number> {
   const { flags, ui } = ctx
@@ -1308,6 +1330,8 @@ async function main(command: string, ctx: Context): Promise<number> {
       return cmdWhere(ctx)
     case 'clear':
       return cmdClear(ctx)
+    case 'clear-history':
+      return cmdClearHistory(ctx)
     case 'sessions':
       return cmdSessions(ctx)
     default:

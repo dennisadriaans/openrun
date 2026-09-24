@@ -1,0 +1,1 @@
+You no longer have to delete files in `~/.openrun` by hand to forget what you typed. `openrun clear-history`, or `/clear-history` at Home, clears the commands that ↑↓ and Tab offer and deletes saved CLI sessions, and keeps your runs and automations.
