@@ -39,7 +39,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macos-latest temporarily disabled; re-add it here to restore the
+        # macOS leg (and the "Apple client" step below, which only runs there).
+        os: [ubuntu-latest]
         node: [22]
         include:
           # Forward-compatibility canary. Runtime discovery and `node:test` are
