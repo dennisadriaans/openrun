@@ -183,6 +183,7 @@ export class TerminalSurface {
     this.session = session
     const { BoxRenderable, TextRenderable, ScrollBoxRenderable } = core
     this.renderer = renderer
+    renderer.setTerminalTitle('OpenRun')
     this.clipboard = core.createClipboard({
       host: core.createHostClipboard(),
       terminal: core.createRendererClipboardAdapter(renderer),
