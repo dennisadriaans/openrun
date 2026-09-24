@@ -390,7 +390,8 @@ function RuntimeModal({
           <span className="text-ui-base text-tier-secondary">
             May open pull requests
             <span className="ml-1.5 text-ui-sm text-tier-quaternary">
-              (adds a prompt telling the agent it can branch, push &amp; `gh pr create`)
+              (automations: Open Run pushes work that passed its checks and opens the PR; chats: the
+              agent may branch, push &amp; `gh pr create`)
             </span>
           </span>
         </label>

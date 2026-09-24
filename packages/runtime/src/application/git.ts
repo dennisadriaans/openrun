@@ -8,13 +8,17 @@ import {
   ensureRunEnvironment,
   releaseRunEnvironment,
   usingRunEnvironment,
+  renameRunBranch,
 } from '../execution/runEnvironment.ts'
 import {
+  branchNameForTitle,
   buildShipPlanPrompt,
   commitMessageText,
   fallbackShipPlan,
+  isScratchBranch,
   parseShipPlan,
   shipPlanProblem,
+  uniqueBranchName,
   type ShipPlan,
 } from '@openrun/domain/workspaces/shipPlan'
 import { shipBlockedReason } from '@openrun/domain/workspaces/gitActionGate'
@@ -382,12 +386,24 @@ export async function shipRun(input: {
       commits.push({ message: entry.message, sha: result.sha, paths: entry.paths })
     }
 
-    const pushed = await git.push(run.cwd)
-
     // Title the PR from the plan when there is one; a ship that only pushes
     // existing commits falls back to the run's own name.
     const title =
       plan?.prTitle || fallbackShipPlan({ taskName: run.taskName ?? '', changed: [] }).prTitle
+
+    // An execution checkout works on `openrun/<runId>`; what reaches origin is
+    // named after the change, the same way a person would branch.
+    if (isScratchBranch(git.currentBranch(run.cwd))) {
+      const taken = await git.takenBranchNames(run.cwd)
+      renameRunBranch(
+        run.id,
+        run.cwd,
+        uniqueBranchName(branchNameForTitle(title), (name) => taken.has(name)),
+      )
+    }
+
+    const pushed = await git.push(run.cwd)
+
     const body =
       plan?.prBody ||
       `## Summary\n- ${run.taskName || 'Changes produced by an Open Run run.'}\n\n## Test plan\n- [ ] Review the diff and exercise the affected surface`

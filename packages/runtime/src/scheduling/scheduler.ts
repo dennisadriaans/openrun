@@ -17,6 +17,8 @@ import { drainAllQueues, enqueueRun, WORKSPACE_BUSY_MESSAGE } from '../execution
 import { lastFireObservedAt, recordScheduleFire, settleScheduleFire } from './scheduleFires.ts'
 import { isSchedulableCron } from './cronValidation.ts'
 import { unattendedRefusal } from '../execution/unattendedPreflight.ts'
+import { refreshAutomationBase } from '../execution/runEnvironment.ts'
+import { usesFreshExecution } from '@openrun/domain/runs/executionWorkspace'
 
 const MAX_TIMER_MS = 2_147_000_000
 type Scheduled = {
@@ -70,6 +72,24 @@ function refusal(task: TaskRow): { outcome: 'skipped' | 'failed'; detail: string
  * the fire settles on, so the audit says why the run happened off-schedule.
  */
 function fireTask(taskId: string, scheduledFor: number, note?: string): void {
+  if (isShuttingDown()) return
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as
+    | TaskRow
+    | undefined
+  if (
+    task &&
+    hasWorkspaceId(task.workspaceId) &&
+    usesFreshExecution({ trigger: 'schedule', resumeSessionId: task.resumeSessionId })
+  ) {
+    void refreshAutomationBase(task.workspaceId, task.baseRef).finally(() =>
+      fireTaskNow(taskId, scheduledFor, note),
+    )
+    return
+  }
+  fireTaskNow(taskId, scheduledFor, note)
+}
+
+function fireTaskNow(taskId: string, scheduledFor: number, note?: string): void {
   if (isShuttingDown()) return
   const db = getDb()
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as TaskRow | undefined

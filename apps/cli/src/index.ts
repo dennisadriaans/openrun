@@ -67,7 +67,8 @@ import { OpenRunClient, OpenRunError } from '@openrun/contracts/generated/client
 import {
   deriveTaskName,
   parseCliSchedule,
-  promptWithPrIntent,
+  agentPrompt,
+  shipsLabel,
   type CliIntent,
 } from './commands/cliSchedule.ts'
 import {
@@ -185,7 +186,12 @@ function printIntent(
   console.log(field('Fires', scheduleTiming(intent.schedule)))
   if (intent.modelHint) console.log(field('Model', intent.modelHint))
   if (intent.effortHint) console.log(field('Effort', intent.effortHint))
-  if (intent.openPr) console.log(field('Ships', 'branch, commit, push, open a pull request'))
+  const ships = shipsLabel({
+    schedule: intent.schedule,
+    openPr: intent.openPr,
+    canOpenPrs: Boolean(Number(runtime.canOpenPrs ?? 0)),
+  })
+  if (ships) console.log(field('Ships', ships))
   console.log(field('Prompt', prompt.split('\n')[0] ?? ''))
   for (const line of prompt.split('\n').slice(1)) {
     if (line.trim()) console.log(`${BULLET}${' '.repeat(11)}${line}`)
@@ -371,7 +377,7 @@ async function plan(ctx: Context, intent: CliIntent) {
     ok: true as const,
     runtime: runtime.value,
     workspace: workspace.value,
-    prompt: promptWithPrIntent(intent.prompt, intent.openPr),
+    prompt: agentPrompt(intent),
     name: intent.name || deriveTaskName(intent.prompt),
   }
 }

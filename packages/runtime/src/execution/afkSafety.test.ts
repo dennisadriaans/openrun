@@ -165,7 +165,7 @@ async function waitForTerminal(runId: string): Promise<string> {
 describe('AFK safety core boundaries', () => {
   beforeEach(() => seed())
 
-  it('saves and arms a one-time task in the current dirty checkout with matching fire readiness', () => {
+  it('arms one-time and recurring tasks while the checkout has uncommitted changes', () => {
     seed({ kind: 'main' })
     const existingFile = join(repo, 'existing-work.txt')
     writeFileSync(existingFile, 'work in progress')
@@ -192,10 +192,11 @@ describe('AFK safety core boundaries', () => {
       assert.equal(unattendedRefusal(row, runtime), null)
       core.setTaskEnabled(task.id, false)
       assert.equal(core.setTaskEnabled(task.id, true)?.enabled, 1)
-      assert.throws(
-        () => core.upsertTask(taskInput({ enabled: true, cron: '* * * * *' })),
-        /uncommitted changes/i,
-      )
+      // Every scheduled fire gets its own checkout, so the user's edits no
+      // longer stand in the way of a recurring schedule either.
+      const recurring = core.upsertTask(taskInput({ enabled: true, cron: '* * * * *' }))
+      assert.equal(recurring.unattendedBlockedReason, null)
+      core.setTaskEnabled(recurring.id, false)
     } finally {
       if (taskId) core.setTaskEnabled(taskId, false)
       rmSync(existingFile)
@@ -322,7 +323,7 @@ describe('AFK safety core boundaries', () => {
     )
   })
 
-  it('keeps a scheduled run in its selected workspace', async () => {
+  it('runs a scheduled fire in its own execution checkout', async () => {
     const db = getDb()
     // A runtime that actually writes a file, the way a real agent would.
     db.prepare("UPDATE runtimes SET argsTemplate = ? WHERE id = 'afk-runtime'").run(
@@ -343,19 +344,30 @@ describe('AFK safety core boundaries', () => {
     const firstId = executor.runTask(row, runtime, 'schedule')
     assert.equal(await waitForTerminal(firstId), 'success')
 
-    // The agent's file remains in the selected checkout for the user to review.
+    // The selected checkout is untouched; the agent's file is committed on the
+    // run's own branch for review.
     const status = execFileSync('git', ['status', '--porcelain'], {
       cwd: worktree,
       encoding: 'utf8',
     }).trim()
-    assert.match(status, /agent-output\.txt/)
-    assert.equal(core.getRun(firstId)!.cwd, worktree)
+    assert.doesNotMatch(status, /agent-output\.txt/)
+    const run = core.getRun(firstId)!
+    assert.notEqual(run.cwd, worktree)
+    assert.match(run.cwd, /executions/)
+    const committed = execFileSync(
+      'git',
+      ['log', '--name-only', '--format=', `openrun/${firstId}`],
+      {
+        cwd: repo,
+        encoding: 'utf8',
+      },
+    )
+    assert.match(committed, /agent-output\.txt/)
   })
 
-  it('runs scheduled entry points in the selected project checkout', async () => {
-    // `upsertTask` refuses the primary checkout outright, so drive the
-    // unattended path directly: the guard has to hold for any scheduled run,
-    // not only the ones the task form can produce.
+  it('never writes a scheduled fire into the primary checkout', async () => {
+    // Drive the unattended path directly: the guard has to hold for any
+    // scheduled run, not only the ones the task form can produce.
     seed({ kind: 'main' })
     const db = getDb()
     db.prepare("UPDATE runtimes SET argsTemplate = ? WHERE id = 'afk-runtime'").run(
@@ -383,8 +395,8 @@ describe('AFK safety core boundaries', () => {
       cwd: repo,
       encoding: 'utf8',
     }).trim()
-    assert.match(status, /main-output\.txt/)
-    assert.equal(core.getRun(runId)!.cwd, repo)
+    assert.doesNotMatch(status, /main-output\.txt/)
+    assert.notEqual(core.getRun(runId)!.cwd, repo)
   })
 
   it('accepts a project checkout as an automation target', () => {

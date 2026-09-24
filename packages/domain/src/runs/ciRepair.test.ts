@@ -79,6 +79,18 @@ describe('buildCiRepairPrompt', () => {
     failingChecks: failing,
   })
 
+  it('leaves the push to Open Run when it verifies the fix first', () => {
+    assert.match(prompt, /push the fix to this branch\./)
+    const watched = buildCiRepairPrompt({
+      prNumber: 42,
+      prUrl: 'https://github.com/o/r/pull/42',
+      failingChecks: failing,
+      executorPushes: true,
+    })
+    assert.match(watched, /Open Run runs the project's checks and pushes the fix/)
+    assert.doesNotMatch(watched, /push the fix to this branch\./)
+  })
+
   it('names the pull request it is talking about', () => {
     assert.match(prompt, /#42/)
     assert.match(prompt, /https:\/\/github\.com\/o\/r\/pull\/42/)

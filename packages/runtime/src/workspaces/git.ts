@@ -33,8 +33,10 @@ import {
 import { parseGitForEachRef, type GitBranchRow } from '@openrun/domain/workspaces/gitBranches'
 import {
   parseGhPullRequestListResult,
+  parseGhPullRequestResult,
   type RunPullRequest,
 } from '@openrun/domain/workspaces/pullRequest'
+import { parseMergeable, type PrMergeable } from '@openrun/domain/runs/autoShip'
 import {
   NO_RUN_COMMITS,
   undoCommitsBlockedReason,
@@ -1032,14 +1034,68 @@ export function createBranch(cwd: string, name: string) {
   return { branch }
 }
 
+/** Rename the checked-out branch, e.g. a scratch branch to its shipping name. */
+export function renameCurrentBranch(cwd: string, name: string): { branch: string } {
+  const branch = refuseLeadingDash(name, 'branch name')
+  gitOrThrow(cwd, ['check-ref-format', '--branch', branch])
+  gitOrThrow(cwd, ['branch', '-m', branch])
+  // `-m` keeps the old tracking config; the next push must set it to the new
+  // name, or `gh pr create` would open the pull request from the old branch.
+  git(cwd, ['branch', '--unset-upstream'])
+  return { branch }
+}
+
+/**
+ * Every branch name that is already in use here or on origin. Origin is asked
+ * directly; when it cannot be reached, the locally known remote branches stand
+ * in, and a push onto a name taken since then still fails rather than
+ * overwriting it.
+ */
+export async function takenBranchNames(cwd: string): Promise<Set<string>> {
+  const names = new Set<string>()
+  const local = git(cwd, [
+    'for-each-ref',
+    '--format=%(refname)',
+    'refs/heads',
+    'refs/remotes/origin',
+  ])
+  for (const ref of local.stdout.split('\n')) {
+    const name = ref
+      .trim()
+      .replace(/^refs\/heads\//, '')
+      .replace(/^refs\/remotes\/origin\//, '')
+    if (name && name !== 'HEAD') names.add(name)
+  }
+  const res = await runCommand({
+    command: 'git',
+    args: ['ls-remote', '--heads', 'origin'],
+    cwd,
+    env: gitEnv({ GIT_TERMINAL_PROMPT: '0' }),
+    timeoutMs: PUSH_TIMEOUT_MS,
+  })
+  if (res.status === 0) {
+    for (const line of res.stdout.split('\n')) {
+      const ref = line.split('\t')[1]?.trim() ?? ''
+      if (ref.startsWith('refs/heads/')) names.add(ref.slice('refs/heads/'.length))
+    }
+  }
+  return names
+}
+
 /**
  * Push the current branch, setting upstream when it has none.
  *
  * Async and budgeted: a push talks to a network the app cannot see, and doing
  * it synchronously froze every other request (and the SSE heartbeats) for the
  * duration.
+ *
+ * `forceWithLease` is for a branch Open Run owns and just rebased: it replaces
+ * the remote branch only if nobody else moved it since our last push.
  */
-export async function push(cwd: string): Promise<{ branch: string; output: string }> {
+export async function push(
+  cwd: string,
+  options: { forceWithLease?: boolean } = {},
+): Promise<{ branch: string; output: string }> {
   if (!isRepo(cwd)) throw new Error('Not a git repository')
   const branch = currentBranch(cwd)
   if (!branch || branch === 'HEAD') throw new Error('Cannot push a detached HEAD')
@@ -1047,9 +1103,13 @@ export async function push(cwd: string): Promise<{ branch: string; output: strin
   const info = repoInfo(cwd)
   if (!info.remote) throw new Error(missingOriginRemoteMessage())
 
-  const args = info.hasUpstream
-    ? ['push', 'origin', branch]
-    : ['push', '--set-upstream', 'origin', branch]
+  const args = [
+    'push',
+    ...(options.forceWithLease ? ['--force-with-lease'] : []),
+    ...(info.hasUpstream ? [] : ['--set-upstream']),
+    'origin',
+    branch,
+  ]
   const res = await runCommand({
     command: 'git',
     args,
@@ -1571,6 +1631,50 @@ function ghErrorReason(output: GhCommandResult): string {
   if (!detail) return 'gh pull request lookup failed'
   const bounded = detail.length > 500 ? `${detail.slice(0, 500)}…` : detail
   return `gh pull request lookup failed: ${bounded}`
+}
+
+export type PullRequestWatchProbe =
+  | {
+      kind: 'found'
+      pullRequest: RunPullRequest
+      mergeable: PrMergeable
+      headSha: string
+      baseBranch: string
+    }
+  | { kind: 'error'; reason: string }
+
+/** The PR fields the auto-ship watcher needs beyond the chip's rollup. */
+export async function pullRequestWatchStateAsync(
+  cwd: string,
+  prNumber: number,
+): Promise<PullRequestWatchProbe> {
+  let out: GhCommandResult
+  try {
+    out = await runGhCommand(
+      cwd,
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        `${GH_PR_FIELDS},mergeable,headRefOid,baseRefName`,
+      ],
+      GH_PROBE_TIMEOUT_MS,
+    )
+  } catch {
+    return { kind: 'error', reason: 'gh pull request lookup failed' }
+  }
+  if (out.status !== 0) return { kind: 'error', reason: ghErrorReason(out) }
+  const parsed = parseGhPullRequestResult(out.stdout)
+  if (parsed.kind !== 'found') return { kind: 'error', reason: parsed.reason }
+  const raw = JSON.parse(out.stdout) as Record<string, unknown>
+  return {
+    kind: 'found',
+    pullRequest: parsed.pullRequest,
+    mergeable: parseMergeable(raw.mergeable),
+    headSha: typeof raw.headRefOid === 'string' ? raw.headRefOid : '',
+    baseBranch: typeof raw.baseRefName === 'string' ? raw.baseRefName : '',
+  }
 }
 
 /** Look up a PR for the supplied branch without reading the mutable checkout HEAD. */
