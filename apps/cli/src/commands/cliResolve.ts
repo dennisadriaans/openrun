@@ -255,11 +255,11 @@ export function workspaceScheduleWarning(workspace: WorkspaceChoice): string | n
  * to open one.
  *
  * `canOpenPrs` is a per-runtime capability, not a per-automation one: it is
- * what appends the branch/commit/push/`gh pr create` instruction to the prompt
- * (see `prCapability.ts`). The CLI still sets `requireGhAuth` on the
+ * what lets Open Run push a verified scheduled run and open its pull request
+ * (see `runs/autoShip.ts`). The CLI still sets `requireGhAuth` on the
  * automation, so the schedule refuses to arm without a working `gh` login —
- * but without the capability the agent is never told it may ship, so say so
- * rather than letting the run end with an unpushed branch.
+ * but without the capability nothing is pushed, so say so rather than
+ * letting the run end with an unpushed branch.
  */
 export function prCapabilityWarning(
   runtime: RuntimeChoice,
@@ -267,7 +267,7 @@ export function prCapabilityWarning(
   suppress = false,
 ): string | null {
   if (!openPr || suppress || truthy(runtime.canOpenPrs)) return null
-  return `${runtime.label || runtime.bin} does not have "May open pull requests" enabled. The prompt asks for one; enable the capability on the Runtimes page so the agent is told it may push.`
+  return `${runtime.label || runtime.bin} does not have "May open pull requests" enabled, so verified work stays committed in its run. Enable the capability on the Runtimes page to have Open Run push it and open the pull request.`
 }
 
 /** The fields of a `tasks.list` row this module reads. */

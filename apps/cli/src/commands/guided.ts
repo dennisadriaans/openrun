@@ -12,6 +12,7 @@ import {
   deriveTaskName,
   parseCliSchedule,
   parseClockTime,
+  shipsLabel,
   type CliIntent,
   type CliSchedule,
 } from './cliSchedule.ts'
@@ -475,7 +476,9 @@ async function editRunSettings(
         )
       if (setting === 'pr')
         draft.intent.openPr = await ui.confirm(
-          'Ask the agent to commit, push and open a pull request?',
+          draft.intent.schedule.kind === 'now'
+            ? 'Ask the agent to commit, push and open a pull request?'
+            : 'Require a GitHub login so the pull request can open once checks pass?',
           draft.intent.openPr,
         )
       return true
@@ -552,6 +555,11 @@ export async function guideRun(
     })
   setup.push(async () => {
     for (;;) {
+      const ships = shipsLabel({
+        schedule: intent.schedule,
+        openPr: intent.openPr,
+        canOpenPrs: Boolean(Number(runtime?.canOpenPrs ?? 0)),
+      })
       ui.note(
         [
           `Task     ${intent.prompt}`,
@@ -562,7 +570,7 @@ export async function guideRun(
           ...(intent.schedule.kind !== 'now'
             ? [`Name     ${intent.name || deriveTaskName(intent.prompt)}`]
             : []),
-          ...(intent.openPr ? ['Finish   Commit, push and open a pull request'] : []),
+          ...(ships ? [`Finish   ${ships}`] : []),
         ].join('\n'),
         dryRun ? 'Preview' : 'Ready when you are',
       )

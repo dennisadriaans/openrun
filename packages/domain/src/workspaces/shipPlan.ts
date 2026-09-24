@@ -208,3 +208,42 @@ export function fallbackShipPlan(input: { taskName: string; changed: string[] })
     prBody: `## Summary\n- ${input.taskName || 'Changes produced by an Open Run run.'}\n\n## Test plan\n- [ ] Review the diff and exercise the affected surface`,
   }
 }
+
+/** Branches Open Run names for itself; renamed to a conventional name on ship. */
+export function isScratchBranch(branch: string): boolean {
+  return branch.startsWith('openrun/')
+}
+
+const BRANCH_SLUG_MAX = 48
+
+/**
+ * `<type>/<slug>` from a conventional title: `feat(cli): add clear history`
+ * becomes `feat/add-clear-history`. The type comes from the title because it
+ * is only known once the work is done; anything unparseable ships as `chore`.
+ */
+export function branchNameForTitle(title: string): string {
+  const match = title.trim().match(/^([a-z]+)(?:\([^()]*\))?!?:\s*(.+)$/)
+  const type =
+    match && (CONVENTIONAL_TYPES as readonly string[]).includes(match[1]!) ? match[1]! : 'chore'
+  const summary = match ? match[2]! : title
+  let slug = summary
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (slug.length > BRANCH_SLUG_MAX) {
+    const cut = slug.slice(0, BRANCH_SLUG_MAX)
+    const lastDash = cut.lastIndexOf('-')
+    slug = lastDash > BRANCH_SLUG_MAX / 2 ? cut.slice(0, lastDash) : cut.replace(/-+$/, '')
+  }
+  return `${type}/${slug || 'openrun-changes'}`
+}
+
+/** First of `name`, `name-2`, `name-3`, … that `taken` does not claim. */
+export function uniqueBranchName(name: string, taken: (candidate: string) => boolean): string {
+  if (!taken(name)) return name
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${name}-${n}`
+    if (!taken(candidate)) return candidate
+  }
+  return `${name}-${Date.now().toString(36)}`
+}

@@ -10,6 +10,7 @@ import { warmModelCatalogs } from './runtimes/modelCatalog.ts'
 import {
   installProcessShutdownHooks,
   reconcileOrphanRuns,
+  setAutoShipHook,
   setRunFinalizedHook,
 } from './execution/executor.ts'
 import { notifyRunFinished } from './notifications/notify.ts'
@@ -21,6 +22,7 @@ import { bootMcpTokenRefresh } from './mcp/mcpOAuth.ts'
 import { bootCloud } from './cloud/index.ts'
 import { assertServerAccess } from './security/accessToken.ts'
 import { getRun } from './application/runs.ts'
+import { bootPrWatches, shipVerifiedRun } from './application/autoShip.ts'
 
 assertServerAccess()
 
@@ -66,5 +68,8 @@ setRunFinalizedHook((runId) => {
   // The workspace lock just came free — start whatever was waiting on it.
   if (run.workspaceId) drainWorkspace(run.workspaceId)
 })
+
+setAutoShipHook(shipVerifiedRun)
+bootPrWatches()
 
 bootCloud()

@@ -1,4 +1,5 @@
 /** taskQueries capability implementation. */
+import { usesFreshExecution } from '@openrun/domain/runs/executionWorkspace'
 import { automationBaseRefusal } from '../execution/runEnvironment.ts'
 import parser from 'cron-parser'
 import { parseChecks } from '@openrun/domain/runs/checks'
@@ -198,7 +199,10 @@ function decorate(
       ? workspaceOwnerMessage(unattendedOwner.name)
       : workspace
         ? unattendedBlockedReason({
-            freshExecution: Boolean(task.webhookIntegrationId.trim()),
+            freshExecution: usesFreshExecution({
+              trigger: task.webhookIntegrationId.trim() ? 'webhook' : 'schedule',
+              resumeSessionId: task.resumeSessionId,
+            }),
             resumeSessionId: task.resumeSessionId,
             workspaceKind: workspace.kind,
             requireIsolation: task.requireIsolation === 1,

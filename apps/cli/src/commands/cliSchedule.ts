@@ -592,3 +592,29 @@ export function promptWithPrIntent(prompt: string, openPr: boolean): string {
   if (/\bpull request\b|\bpr\b/i.test(prompt)) return prompt
   return `${prompt.trimEnd()}\n\n${CLI_PR_INSTRUCTION}`
 }
+
+/**
+ * The prompt the agent receives. A scheduled fire runs in its own checkout and
+ * Open Run ships it once the project's checks pass, so only `run` — attended,
+ * in the checkout you are standing in — asks the agent to ship.
+ */
+export function agentPrompt(intent: Pick<CliIntent, 'prompt' | 'openPr' | 'schedule'>): string {
+  return intent.schedule.kind === 'now'
+    ? promptWithPrIntent(intent.prompt, intent.openPr)
+    : intent.prompt
+}
+
+/** What happens to the work when the agent is done, for the summary line. */
+export function shipsLabel(input: {
+  schedule: CliSchedule
+  openPr: boolean
+  /** The runtime has "May open pull requests" enabled. */
+  canOpenPrs: boolean
+}): string | null {
+  if (input.schedule.kind === 'now') {
+    return input.openPr ? 'Commit, push and open a pull request' : null
+  }
+  return input.canOpenPrs
+    ? 'Pull request once checks pass; CI failures and conflicts are fixed until green'
+    : null
+}

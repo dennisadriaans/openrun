@@ -439,6 +439,18 @@ function migrate(db: Database.Database) {
     setupLog TEXT NOT NULL DEFAULT '',
     createdAt INTEGER NOT NULL
   )`)
+  // A shipped automation run whose pull request is watched until it is green
+  // and mergeable. The row is the watch: it is deleted when the watch ends.
+  db.exec(`CREATE TABLE IF NOT EXISTS pr_watches (
+    runId TEXT PRIMARY KEY,
+    prNumber INTEGER NOT NULL,
+    prUrl TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    repairedSha TEXT NOT NULL DEFAULT '',
+    activityAt INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL,
+    FOREIGN KEY (runId) REFERENCES runs(id) ON DELETE CASCADE
+  )`)
   // Persist the task's picked model/effort so runs use the UI selection instead
   // of falling through to the CLI default (which is Opus for Claude).
   addColumn(db, 'tasks', 'model', "TEXT NOT NULL DEFAULT ''")

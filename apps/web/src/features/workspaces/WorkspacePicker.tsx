@@ -39,7 +39,8 @@ export function WorkspacePicker({
         </select>
       </Field>
       <p className="mt-2 text-ui-sm text-tier-tertiary">
-        Scheduled runs use this checkout. Webhook deliveries get a fresh worktree from the base.
+        Scheduled and webhook runs each get a fresh worktree from the base. Only an automation that
+        resumes a saved chat runs in this checkout.
       </p>
       <button
         type="button"

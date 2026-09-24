@@ -7,9 +7,10 @@
  * are what separate an AFK-safe automation from one that merely started on
  * time:
  *
- * 1. **Serialization** — scheduled runs reuse their selected checkout and the
- *    workspace queue keeps one writer there at a time. Webhooks receive a
- *    fresh execution worktree.
+ * 1. **Isolation** — scheduled and webhook fires each receive a fresh
+ *    execution worktree (`runs/executionWorkspace.ts`). Only an automation
+ *    that resumes a saved chat stays in its checkout, where the workspace
+ *    queue keeps one writer at a time.
  * 2. **Health** — the worktree must physically exist, be the right worktree,
  *    be on its configured branch, and be clean (see `workspaceHealth.ts`).
  *    A one-time run in the user's own checkout may continue existing edits.
@@ -72,8 +73,9 @@ export function requiresGhAuth(input: { canOpenPrs: boolean; requireGhAuth: bool
 
 /**
  * Reason an unattended fire would be unsafe, or `null` when it may proceed.
- * Webhook isolation is represented by `freshExecution`; scheduled runs are
- * serialized by the workspace queue before reaching this gate.
+ * A fresh execution never touches the checkout, so its health only matters to
+ * runs that stay in place; those are serialized by the workspace queue before
+ * reaching this gate.
  */
 export function unattendedBlockedReason(input: UnattendedGateInput): string | null {
   const continuing = !input.freshExecution && Boolean(input.resumeSessionId?.trim())
