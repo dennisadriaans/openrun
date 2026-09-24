@@ -1,12 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  branchNameForTitle,
   buildShipPlanPrompt,
   commitMessageText,
   commitSubjectProblem,
   fallbackShipPlan,
+  isScratchBranch,
   parseShipPlan,
   shipPlanProblem,
+  uniqueBranchName,
 } from './shipPlan.ts'
 
 test('commitSubjectProblem accepts a conventional subject', () => {
@@ -118,4 +121,38 @@ test('buildShipPlanPrompt lists the files and forbids editing', () => {
   assert.match(prompt, /Do NOT edit/)
   assert.match(prompt, /Add ship button/)
   assert.match(prompt, /main/)
+})
+
+test('branchNameForTitle turns a conventional title into <type>/<slug>', () => {
+  assert.equal(branchNameForTitle('feat(cli): add clear history'), 'feat/add-clear-history')
+  assert.equal(branchNameForTitle('fix!: stop double commit'), 'fix/stop-double-commit')
+  assert.equal(branchNameForTitle('Update the README'), 'chore/update-the-readme')
+  assert.equal(branchNameForTitle('feat: ###'), 'feat/openrun-changes')
+})
+
+test('branchNameForTitle cuts a long summary on a word boundary', () => {
+  const name = branchNameForTitle(
+    'feat(tasks): schedule isolated runs that open pull requests after checks pass',
+  )
+  assert.ok(name.length <= 'feat/'.length + 48, name)
+  assert.ok(!name.endsWith('-'), name)
+  assert.equal(name, 'feat/schedule-isolated-runs-that-open-pull-requests')
+})
+
+test('uniqueBranchName suffixes a taken name', () => {
+  const taken = new Set(['fix/a', 'fix/a-2'])
+  assert.equal(
+    uniqueBranchName('fix/b', (n) => taken.has(n)),
+    'fix/b',
+  )
+  assert.equal(
+    uniqueBranchName('fix/a', (n) => taken.has(n)),
+    'fix/a-3',
+  )
+})
+
+test('isScratchBranch recognises only Open Run-named branches', () => {
+  assert.equal(isScratchBranch('openrun/run_abc'), true)
+  assert.equal(isScratchBranch('openrun/run_abc/resume-1234'), true)
+  assert.equal(isScratchBranch('feat/openrun'), false)
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
@@ -167,12 +167,16 @@ describe('server pending-run queue', () => {
     assert.equal(listQueue('workspace-old').length, 0)
     const run = getDb()
       .prepare(
-        "SELECT cwd, workspaceId, trigger FROM runs WHERE taskId = 'queue-task' ORDER BY startedAt DESC LIMIT 1",
+        "SELECT id, workspaceId, trigger FROM runs WHERE taskId = 'queue-task' ORDER BY startedAt DESC LIMIT 1",
       )
-      .get() as { cwd: string; workspaceId: string; trigger: string } | undefined
+      .get() as { id: string; workspaceId: string; trigger: string } | undefined
     assert.equal(run?.workspaceId, 'workspace-new')
     assert.equal(run?.trigger, 'schedule')
-    assert.equal(run?.cwd, newRepo)
+    // A scheduled fire runs in its own checkout of the destination project.
+    const environment = getDb()
+      .prepare('SELECT repoPath FROM run_environments WHERE runId = ?')
+      .get(run?.id) as { repoPath: string } | undefined
+    assert.equal(environment?.repoPath, realpathSync(newProject))
 
     const deadline = Date.now() + 2000
     while (Date.now() < deadline) {

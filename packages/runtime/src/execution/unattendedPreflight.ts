@@ -63,14 +63,17 @@ export function unattendedRefusalFor(input: {
   health: WorkspaceHealth
   trigger?: 'schedule' | 'webhook'
 }): string | null {
-  const webhook = usesFreshExecution(input.trigger ?? 'schedule')
-  if (webhook) {
+  const fresh = usesFreshExecution({
+    trigger: input.trigger ?? 'schedule',
+    resumeSessionId: input.task.resumeSessionId,
+  })
+  if (fresh) {
     const baseRefusal = automationBaseRefusal(input.workspace.id, input.task.baseRef)
     if (baseRefusal) return baseRefusal
   }
   const gh = ghStatus()
   return unattendedBlockedReason({
-    freshExecution: webhook,
+    freshExecution: fresh,
     workspaceKind: input.workspace.kind,
     requireIsolation: input.task.requireIsolation === 1,
     fireOnce: input.task.fireOnce === 1,
@@ -107,7 +110,9 @@ export function unattendedRefusal(
   if (!checkRuntimeInstalled(runtime.bin).installed) return 'Automation runtime is not on PATH.'
   if (!hasTaskPrompt(task.prompt)) return 'Automation has empty agent instructions.'
 
-  const sessionId = usesFreshExecution(trigger) ? '' : task.resumeSessionId.trim()
+  const sessionId = usesFreshExecution({ trigger, resumeSessionId: task.resumeSessionId })
+    ? ''
+    : task.resumeSessionId.trim()
   if (sessionId) {
     const kind = nativeResumeKindFor(runtime)
     if (!kind) return 'The selected runtime does not support resuming a conversation.'

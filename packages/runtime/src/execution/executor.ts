@@ -93,7 +93,8 @@ import { isAcpTransport } from '@openrun/domain/runtimes/acpTransport'
 import { startAcpTurn } from './acpTurn.ts'
 import { protocolMcpServers } from '../mcp/mcp.ts'
 import { OPENRUN_APP_DIR_ENV, OPENRUN_RUN_ID_ENV } from '@openrun/domain/mcp/openrunTools'
-import { withPrCapability } from '@openrun/domain/workspaces/prCapability'
+import { canOpenPullRequests, withPrCapability } from '@openrun/domain/workspaces/prCapability'
+import { shouldAutoShip } from '@openrun/domain/runs/autoShip'
 import {
   buildHandoffPrompt,
   handoffSystemNote,
@@ -358,7 +359,9 @@ export function startRun(input: StartRunInput): string {
   // the old cwd-or-process.cwd() fallback untouched. Planner stores a target
   // workspaceId for install cards but does not lock or chdir into it.
   const isolated =
-    (input.isolated === true || usesFreshExecution(input.trigger)) && input.trigger !== 'planner'
+    (input.isolated === true ||
+      usesFreshExecution({ trigger: input.trigger, resumeSessionId: input.resumeSessionId })) &&
+    input.trigger !== 'planner'
   const lockWorkspace = input.lockWorkspace !== false && !isolated
   let cwd: string
   if (input.workspaceId && input.workspaceId.trim().length > 0 && lockWorkspace) {
@@ -428,6 +431,7 @@ export function startRun(input: StartRunInput): string {
     input.cliPrompt ?? input.prompt,
     input.trigger !== 'planner' && (input.runtime as { canOpenPrs?: number }).canOpenPrs === 1,
     runtimeMode,
+    Boolean(environment) && (input.trigger === 'schedule' || input.trigger === 'webhook'),
   )
 
   const turn = buildTurnCommand({
@@ -1996,6 +2000,19 @@ export function drainMessageQueue(runId: string): boolean {
 type RunFinalizedHook = (runId: string) => void
 let runFinalizedHook: RunFinalizedHook | null = null
 
+/**
+ * Hook that ships a verified automation run (`application/autoShip.ts`).
+ * Assigned at boot for the same reason as the finalized hook: shipping plans
+ * commits with a planner run and opens the pull request, both of which live
+ * above the executor.
+ */
+type AutoShipHook = (runId: string, messageId: string) => Promise<void>
+let autoShipHook: AutoShipHook | null = null
+
+export function setAutoShipHook(hook: AutoShipHook | null): void {
+  autoShipHook = hook
+}
+
 export function setRunFinalizedHook(hook: RunFinalizedHook | null): void {
   runFinalizedHook = hook
 }
@@ -2276,7 +2293,7 @@ async function concludeTurn(input: {
   const db = getDb()
   const run = db
     .prepare(
-      'SELECT id, taskId, runtimeId, workspaceId, baseSnapshot, repairAttempts, timedOut, status FROM runs WHERE id = ?',
+      'SELECT id, taskId, runtimeId, workspaceId, baseSnapshot, repairAttempts, timedOut, status, trigger, runtimeMode FROM runs WHERE id = ?',
     )
     .get(input.runId) as
     | {
@@ -2288,6 +2305,8 @@ async function concludeTurn(input: {
         repairAttempts: number
         timedOut: number
         status: string
+        trigger: string
+        runtimeMode: string
       }
     | undefined
   if (!run) return
@@ -2400,6 +2419,24 @@ async function concludeTurn(input: {
     const taskName = db.prepare('SELECT taskName FROM runs WHERE id = ?').get(input.runId) as
       | { taskName: string }
       | undefined
+    // Verified work in its own checkout leaves as a pull request. Anything the
+    // ship could not take is still committed below, so nothing is lost.
+    if (
+      autoShipHook &&
+      runtime &&
+      shouldAutoShip({
+        trigger: run.trigger,
+        freshExecution: Boolean(getRunEnvironment(input.runId)),
+        verdict,
+        canOpenPrs: canOpenPullRequests(runtime.canOpenPrs === 1, run.runtimeMode),
+      })
+    ) {
+      try {
+        await autoShipHook(input.runId, input.assistantMessageId)
+      } catch (err) {
+        console.error(`[executor] auto-ship failed for ${input.runId}:`, err)
+      }
+    }
     // Commit before recording the outcome: the health check the next fire runs
     // reads the tree, and a dirty tree refuses that fire regardless of how well
     // this run went.
@@ -2761,6 +2798,7 @@ export function runTask(
   // Task-backed runs must never hit the process.cwd() fallback — that path is
   // reserved for planner (intentional) and other non-task callers.
   assertWorkspaceId(task.workspaceId)
+  const resumes = resumesSavedSession({ trigger, resumeSessionId: task.resumeSessionId })
   return startRun({
     runtime,
     taskId: task.id,
@@ -2774,8 +2812,8 @@ export function runTask(
     model: task.model,
     effort: task.effort,
     timeoutMs: task.timeoutMs,
-    resumeSessionId: resumesSavedSession(trigger) ? task.resumeSessionId : '',
-    resumeSessionLabel: resumesSavedSession(trigger) ? task.resumeSessionLabel : '',
+    resumeSessionId: resumes ? task.resumeSessionId : '',
+    resumeSessionLabel: resumes ? task.resumeSessionLabel : '',
     ...(source ? { source } : {}),
   })
 }

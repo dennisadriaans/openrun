@@ -24,6 +24,18 @@ environment. If \`gh\` fails (not authenticated, no remote, not installed),
 print the error clearly and stop — do not report success.`
 
 /**
+ * The instruction for a run Open Run ships itself (`runs/autoShip.ts`): the
+ * checks judge the work first, then the executor commits, pushes and opens the
+ * pull request. An agent that ships on its own would skip that judgement.
+ */
+export const AUTO_SHIP_PROMPT_APPENDIX = `
+
+---
+When you finish, Open Run runs this project's checks. If they pass, it commits
+your work on a conventional branch and opens the pull request itself. Leave your
+changes uncommitted, and do not create branches, push, or run \`gh pr create\`.`
+
+/**
  * A runtime may open a PR only when the capability is enabled AND the access
  * mode actually lets the agent run shell/network tools. Supervised has no live
  * approval channel for a scheduled ship step, so it is excluded here (attended
@@ -45,6 +57,9 @@ export function withPrCapability(
   prompt: string,
   capabilityEnabled: boolean,
   mode: RuntimeMode | string | null | undefined,
+  /** Open Run ships this run after its checks pass; the agent must not. */
+  executorShips = false,
 ): string {
-  return canOpenPullRequests(capabilityEnabled, mode) ? prompt + PR_PROMPT_APPENDIX : prompt
+  if (!canOpenPullRequests(capabilityEnabled, mode)) return prompt
+  return prompt + (executorShips ? AUTO_SHIP_PROMPT_APPENDIX : PR_PROMPT_APPENDIX)
 }

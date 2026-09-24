@@ -62,6 +62,7 @@
     "./mcp/openrunTools": "./src/mcp/openrunTools.ts",
     "./notifications/notify": "./src/notifications/notify.ts",
     "./runs/approvals": "./src/runs/approvals.ts",
+    "./runs/autoShip": "./src/runs/autoShip.ts",
     "./runs/checkPass": "./src/runs/checkPass.ts",
     "./runs/checks": "./src/runs/checks.ts",
     "./runs/ciRepair": "./src/runs/ciRepair.ts",

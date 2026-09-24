@@ -70,6 +70,8 @@ export function buildCiRepairPrompt(input: {
   prNumber: number
   prUrl: string
   failingChecks: FailingCheck[]
+  /** Open Run verifies and pushes after the turn, as it does for a watched PR. */
+  executorPushes?: boolean
 }): string {
   const lines = [
     `Continuous integration is failing on pull request #${input.prNumber} (${input.prUrl}), which was opened from this run.`,
@@ -83,7 +85,9 @@ export function buildCiRepairPrompt(input: {
     '',
     `Read the logs yourself before changing anything — \`gh pr checks ${input.prNumber}\` lists them, and \`gh run view <run-id> --log-failed\` prints the failing step. The \`gh\` login is already available in your environment.`,
     '',
-    'Then fix the underlying problem in the code and push the fix to this branch.',
+    input.executorPushes
+      ? "Then fix the underlying problem in the code. Open Run runs the project's checks and pushes the fix to this branch; do not push or open another pull request."
+      : 'Then fix the underlying problem in the code and push the fix to this branch.',
     'Do not disable, skip, or weaken a check to make it pass, and do not edit the CI configuration to route around the failure.',
     'If the failure is pre-existing, environmental, or otherwise not caused by this branch, say so explicitly and stop rather than working around it.',
   )

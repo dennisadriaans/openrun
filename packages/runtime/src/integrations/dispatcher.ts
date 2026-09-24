@@ -17,6 +17,7 @@ import { getDb, type RuntimeRow, type TaskRow } from '../storage/db.ts'
 import { startRun } from '../execution/executor.ts'
 import { enqueueRun, WORKSPACE_BUSY_MESSAGE } from '../execution/runQueue.ts'
 import { unattendedRefusal } from '../execution/unattendedPreflight.ts'
+import { refreshAutomationBase } from '../execution/runEnvironment.ts'
 import { getIntegration } from './connections.ts'
 import { getWorkspace } from '../workspaces/workspaces.ts'
 
@@ -146,6 +147,18 @@ export async function ingestCanonicalEvent(
   integrationId: string,
   event: CanonicalWebhookEvent,
 ): Promise<WebhookHandleResult> {
+  // Fetch first: from the duplicate check to the delivery record, dispatch
+  // never yields, so a replayed delivery cannot slip in between.
+  const integration = getIntegration(integrationId)
+  if (integration?.enabled) {
+    const bases = new Map<string, TaskRow>()
+    for (const task of matchingTasks(integration.id, event)) {
+      bases.set(`${task.workspaceId}\0${task.baseRef}`, task)
+    }
+    await Promise.all(
+      [...bases.values()].map((task) => refreshAutomationBase(task.workspaceId, task.baseRef)),
+    )
+  }
   return ingestCanonicalEvents(integrationId, [event])
 }
 

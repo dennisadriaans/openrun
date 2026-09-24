@@ -7,8 +7,10 @@ import {
   nextClockOccurrence,
   parseClockTime,
   parseCliSchedule,
+  agentPrompt,
   promptWithPrIntent,
   readPromptAndPrIntent,
+  shipsLabel,
 } from './cliSchedule.ts'
 
 /** Wednesday 21 January 2026, 10:00 local. Pinned so relative times are exact. */
@@ -318,5 +320,34 @@ describe('dailyCron', () => {
   it('writes the minute before the hour, as cron does', () => {
     assert.equal(dailyCron(16, 40), '40 16 * * *')
     assert.equal(dailyCron(0, 0), '0 0 * * *')
+  })
+})
+
+describe('agentPrompt', () => {
+  it('asks the agent to ship only for an attended run', () => {
+    const now = { prompt: 'build the homepage', openPr: true, schedule: { kind: 'now' as const } }
+    assert.equal(agentPrompt(now), `build the homepage\n\n${CLI_PR_INSTRUCTION}`)
+    const later = { ...now, schedule: { kind: 'recurring' as const, cron: '0 9 * * *' } }
+    assert.equal(agentPrompt(later), 'build the homepage')
+  })
+})
+
+describe('shipsLabel', () => {
+  const recurring = { kind: 'recurring' as const, cron: '0 9 * * *' }
+
+  it('describes an attended run by what the agent was asked to do', () => {
+    assert.match(
+      shipsLabel({ schedule: { kind: 'now' }, openPr: true, canOpenPrs: false }) ?? '',
+      /open a pull request/,
+    )
+    assert.equal(shipsLabel({ schedule: { kind: 'now' }, openPr: false, canOpenPrs: true }), null)
+  })
+
+  it('describes a schedule by what Open Run will do with verified work', () => {
+    assert.match(
+      shipsLabel({ schedule: recurring, openPr: false, canOpenPrs: true }) ?? '',
+      /once checks pass/,
+    )
+    assert.equal(shipsLabel({ schedule: recurring, openPr: true, canOpenPrs: false }), null)
   })
 })

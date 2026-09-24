@@ -19,6 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { getDb, openrunHome, type TaskRow } from '../storage/db.ts'
 import * as git from '../workspaces/git.ts'
+import { runCommand } from '../process/command.ts'
 import type { RunCommitSummary } from '@openrun/domain/runs/undoRun'
 import type { FileContent, FileEntry } from '../workspaces/files.ts'
 import { isPidAlive, isWorkspaceCancellationPending } from '../process/processControl.ts'
@@ -120,6 +121,38 @@ export function automationBase(workspaceId: string, requested?: string) {
     ]).trim()
   if (!commit) throw new Error(`Cannot resolve automation base "${baseRef}".`)
   return { project, baseRef, commit }
+}
+
+const BASE_FETCH_TIMEOUT_MS = 30_000
+
+/**
+ * Bring `origin/<base>` up to date before a fresh execution resolves it, so a
+ * fire branches from what the remote has now rather than from whenever the
+ * user last fetched. Best-effort: offline, no origin, or a pinned commit keep
+ * the locally known revision, which `automationBase` already falls back to.
+ */
+export async function refreshAutomationBase(workspaceId: string, requested?: string) {
+  let project: ReturnType<typeof projectForWorkspace>
+  try {
+    project = projectForWorkspace(workspaceId)
+  } catch {
+    return
+  }
+  const baseRef = requested?.trim() || project.defaultBranch
+  if (!baseRef || baseRef.startsWith('-') || /^[0-9a-f]{7,64}$/.test(baseRef)) return
+  if (!git.remoteUrl(project.path)) return
+  const res = await runCommand({
+    command: 'git',
+    args: ['fetch', '--quiet', '--no-tags', 'origin', '--end-of-options', baseRef],
+    cwd: project.path,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    timeoutMs: BASE_FETCH_TIMEOUT_MS,
+  })
+  if (res.status !== 0 || res.timedOut) {
+    console.warn(
+      `[executor] could not fetch origin/${baseRef}; using the local revision: ${res.stderr.trim() || 'timed out'}`,
+    )
+  }
 }
 
 export function automationBaseRefusal(workspaceId: string, baseRef?: string): string | null {
@@ -384,6 +417,17 @@ export function ensureRunEnvironment(runId: string): boolean {
   getDb().prepare('UPDATE run_environments SET branch = ? WHERE runId = ?').run(branch, runId)
   getDb().prepare('UPDATE runs SET headBranch = ? WHERE id = ?').run(branch, runId)
   return true
+}
+
+/**
+ * Rename a run's checked-out branch and keep the journal and run row in step,
+ * so release, resume and the pull-request probe all follow the new name.
+ */
+export function renameRunBranch(runId: string, cwd: string, name: string): string {
+  const { branch } = git.renameCurrentBranch(cwd, name)
+  getDb().prepare('UPDATE run_environments SET branch = ? WHERE runId = ?').run(branch, runId)
+  getDb().prepare('UPDATE runs SET headBranch = ? WHERE id = ?').run(branch, runId)
+  return branch
 }
 
 export function releasedResult(runId: string) {
