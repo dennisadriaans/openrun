@@ -60,6 +60,11 @@ Choose an earlier CLI session and continue it in Home. From a script, or with
 resume and /resume do the same, and clear or /clear starts a new session.
 Transcripts are saved in ~/.openrun/cli-sessions/.
 With a run ID, resume continues that run: see openrun continue --help.`,
+  'clear-history': `openrun clear-history [--yes] [--json]
+
+Forget the commands typed at Home, so ↑↓ and Tab stop offering them, and delete
+every saved CLI session in ~/.openrun/cli-sessions/. Runs and automations are kept.
+At Home, clear-history or /clear-history asks first; --yes skips the question.`,
   init: `openrun init [path] [--check COMMAND]…
 
 Register a Git repository and detect its verification commands.
@@ -219,6 +224,7 @@ Commands
   integrations         connect providers and configure event triggers
   resume               resume an earlier CLI session (alias: sessions)
   clear                start a new CLI session
+  clear-history        forget typed commands and delete saved CLI sessions
 
 Advanced
   worker               status, start, stop and logs

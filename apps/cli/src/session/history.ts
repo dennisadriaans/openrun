@@ -29,6 +29,16 @@ export class CommandHistory {
     if (!value || this.commands.at(-1) === value) return
     this.commands.push(value)
     if (this.commands.length > HISTORY_LIMIT) this.commands.shift()
+    this.save()
+  }
+
+  /** Forget every command in place, so an open input stops completing them too. */
+  clear(): void {
+    this.commands.splice(0)
+    this.save()
+  }
+
+  private save(): void {
     try {
       mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 })
       writeFileSync(this.file, JSON.stringify(this.commands), { mode: 0o600 })

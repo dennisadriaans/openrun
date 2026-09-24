@@ -267,6 +267,9 @@ test('every Home command answers to its bare and slash form alike', () => {
   assert.deepEqual(value('/re'), ['review', 'resume', 'refresh'])
   assert.equal(value('/').length > 10, true)
   assert.deepEqual(value('start over'), ['clear'])
+  assert.deepEqual(value('/clear-history'), ['clear-history'])
+  assert.deepEqual(value('clear history'), ['clear-history'])
+  assert.deepEqual(value('forget my command history'), ['clear-history'])
   assert.deepEqual(value('resume my previous session'), ['resume'])
   // Continuing a run has its own name, and a task that mentions clearing stays a task.
   assert.deepEqual(value('continue'), ['continue'])

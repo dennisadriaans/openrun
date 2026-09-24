@@ -3,7 +3,13 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { CliSession, readSessionFile, savedSessions } from './session.ts'
+import {
+  answeredByCard,
+  CliSession,
+  deleteSavedSessions,
+  readSessionFile,
+  savedSessions,
+} from './session.ts'
 
 test('multiple requests and an asynchronous failure preserve chronological history and FIFO delivery', () => {
   const session = new CliSession(null)
@@ -287,4 +293,41 @@ test('commands and picker answers never make a session look like a request', () 
     [{ title: 'create a.css', requests: 2 }],
   )
   assert.equal(readSessionFile(join(directory, 'leaving.jsonl'))[2]!.answer, true)
+})
+
+test('clearing history deletes every saved transcript and leaves other files', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'openrun-cli-clear-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  for (const name of ['a', 'b']) {
+    const session = new CliSession(join(directory, `${name}.jsonl`))
+    session.begin(`create ${name}.css`)
+    session.finish()
+  }
+  appendFileSync(join(directory, 'notes.txt'), 'keep')
+  assert.equal(deleteSavedSessions(directory), 2)
+  assert.deepEqual(savedSessions(directory), [])
+  assert.equal(statSync(join(directory, 'notes.txt')).isFile(), true)
+  assert.equal(deleteSavedSessions(join(directory, 'missing')), 0)
+})
+
+test('a card stands in for the typed request it answers, and only that one', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'openrun-cli-card-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const session = new CliSession(join(directory, 'cards.jsonl'))
+  session.enqueue('create a.css in 5 seconds')
+  const request = session.entries[0]!
+  assert.equal(session.requestDetail(request.id), 'Queued')
+  session.begin(session.take())
+  session.progress('Interpreting request')
+  assert.equal(session.requestDetail(request.id), 'Interpreting request')
+  session.card({ status: 'Scheduled', title: 'create a.css' })
+  session.finish()
+  assert.equal(session.requestDetail(request.id), undefined)
+  session.begin('ls')
+  session.log('assistant', 'No runs yet.')
+  session.finish()
+  const saved = readSessionFile(session.file!)
+  assert.equal(answeredByCard(saved[0]!, saved[1]), true)
+  assert.equal(answeredByCard(saved[2]!, saved[3]), false)
+  assert.equal(answeredByCard(saved[2]!, saved[1]), false)
 })

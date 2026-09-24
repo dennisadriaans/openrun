@@ -24,6 +24,7 @@ import {
 } from './ui.ts'
 import { RequestPreview } from '../commands/preview.ts'
 import {
+  answeredByCard,
   CliSession,
   transcriptText,
   type ActivityItem,
@@ -105,6 +106,8 @@ export class TerminalSurface {
   }[] = []
   private cardTimer?: ReturnType<typeof setInterval>
   private lastBubble?: { box: BoxRenderable; role: TimelineEntry['role'] }
+  /** A typed request still in flight: a loader stands in until its card or reply arrives. */
+  private held?: { entry: TimelineEntry; loader: TextRenderable }
   private detailScroll: ScrollBoxRenderable
   private scheduledScroll: ScrollBoxRenderable
   private overview: TextRenderable
@@ -617,37 +620,77 @@ export class TerminalSurface {
       for (const child of this.detailScroll.getChildren()) child.destroyRecursively()
       this.cards = []
       this.lastBubble = undefined
+      this.held = undefined
       this.renderedEntries = 0
       this.renderedGeneration = this.session.generation
     }
-    for (const entry of this.session.entries.slice(this.renderedEntries)) {
-      if (entry.card) {
-        this.addCard(entry, entry.card)
-        continue
-      }
-      const bubble = new this.core.BoxRenderable(this.renderer, {
-        id: entry.id,
-        width: '100%',
-        flexDirection: 'column',
-        flexShrink: 0,
-        marginBottom: 1,
-        backgroundColor: entry.role === 'user' ? colors.input : colors.background,
-      })
-      bubble.add(
-        new this.core.TextRenderable(this.renderer, {
-          content: entry.role === 'user' ? entry.text : this.styledText(entry.text),
-          fg: entry.role === 'user' ? colors.text : colors.secondary,
-          width: '100%',
-          wrapMode: 'word',
-          flexShrink: 0,
-        }),
+    const entries = this.session.entries
+    for (let index = this.renderedEntries; index < entries.length; index++) {
+      const entry = entries[index]!
+      const next = entries[index + 1]
+      if (this.held) this.release(!answeredByCard(this.held.entry, entry))
+      if (answeredByCard(entry, next)) continue
+      if (entry.card) this.addCard(entry, entry.card)
+      else if (
+        !next &&
+        entry.role === 'user' &&
+        !entry.answer &&
+        this.session.requestDetail(entry.id) !== undefined
       )
-      this.detailScroll.add(bubble)
-      this.lastBubble = { box: bubble, role: entry.role }
+        this.hold(entry)
+      else this.addBubble(entry)
     }
-    this.renderedEntries = this.session.entries.length
+    this.renderedEntries = entries.length
+    if (this.held && this.session.requestDetail(this.held.entry.id) === undefined)
+      this.release(true)
     if (replaced) this.detailScroll.scrollTo(this.detailScroll.scrollHeight)
     this.renderOverview()
+  }
+
+  private addBubble(entry: TimelineEntry): void {
+    const bubble = new this.core.BoxRenderable(this.renderer, {
+      id: entry.id,
+      width: '100%',
+      flexDirection: 'column',
+      flexShrink: 0,
+      marginBottom: 1,
+      backgroundColor: entry.role === 'user' ? colors.input : colors.background,
+    })
+    bubble.add(
+      new this.core.TextRenderable(this.renderer, {
+        content: entry.role === 'user' ? entry.text : this.styledText(entry.text),
+        fg: entry.role === 'user' ? colors.text : colors.secondary,
+        width: '100%',
+        wrapMode: 'word',
+        flexShrink: 0,
+      }),
+    )
+    this.detailScroll.add(bubble)
+    this.lastBubble = { box: bubble, role: entry.role }
+  }
+
+  /** Keep a typed request off the chat until it answers; the loader shows after a beat. */
+  private hold(entry: TimelineEntry): void {
+    const loader = new this.core.TextRenderable(this.renderer, {
+      content: '',
+      fg: colors.keyword,
+      width: '100%',
+      flexShrink: 0,
+      marginBottom: 1,
+      paddingLeft: 1,
+      visible: false,
+      selectable: false,
+    })
+    this.detailScroll.add(loader)
+    this.held = { entry, loader }
+  }
+
+  private release(show: boolean): void {
+    if (!this.held) return
+    const { entry, loader } = this.held
+    this.held = undefined
+    loader.destroyRecursively()
+    if (show) this.addBubble(entry)
   }
 
   /**
@@ -1201,6 +1244,13 @@ export class TerminalSurface {
       const started = Date.now()
       const render = () => {
         const frame = loadingFrames[Math.floor((Date.now() - started) / 80) % loadingFrames.length]
+        if (this.held) {
+          const detail = this.session.requestDetail(this.held.entry.id) || 'Working'
+          this.held.loader.content = `${frame} ${detail}…`
+          this.held.loader.visible = true
+          this.progress.visible = false
+          return
+        }
         this.progress.content = fitLine(
           `${frame} ${this.session.current?.detail || 'Working'}…`,
           this.renderer.width - 2,
@@ -1220,6 +1270,7 @@ export class TerminalSurface {
     this.loadingDelay = undefined
     this.loadingTimer = undefined
     this.progress.visible = false
+    if (this.held) this.held.loader.visible = false
   }
 
   private clearControl(): void {

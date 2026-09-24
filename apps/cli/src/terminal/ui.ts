@@ -6,6 +6,7 @@ import { CommandHistory } from '../session/history.ts'
 import { isImplicitRequest } from '../commands/natural.ts'
 import {
   CliSession,
+  deleteSavedSessions,
   savedSessions,
   sessionsDirectory,
   type HomeOverview,
@@ -35,6 +36,7 @@ const HOME_CHOICES: Choice[] = [
   { value: 'api', label: 'Application operations' },
   { value: 'resume', label: 'Resume a CLI session' },
   { value: 'clear', label: 'Clear the conversation' },
+  { value: 'clear-history', label: 'Clear history' },
   { value: 'help', label: 'Help' },
   { value: 'refresh', label: 'Refresh overview' },
   { value: 'exit', label: 'Quit' },
@@ -50,6 +52,10 @@ const HOME_ALIASES: [RegExp, string][] = [
   [
     /^(?:start over|(?:start )?(?:a )?new (?:session|chat|conversation)|clear (?:the |this )?(?:chat|conversation|session|screen))$/i,
     'clear',
+  ],
+  [
+    /^(?:clear|delete|erase|forget|wipe)(?: my| the| all)? (?:(?:command|cli|input|prompt|session) )?history$/i,
+    'clear-history',
   ],
   [
     /^(?:sessions|(?:resume|continue|reopen|open|show|list|browse)(?: an?| my| the)? (?:earlier |previous |old |past |last )?(?:cli )?(?:sessions?|chats?|conversations?))$/i,
@@ -302,6 +308,14 @@ export class CliUi {
   /** clear: start a new transcript and an empty Activity list. */
   clearSession(): void {
     this.transcript.reset()
+  }
+
+  /** clear-history: forget typed commands and delete every saved transcript. */
+  clearHistory(): number {
+    this.history().clear()
+    const removed = deleteSavedSessions(sessionsDirectory())
+    this.transcript.reset()
+    return removed
   }
 
   /** resume: show an earlier transcript and keep appending to it. */

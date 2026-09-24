@@ -115,10 +115,13 @@ async function readNativeIntent(
   {
     signal,
     info = () => {},
+    interpreting = info,
     recover = false,
   }: {
     signal?: AbortSignal
     info?: (message: string) => void
+    /** The typed line is about to leave the machine; the preview already said so. */
+    interpreting?: (message: string) => void
     recover?: boolean
   } = {},
 ) {
@@ -144,7 +147,9 @@ async function readNativeIntent(
   if (localRequest) {
     interpreted = localRequest
   } else if (text && !explicitAgent) {
-    info('Interpreting with Open Run + TypeSafe. Only this request and model choices are sent.')
+    interpreting(
+      'Interpreting with Open Run + TypeSafe. Only this request and model choices are sent.',
+    )
     try {
       interpreted = await interpretRequest(
         text,
@@ -315,6 +320,8 @@ export async function prepareNativeIntent(
 ): Promise<InterpretedIntent> {
   const input = await readNativeIntent(words, mode, {
     info: (message) => ui.info(message),
+    interpreting: (message) =>
+      ui.session ? ui.progress('Interpreting request') : ui.info(message),
     recover: ui.interactive,
   })
   return completeNativeIntent(input, ui, mode)

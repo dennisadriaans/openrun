@@ -1,0 +1,1 @@
+You no longer see your request echoed and an "Interpreting with…" notice above every automation in the CLI chat. A request now shows an inline loader, then only its card; the typed line stays only when the answer is something other than a card.
