@@ -6,6 +6,18 @@ those releases are described in the repository's CHANGELOG.md.
 
 ## Unreleased
 
+## v0.4.1 — 2026-09-24
+
+[compare changes](https://github.com/dennisadriaans/openrun/compare/cli-v0.4.0...cli-v0.4.1)
+
+### 🩹 Fixes
+
+- terminal title CLI ([#151](https://github.com/dennisadriaans/openrun/pull/151))
+
+### 🤖 CI
+
+- **release:** publish releases from pushed tags ([#150](https://github.com/dennisadriaans/openrun/pull/150))
+
 ## v0.4.0 — 2026-09-24
 
 ### 🚀 Features
