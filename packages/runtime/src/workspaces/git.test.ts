@@ -202,7 +202,16 @@ describe('dirtyPaths', () => {
     const cwd = makeRepo()
     git(cwd, ['-c', 'protocol.file.allow=always', 'submodule', 'add', sub, 'lib'])
     git(cwd, ['commit', '-m', 'add submodule'])
-    git(join(cwd, 'lib'), ['commit', '--allow-empty', '-m', 'bump'])
+    git(join(cwd, 'lib'), [
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'user.name=Test',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'bump',
+    ])
     assert.deepEqual(dirtyPaths(cwd), ['lib (submodule)'])
   })
 
