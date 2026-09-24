@@ -654,7 +654,9 @@ export class TerminalSurface {
    * What a request started, tucked under the prompt that asked for it:
    *
    *   ✓ Scheduled  testabc.txt                    10:24:08
-   *     in 10 seconds · claude-sonnet-5 · low effort
+   *     ⎿  in 10 seconds · claude-sonnet-5 · low effort
+   *
+   * The detail hangs off the headline, dimmed, so the two read as one item.
    */
   private addCard(entry: TimelineEntry, card: StatusCard): void {
     const { BoxRenderable, TextRenderable } = this.core
@@ -709,14 +711,28 @@ export class TerminalSurface {
           selectable: false,
         }),
       )
+    // Wrapped detail lines stay aligned after the connector, not under it.
+    const tail = new BoxRenderable(this.renderer, { width: '100%', flexDirection: 'row' })
+    tail.add(
+      new TextRenderable(this.renderer, {
+        content: '⎿  ',
+        fg: colors.muted,
+        width: 3,
+        flexShrink: 0,
+        selectable: false,
+      }),
+    )
     const detail = new TextRenderable(this.renderer, {
       content: '',
       fg: colors.muted,
-      width: '100%',
+      flexGrow: 1,
+      flexShrink: 1,
+      minWidth: 0,
       wrapMode: 'word',
     })
+    tail.add(detail)
     body.add(head)
-    body.add(detail)
+    body.add(tail)
     box.add(icon)
     box.add(body)
     this.detailScroll.add(box)
