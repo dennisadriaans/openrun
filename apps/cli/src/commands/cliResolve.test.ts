@@ -109,6 +109,15 @@ describe('resolveWorkspace', () => {
     assert.equal(result.value.id, 'ws_main')
   })
 
+  it('stops at the checkout root, so a submodule does not resolve to its parent', () => {
+    const parent = [{ ...WORKSPACES[0]!, path: '/repo' }]
+    const inside = resolveWorkspace('', '/repo/app/src', parent, '/repo/app')
+    assert.equal(inside.ok, false)
+    const same = resolveWorkspace('', '/repo/src', parent, '/repo')
+    assert.ok(same.ok)
+    assert.equal(same.value.id, 'ws_main')
+  })
+
   it('prefers the deepest matching path, so a nested worktree wins', () => {
     const nested: WorkspaceChoice[] = [
       { ...WORKSPACES[0]!, path: '/repo' },

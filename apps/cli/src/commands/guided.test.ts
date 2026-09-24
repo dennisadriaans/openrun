@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { chooseSchedule, guideRun, selectRuntime, selectWorkspace } from './guided.ts'
+import { checkoutRoot, chooseSchedule, guideRun, selectRuntime, selectWorkspace } from './guided.ts'
 import { Back, Cancelled, type Choice, type FlowUi } from '../terminal/ui.ts'
 import type { CliClient } from '../runtime/local.ts'
 
@@ -191,6 +191,30 @@ test('remote selection requires a choice even when the local cwd matches a serve
   const unattended = { ...ui, interactive: false }
   await assert.rejects(selectWorkspace(client, '', unattended, { remote: true }), /workspace/)
   await assert.rejects(selectRuntime(client, '', unattended), /Which runtime/)
+})
+
+test('an unregistered checkout is registered and selected without asking', async () => {
+  const calls: string[] = []
+  const workspaces: { id: string; path: string; status: string }[] = []
+  const client: CliClient = {
+    async call(operation, input) {
+      calls.push(operation)
+      if (operation === 'workspaces.list') return workspaces
+      if (operation === 'projects.list') return []
+      if (operation === 'projects.add') {
+        const { path } = input as { path: string }
+        workspaces.push({ id: 'ws_new', path, status: 'ready' })
+        return { id: 'p_new', path, checks: '[]' }
+      }
+      throw new Error(`Unexpected operation: ${operation}`)
+    },
+  }
+  const { ui, selections } = terminal()
+  const workspace = await selectWorkspace(client, '', ui)
+  assert.equal(workspace.id, 'ws_new')
+  assert.equal(workspace.path, checkoutRoot(process.cwd()))
+  assert.equal(selections.length, 0)
+  assert.ok(calls.includes('projects.add'))
 })
 
 test('a preview outside a registered project offers exit without registering anything', async () => {

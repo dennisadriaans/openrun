@@ -104,7 +104,13 @@ export function inspectWorkspaceHealth(workspace: WorkspaceRow): WorkspaceHealth
   if (workspace.branch.trim() && actualBranch !== workspace.branch) {
     return at(workspace, 'branch-drift', { actualBranch, dirty: info.dirty })
   }
-  if (info.dirty) return at(workspace, 'dirty', { actualBranch, dirty: true })
+  if (info.dirty) {
+    return at(workspace, 'dirty', {
+      actualBranch,
+      dirty: true,
+      changes: git.dirtyPaths(workspace.path),
+    })
+  }
 
   return at(workspace, 'ok', { actualBranch, dirty: false })
 }

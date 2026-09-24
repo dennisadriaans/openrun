@@ -154,13 +154,16 @@ function contains(path: string, cwd: string): boolean {
  *
  * With a hint: an absolute path the cwd rule would also have matched, else a
  * project name, workspace name or branch. Without one: the workspace
- * containing `cwd`. Outside a registered checkout, require an explicit hint
- * rather than starting an agent in a different repository.
+ * containing `cwd`, but never one above `root` — the Git checkout `cwd` is in —
+ * so a submodule or nested repository does not resolve to its parent.
+ * Outside a registered checkout, require an explicit hint rather than starting
+ * an agent in a different repository.
  */
 export function resolveWorkspace(
   hint: string,
   cwd: string,
   workspaces: readonly WorkspaceChoice[],
+  root = '',
 ): Resolved<WorkspaceChoice> {
   const live = workspaces.filter((w) => w.status !== 'archived')
   if (live.length === 0) {
@@ -198,7 +201,9 @@ export function resolveWorkspace(
     return { ok: false, error: `No workspace matches "${hint}".\n${optionList(live)}` }
   }
 
-  const here = live.filter((w) => contains(w.path, cwd)).sort(byPathDepth)
+  const here = live
+    .filter((w) => contains(w.path, cwd) && (!root || contains(root, w.path)))
+    .sort(byPathDepth)
   if (here.length > 0) return { ok: true, value: here[0]! }
   return {
     ok: false,
