@@ -42,8 +42,8 @@ export type CommitTypeMeta = {
 
 /**
  * The type table. `bump: null` is the load-bearing part of "don't cut a release
- * just because Monday arrived" — a range of only docs and chores produces no
- * release at all rather than a meaningless patch.
+ * for nothing" — a range of only docs and chores produces no release at all
+ * rather than a meaningless patch.
  *
  * `revert` is a patch on purpose: undoing shipped behaviour is a user-visible
  * change even though the diff only removes code.
@@ -115,6 +115,18 @@ function stripPr(text: string): { text: string; pr: number | null } {
 export function isReleaseCommitSubject(subject: string, tag: string): boolean {
   const commit = parseCommit({ sha: '', subject })
   return commit.type === 'chore' && commit.scope === 'release' && commit.description === tag
+}
+
+/**
+ * Drops the release commits of either track from a range. They only move a
+ * version and a changelog, so they never count toward the next release and
+ * never belong in its notes.
+ */
+export function withoutReleaseCommits<T extends CommitInput>(commits: readonly T[]): T[] {
+  return commits.filter((commit) => {
+    const parsed = parseCommit(commit)
+    return !(parsed.type === 'chore' && parsed.scope === 'release')
+  })
 }
 
 /** Metadata for a parsed commit's type, or null for an unknown/unconventional one. */

@@ -8,10 +8,10 @@
  *
  * Everything that decides *what* ships — which commits count, the baseline, the
  * next version, the notes — is here and pure. `cliRelease.ts` does the IO, and
- * the private release tool drives that script rather than re-deriving any of it.
+ * the maintainer's release tool drives that script rather than re-deriving any of it.
  */
 
-import { parseCommit } from './conventional.ts'
+import { withoutReleaseCommits } from './conventional.ts'
 import type { CommitInput } from './conventional.ts'
 import { renderReleaseNotes } from './notes.ts'
 import { planRelease } from './plan.ts'
@@ -102,17 +102,6 @@ export function cliBaseline(input: {
   return { tag: null, version: input.manifestVersion, legacy: false }
 }
 
-/**
- * Commits that count toward a CLI release. Release commits of either track are
- * dropped: an app release touches the root manifest but ships no CLI change.
- */
-export function cliCommits<T extends CommitInput>(commits: readonly T[]): T[] {
-  return commits.filter((commit) => {
-    const parsed = parseCommit(commit)
-    return !(parsed.type === 'chore' && parsed.scope === 'release')
-  })
-}
-
 /** `planRelease` for the CLI, with the tag in the CLI namespace. */
 export function planCliRelease(input: {
   config: CliReleaseConfig
@@ -122,7 +111,7 @@ export function planCliRelease(input: {
 }): ReleasePlan {
   const plan = planRelease({
     currentVersion: input.baseline.version,
-    commits: cliCommits(input.commits),
+    commits: withoutReleaseCommits(input.commits),
     allowMajor: input.allowMajor ?? false,
     // A legacy baseline already shipped under that number, so it must be bumped.
     firstRelease: input.baseline.tag === null,
@@ -133,21 +122,6 @@ export function planCliRelease(input: {
     // The reason names versions in tag form; say them in the CLI namespace.
     reason: plan.reason.replace(/(?<![\w-])v(?=\d+\.\d+\.\d+)/g, input.config.tagPrefix),
   }
-}
-
-/**
- * Checks an operator-chosen version against the baseline. A version that is
- * not strictly newer would either collide on npm or publish a downgrade.
- */
-export function validateCliVersion(version: string, baseline: CliBaseline): string | null {
-  const next = parseSemVer(version)
-  if (!next || version.startsWith('v')) return `"${version}" is not a SemVer version.`
-  const current = parseSemVer(baseline.version)!
-  const order = compareSemVer(next, current)
-  if (order < 0 || (order === 0 && baseline.tag !== null)) {
-    return `${version} is not newer than the released ${baseline.version}.`
-  }
-  return null
 }
 
 /** Prereleases must not move `latest`, or every `npm install -g` would get a beta. */

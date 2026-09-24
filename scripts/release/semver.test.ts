@@ -9,6 +9,7 @@ import {
   parseSemVer,
   resolveBump,
   toTag,
+  validateNextVersion,
 } from './semver.ts'
 
 test('parses plain, prefixed and prerelease versions', () => {
@@ -100,4 +101,13 @@ test('minor and patch are never held', () => {
   const base = { major: 0, minor: 8, patch: 1 }
   assert.deepEqual(resolveBump(base, 'minor'), { bump: 'minor', requested: 'minor', held: null })
   assert.deepEqual(resolveBump(base, 'patch'), { bump: 'patch', requested: 'patch', held: null })
+})
+
+test('operator versions must move forward', () => {
+  assert.equal(validateNextVersion('0.4.1', '0.4.0', true), null)
+  assert.match(validateNextVersion('0.4.0', '0.4.0', true) ?? '', /not newer/)
+  assert.match(validateNextVersion('0.3.9', '0.4.0', true) ?? '', /not newer/)
+  assert.match(validateNextVersion('v0.5.0', '0.4.0', true) ?? '', /SemVer/)
+  // Before the first release the manifest version itself may ship.
+  assert.equal(validateNextVersion('0.1.0', '0.1.0', false), null)
 })

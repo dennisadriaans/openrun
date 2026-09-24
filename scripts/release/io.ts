@@ -3,9 +3,11 @@
 // repository root and reports to GitHub Actions when it runs there.
 
 import { execFileSync } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { appendFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { isReleaseCommitSubject } from './conventional.ts'
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -40,10 +42,88 @@ export function runLive(command: string, args: string[]): void {
   execFileSync(command, args, { cwd: ROOT, stdio: 'inherit' })
 }
 
-export function remoteTagTarget(tag: string): string | null {
-  const peeled = gitQuiet('ls-remote', '--tags', 'origin', `refs/tags/${tag}^{}`)
-  const direct = peeled || gitQuiet('ls-remote', '--tags', 'origin', `refs/tags/${tag}`)
-  return direct.split(/\s+/)[0] || null
+/** `--name=value` from argv, or undefined. */
+export function flag(argv: string[], name: string): string | undefined {
+  return argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
+}
+
+/** `https://github.com/owner/repo`, from the root manifest. */
+export function repoUrl(): string | undefined {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+    repository?: { url?: string }
+  }
+  return manifest.repository?.url?.replace(/^git\+/, '').replace(/\.git$/, '')
+}
+
+export type RangeCommit = { sha: string; subject: string; body: string }
+
+/** Commits in `from..HEAD` (all of HEAD when `from` is null), optionally limited to paths. */
+export function commitsSince(from: string | null, paths: readonly string[] = []): RangeCommit[] {
+  const range = from ? `${from}..HEAD` : 'HEAD'
+  // Record and unit separators keep multi-line bodies unambiguous.
+  const pathArgs = paths.length ? ['--', ...paths] : []
+  const raw = gitQuiet('log', range, '--no-merges', '--format=%H%x1f%s%x1f%b%x1e', ...pathArgs)
+  if (!raw) return []
+  return raw
+    .split('\x1e')
+    .map((record) => record.replace(/^\n/, ''))
+    .filter((record) => record.trim())
+    .map((record) => {
+      const [sha = '', subject = '', body = ''] = record.split('\x1f')
+      return { sha: sha.trim(), subject: subject.trim(), body }
+    })
+}
+
+/**
+ * A `chore(release): <tag>` commit in HEAD's history whose tag does not exist:
+ * the release PR merged, but nobody tagged it. The release tool resumes from
+ * here instead of planning the next version on top of an unpublished one.
+ */
+export function untaggedRelease(tag: string): { tag: string; sha: string } | null {
+  if (gitQuiet('tag', '--list', tag) === tag) return null
+  const sha = gitQuiet('log', '--format=%H%x1f%s')
+    .split('\n')
+    .map((line) => line.split('\x1f'))
+    .find(([, subject = '']) => isReleaseCommitSubject(subject, tag))?.[0]
+  return sha ? { tag, sha } : null
+}
+
+/**
+ * Publishing is only ever done from the tagged commit: the bytes behind a
+ * release must be rebuildable from a ref nobody moves.
+ */
+export function requireTaggedHead(tag: string): void {
+  const tagged = gitQuiet('rev-parse', `${tag}^{commit}`)
+  const head = git('rev-parse', 'HEAD')
+  if (!tagged) throw new ReleaseError(`${tag} does not exist. Tag the merged release commit first.`)
+  if (tagged !== head) {
+    throw new ReleaseError(`${tag} is ${tagged.slice(0, 9)}, but HEAD is ${head.slice(0, 9)}.`)
+  }
+}
+
+export function githubReleaseExists(tag: string): boolean {
+  return Boolean(run('gh', ['release', 'view', tag, '--json', 'tagName'], { allowFailure: true }))
+}
+
+/** `gh release create` for an existing tag, with the notes passed through a file. */
+export function createGithubRelease(tag: string, title: string, notes: string, extra: string[]) {
+  const notesFile = join(ROOT, '.release-notes.md')
+  writeFileSync(notesFile, notes)
+  try {
+    run('gh', [
+      'release',
+      'create',
+      tag,
+      '--verify-tag',
+      '--title',
+      title,
+      '--notes-file',
+      notesFile,
+      ...extra,
+    ])
+  } finally {
+    rmSync(notesFile, { force: true })
+  }
 }
 
 /** Sets a GitHub Actions step output when running in CI; a no-op locally. */

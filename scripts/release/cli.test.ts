@@ -5,7 +5,6 @@ import { test } from 'node:test'
 
 import {
   cliBaseline,
-  cliCommits,
   cliTag,
   cliVersionFromTag,
   cliWorkspaces,
@@ -14,7 +13,6 @@ import {
   readCliReleaseConfig,
   renderCliNotes,
   uncoveredWorkspaces,
-  validateCliVersion,
 } from './cli.ts'
 import { extractRelease } from './notes.ts'
 
@@ -66,19 +64,6 @@ test('the baseline is the newest CLI tag, else the app tag the CLI last shipped 
   })
 })
 
-test('release commits of either track never count toward a CLI release', () => {
-  const kept = cliCommits([
-    commit('chore(release): v0.4.0'),
-    commit('chore(release): cli-v0.4.0'),
-    commit('feat(cli): add home'),
-    commit('chore(deps): bump esbuild'),
-  ])
-  assert.deepEqual(
-    kept.map((c) => c.subject),
-    ['feat(cli): add home', 'chore(deps): bump esbuild'],
-  )
-})
-
 test('a legacy baseline is bumped, not republished', () => {
   const baseline = { tag: 'v0.3.0', version: '0.3.0', legacy: true }
   const plan = planCliRelease({
@@ -110,15 +95,6 @@ test('a first CLI release publishes the manifest version as-is', () => {
     commits: [commit('feat: start')],
   })
   assert.equal(plan.tag, 'cli-v0.1.0')
-})
-
-test('operator versions must move forward', () => {
-  const shipped = { tag: 'cli-v0.4.0', version: '0.4.0', legacy: false }
-  assert.equal(validateCliVersion('0.4.1', shipped), null)
-  assert.match(validateCliVersion('0.4.0', shipped) ?? '', /not newer/)
-  assert.match(validateCliVersion('0.3.9', shipped) ?? '', /not newer/)
-  assert.match(validateCliVersion('v0.5.0', shipped) ?? '', /SemVer/)
-  assert.equal(validateCliVersion('0.1.0', { tag: null, version: '0.1.0', legacy: false }), null)
 })
 
 test('prereleases never take the latest dist-tag', () => {

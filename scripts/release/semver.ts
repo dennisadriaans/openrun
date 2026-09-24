@@ -3,7 +3,7 @@
  *
  * Browser-safe and dependency-free, like everything else in `lib/`: the same
  * module answers "what would the next release be?" for `pnpm release:plan`, for
- * the GitHub Action that opens the release PR, and for any UI that wants to show
+ * the maintainer's guided release, and for any UI that wants to show
  * the pending release. No LLM is ever consulted for a version number — given a
  * base version and a set of commits the answer is a pure function.
  */
@@ -141,9 +141,9 @@ export type ResolvedBump = {
  *   the leading zero means in SemVer, not a reason to jump to `1.0.0`. Reaching
  *   1.0 is a product decision, never a side effect of a `feat!` merging.
  * - **Policy.** At or past 1.0 an automatic major is still gated on
- *   `allowMajor`, so an unattended Monday release can never move the headline
- *   number on its own. The release PR says the breaking changes are there and a
- *   human cuts the major.
+ *   `allowMajor`, so the suggested version never moves the headline number on
+ *   its own. The plan says the breaking changes are there and a human types
+ *   the major.
  */
 export function resolveBump(
   version: SemVer,
@@ -156,4 +156,24 @@ export function resolveBump(
   if (!options.allowMajor) return { bump: 'minor', requested, held: 'policy' }
 
   return { bump: 'major', requested, held: null }
+}
+
+/**
+ * Checks an operator-chosen version against the one already released. A
+ * version that is not strictly newer would collide with a shipped tag or
+ * publish a downgrade. `shipped` is false before the first release, when the
+ * manifest version itself may go out unchanged.
+ */
+export function validateNextVersion(
+  version: string,
+  current: string,
+  shipped: boolean,
+): string | null {
+  const next = parseSemVer(version)
+  if (!next || version.startsWith('v')) return `"${version}" is not a SemVer version.`
+  const order = compareSemVer(next, parseSemVer(current)!)
+  if (order < 0 || (order === 0 && shipped)) {
+    return `${version} is not newer than the released ${current}.`
+  }
+  return null
 }

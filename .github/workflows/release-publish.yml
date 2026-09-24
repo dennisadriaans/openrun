@@ -1,20 +1,26 @@
 name: Release · publish
 
+# Creates the GitHub Release for a vX.Y.Z tag. The tag, not a branch, is the
+# trigger: the maintainer tags the merged `chore(release): vX.Y.Z` commit, and
+# the Release must describe exactly that commit. Re-running is safe — publish
+# skips a Release that already exists.
+
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      expected_tag:
-        description: Fail unless this exact release is complete
+      tag:
+        description: The vX.Y.Z tag to (re)publish
         type: string
-        required: false
+        required: true
 
 permissions:
+  # gh release create
   contents: write
 
 concurrency:
-  group: release-publish
+  group: release-publish-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -22,9 +28,19 @@ jobs:
     name: publish release
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Check tag
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$TAG is not a vX.Y.Z tag"
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
@@ -33,11 +49,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-
-      - name: Configure release author
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 
       - name: Verify release commit
         run: |
@@ -48,13 +59,7 @@ jobs:
           pnpm test
           pnpm build
 
-      - name: Reconcile release
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_TAG: ${{ inputs.expected_tag }}
-        run: |
-          args=()
-          if [[ -n "$EXPECTED_TAG" ]]; then
-            args+=(--expect="$EXPECTED_TAG")
-          fi
-          pnpm release:publish -- "${args[@]}"
+        run: pnpm release:publish -- --expect="$TAG"

@@ -18,12 +18,6 @@
     "pnpm": ">=10"
   },
   "type": "module",
-  "release": {
-    "cadence": "weekly",
-    "day": "monday",
-    "time": "09:00",
-    "timezone": "Europe/Amsterdam"
-  },
   "imports": {
     "#/*": "./apps/web/src/*"
   },

@@ -6,6 +6,7 @@ import {
   MAX_SUBJECT_LENGTH,
   commitBump,
   isReleaseCommitSubject,
+  withoutReleaseCommits,
   parseCommit,
   typeMeta,
   validateCommitTitle,
@@ -146,4 +147,17 @@ test('a valid title parses back into the commit the release plan will see', () =
   const title = 'feat(tasks): select and bulk delete automations'
   assert.equal(validateCommitTitle(title).ok, true)
   assert.equal(parseCommit({ sha: 'a', subject: title }).type, 'feat')
+})
+
+test('release commits of either track never count toward the next release', () => {
+  const kept = withoutReleaseCommits([
+    { sha: '', subject: 'chore(release): v0.4.0' },
+    { sha: '', subject: 'chore(release): cli-v0.4.0' },
+    { sha: '', subject: 'feat(cli): add home' },
+    { sha: '', subject: 'chore(deps): bump esbuild' },
+  ])
+  assert.deepEqual(
+    kept.map((c) => c.subject),
+    ['feat(cli): add home', 'chore(deps): bump esbuild'],
+  )
 })
