@@ -6,16 +6,15 @@
 //   publish  build, smoke-test and publish the tagged commit to npm, then the
 //            GitHub Release — each step skipped when it already happened
 //
-// Tagging stays with whoever merged the release PR (the private release tool,
-// or a maintainer), exactly like the app. `publish` refuses to run anywhere but
-// on the tagged commit, so npm only ever receives a version git can reproduce.
+// Same split as the app track (`index.ts`): the branch, commit, PR and tag
+// belong to whoever runs the release, and `Release · CLI` runs `publish` when a
+// `cli-vX.Y.Z` tag is pushed.
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
   cliBaseline,
-  cliCommits,
   cliTag,
   type CliBaseline,
   type CliReleaseConfig,
@@ -23,12 +22,28 @@ import {
   planCliRelease,
   readCliReleaseConfig,
   renderCliNotes,
-  validateCliVersion,
 } from './cli.ts'
-import { addSummary, git, gitQuiet, ReleaseError, ROOT, run, runLive, setOutput } from './io.ts'
-import { extractRelease, insertRelease } from './notes.ts'
+import { withoutReleaseCommits } from './conventional.ts'
+import {
+  addSummary,
+  commitsSince,
+  createGithubRelease,
+  flag,
+  gitQuiet,
+  githubReleaseExists,
+  ReleaseError,
+  ROOT,
+  repoUrl,
+  requireTaggedHead,
+  run,
+  runLive,
+  setOutput,
+  untaggedRelease,
+} from './io.ts'
+import { extractRelease, insertRelease, releaseIndex } from './notes.ts'
 import type { ReleasePlan } from './plan.ts'
 import { summariseCounts } from './plan.ts'
+import { validateNextVersion } from './semver.ts'
 
 const CLI_MANIFEST = join(ROOT, 'apps/cli/package.json')
 const CLI_CHANGELOG = join(ROOT, 'apps/cli/CHANGELOG.md')
@@ -42,17 +57,6 @@ function readCliManifest(): { version: string; config: CliReleaseConfig } {
   return { version: manifest.version, config: readCliReleaseConfig(manifest) }
 }
 
-function repoUrl(): string | undefined {
-  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
-    repository?: { url?: string }
-  }
-  return manifest.repository?.url?.replace(/^git\+/, '').replace(/\.git$/, '')
-}
-
-function flag(argv: string[], name: string): string | undefined {
-  return argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
-}
-
 // -------------------------------------------------------------------- planning
 
 type Resolved = {
@@ -63,38 +67,16 @@ type Resolved = {
   plan: ReleasePlan
 }
 
-/** Commits in `baseline..HEAD` that touch a path the npm package is built from. */
-function cliRangeCommits(config: CliReleaseConfig, baseline: CliBaseline) {
-  const range = baseline.tag ? `${baseline.tag}..HEAD` : 'HEAD'
-  const raw = gitQuiet(
-    'log',
-    range,
-    '--no-merges',
-    '--format=%H%x1f%s%x1f%b%x1e',
-    '--',
-    ...config.paths,
-  )
-  if (!raw) return []
-  return raw
-    .split('\x1e')
-    .map((record) => record.replace(/^\n/, ''))
-    .filter((record) => record.trim())
-    .map((record) => {
-      const [sha = '', subject = '', body = ''] = record.split('\x1f')
-      return { sha: sha.trim(), subject: subject.trim(), body }
-    })
-}
-
 function resolve(options: { allowMajor?: boolean } = {}): Resolved {
   const { version, config } = readCliManifest()
   const tags = gitQuiet('tag', '--list').split('\n').filter(Boolean)
   const baseline = cliBaseline({ config, tags, manifestVersion: version })
-  const commits = cliCommits(cliRangeCommits(config, baseline))
+  const commits = withoutReleaseCommits(commitsSince(baseline.tag, config.paths))
   const plan = planCliRelease({ config, baseline, commits, allowMajor: options.allowMajor })
   return { config, manifestVersion: version, baseline, commits, plan }
 }
 
-function describe({ config, baseline, plan }: Resolved): string {
+function describe({ config, baseline, plan }: Resolved, pending: string | null): string {
   const lines = [
     `Package:  ${config.package}`,
     `Current:  ${baseline.version}${baseline.tag ? ` (${baseline.tag}${baseline.legacy ? ', shared app tag' : ''})` : ' (never published)'}`,
@@ -103,6 +85,10 @@ function describe({ config, baseline, plan }: Resolved): string {
   ]
   if (plan.breaking.length > 0) lines.push(`Breaking: ${plan.breaking.length}`)
   lines.push('')
+  if (pending) {
+    lines.push(`Pending:  ${pending} is merged but not tagged — tag it first.`)
+    return lines.join('\n')
+  }
   lines.push(
     plan.releasable ? `Next:     ${plan.tag}  (${plan.reason})` : `No release: ${plan.reason}`,
   )
@@ -112,6 +98,7 @@ function describe({ config, baseline, plan }: Resolved): string {
 function commandPlan(argv: string[]): number {
   const resolved = resolve({ allowMajor: argv.includes('--allow-major') })
   const { config, baseline, plan, commits } = resolved
+  const pending = untaggedRelease(cliTag(config, resolved.manifestVersion))
 
   if (argv.includes('--json')) {
     console.log(
@@ -119,17 +106,14 @@ function commandPlan(argv: string[]): number {
         {
           package: config.package,
           tagPrefix: config.tagPrefix,
-          manifestVersion: resolved.manifestVersion,
           current: baseline.version,
           previousTag: baseline.tag,
-          legacyBaseline: baseline.legacy,
           next: plan.next,
           tag: plan.tag,
           bump: plan.bump,
           releasable: plan.releasable,
           reason: plan.reason,
-          total: plan.total,
-          counts: plan.counts,
+          pending,
           commits: commits.map(({ sha, subject }) => ({ sha, subject })),
         },
         null,
@@ -137,7 +121,7 @@ function commandPlan(argv: string[]): number {
       ),
     )
   } else {
-    console.log(describe(resolved))
+    console.log(describe(resolved, pending?.tag ?? null))
   }
 
   setOutput('releasable', String(plan.releasable))
@@ -157,13 +141,13 @@ function commandPlan(argv: string[]): number {
 function commandPrepare(argv: string[]): number {
   const resolved = resolve({ allowMajor: argv.includes('--allow-major') })
   const { config, baseline, plan } = resolved
-  console.log(describe(resolved))
+  console.log(describe(resolved, null))
 
   const version = flag(argv, 'version')?.replace(/^v/, '') ?? plan.next
   if (!version) {
     throw new ReleaseError(`Nothing to release (${plan.reason}). Pass --version= to force one.`)
   }
-  const invalid = validateCliVersion(version, baseline)
+  const invalid = validateNextVersion(version, baseline.version, baseline.tag !== null)
   if (invalid) throw new ReleaseError(invalid)
   const tag = cliTag(config, version)
   if (gitQuiet('tag', '--list', tag)) throw new ReleaseError(`${tag} already exists.`)
@@ -198,8 +182,8 @@ function npmHas(pkg: string, version: string): boolean {
 }
 
 async function waitForNpm(pkg: string, version: string): Promise<boolean> {
-  // The registry's read side lags the write by a few seconds.
-  for (let attempt = 0; attempt < 12; attempt++) {
+  // The registry's read side lags the write — seconds usually, minutes at times.
+  for (let attempt = 0; attempt < 36; attempt++) {
     if (npmHas(pkg, version)) return true
     await new Promise((settle) => setTimeout(settle, 5_000))
   }
@@ -227,14 +211,8 @@ async function commandPublish(argv: string[]): Promise<number> {
     throw new ReleaseError(`Expected ${expected}, but apps/cli/package.json identifies ${tag}.`)
   }
 
-  // Only a tagged commit is publishable: npm versions are immutable, so the
-  // bytes behind one must be rebuildable from a ref nobody moves.
-  const tagged = gitQuiet('rev-parse', `${tag}^{commit}`)
-  const head = git('rev-parse', 'HEAD')
-  if (!tagged) throw new ReleaseError(`${tag} does not exist. Tag the merged release commit first.`)
-  if (tagged !== head) {
-    throw new ReleaseError(`${tag} is ${tagged.slice(0, 9)}, but HEAD is ${head.slice(0, 9)}.`)
-  }
+  // npm versions are immutable, so only the tagged commit is publishable.
+  requireTaggedHead(tag)
 
   const notes = extractRelease(
     existsSync(CLI_CHANGELOG) ? readFileSync(CLI_CHANGELOG, 'utf8') : '',
@@ -243,9 +221,7 @@ async function commandPublish(argv: string[]): Promise<number> {
   if (!notes) throw new ReleaseError(`apps/cli/CHANGELOG.md has no "## v${version}" section.`)
 
   const onNpm = npmHas(config.package, version)
-  const releaseExists = Boolean(
-    run('gh', ['release', 'view', tag, '--json', 'tagName'], { allowFailure: true }),
-  )
+  const releaseExists = githubReleaseExists(tag)
   if (onNpm && releaseExists) {
     console.log(`${config.package}@${version} and the ${tag} GitHub Release already exist.`)
     setOutput('published', 'false')
@@ -256,7 +232,7 @@ async function commandPublish(argv: string[]): Promise<number> {
   const distTag = npmDistTag(version)
   if (dryRun) {
     if (!onNpm) console.log(`Would publish ${config.package}@${version} (dist-tag ${distTag}).`)
-    if (!releaseExists) console.log(`Would create GitHub Release ${tag}:\n\n${notes}`)
+    if (!releaseExists) console.log(`Would create GitHub Release ${tag}:\n\n${releaseIndex(notes)}`)
     setOutput('published', 'false')
     return 0
   }
@@ -277,37 +253,23 @@ async function commandPublish(argv: string[]): Promise<number> {
       // Provenance links the package to this workflow run; it needs an OIDC token.
       if (process.env.GITHUB_ACTIONS === 'true') args.push('--provenance')
       runLive('npm', args)
-      if (!(await waitForNpm(config.package, version))) {
-        throw new ReleaseError(`npm accepted ${version} but the registry does not list it yet.`)
+      // `npm publish` exiting 0 means the registry took the version; a slow
+      // read side is not a failed release, so say so and carry on.
+      if (await waitForNpm(config.package, version)) {
+        console.log(`Published ${config.package}@${version} (${distTag}).`)
+      } else {
+        console.warn(`npm accepted ${version}, but the registry does not list it yet.`)
       }
-      console.log(`Published ${config.package}@${version} (${distTag}).`)
     }
 
     if (!releaseExists) {
-      const notesFile = join(ROOT, '.cli-release-notes.md')
-      writeFileSync(
-        notesFile,
-        `${notes}\n\nInstall: \`npm install -g ${config.package}@${version}\`\n`,
+      createGithubRelease(
+        tag,
+        `Open Run CLI ${tag}`,
+        `${releaseIndex(notes)}\n\n📦 \`npm install -g ${config.package}@${version}\`\n`,
+        // The app's release is the repository's headline; a CLI patch must not replace it.
+        ['--latest=false', ...(distTag === 'next' ? ['--prerelease'] : []), tarball],
       )
-      try {
-        const args = [
-          'release',
-          'create',
-          tag,
-          tarball,
-          '--verify-tag',
-          '--title',
-          `Open Run CLI ${tag}`,
-          '--notes-file',
-          notesFile,
-          // The app's release is the repository's headline; a CLI patch must not replace it.
-          '--latest=false',
-        ]
-        if (distTag === 'next') args.push('--prerelease')
-        run('gh', args)
-      } finally {
-        rmSync(notesFile, { force: true })
-      }
     }
   } finally {
     rmSync(tarball, { force: true })

@@ -47,6 +47,10 @@ export function renderReleaseNotes(input: NotesInput): string {
   const date = input.date ?? new Date().toISOString().slice(0, 10)
   lines.push(`## v${plan.next} — ${date}`, '')
 
+  if (input.repoUrl && input.previousTag) {
+    lines.push(`[compare changes](${input.repoUrl}/compare/${input.previousTag}...${plan.tag})`, '')
+  }
+
   if (plan.breaking.length > 0) {
     lines.push(renderBreaking(plan), '')
   }
@@ -74,21 +78,45 @@ export function renderReleaseNotes(input: NotesInput): string {
   }
 
   if (plan.unconventional.length > 0) {
-    lines.push('### Uncategorised', '')
+    lines.push('### 🧩 Other', '')
     for (const commit of plan.unconventional) {
       lines.push(`- ${renderCommit(null, commit.description, commit.pr, input.repoUrl)}`)
     }
     lines.push('')
   }
 
-  if (input.repoUrl && input.previousTag) {
-    lines.push(
-      `**Full changelog**: [\`${input.previousTag}...${plan.tag}\`](${input.repoUrl}/compare/${input.previousTag}...${plan.tag})`,
-      '',
-    )
-  }
-
   return `${lines.join('\n').trimEnd()}\n`
+}
+
+/**
+ * The GitHub Release body for a changelog section: the compare link, the
+ * breaking-change notice, and the emoji-grouped commit index — no prose.
+ *
+ * The prose stays in CHANGELOG.md for people reading the file; a Release page
+ * reads best as a scannable list of what changed, the way Nuxt's do. Accepts
+ * sections written before the compare link moved to the top
+ * (`**Full changelog**: …` at the bottom), so older releases render the same.
+ */
+export function releaseIndex(section: string): string {
+  const lines = section.split('\n')
+  const firstGroup = lines.findIndex((line) => line.startsWith('### '))
+  // Nothing grouped to show: the prose is all the release has.
+  if (firstGroup === -1) return section.trim()
+
+  const compareLine = lines.find((line) =>
+    /^(\[compare changes\]|\*\*Full changelog\*\*)/.test(line),
+  )
+  const compareUrl = compareLine?.match(/\((https:[^)]+\/compare\/[^)]+)\)/)?.[1]
+  const breaking = lines.slice(0, firstGroup).filter((line) => line.startsWith('> '))
+  const groups = lines.slice(firstGroup).filter((line) => line !== compareLine)
+
+  return [
+    ...(compareUrl ? [`[compare changes](${compareUrl})`, ''] : []),
+    ...(breaking.length ? [...breaking, ''] : []),
+    ...groups,
+  ]
+    .join('\n')
+    .trim()
 }
 
 function renderBreaking(plan: ReleasePlan): string {

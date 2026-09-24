@@ -1,52 +1,54 @@
-// The release pipeline's IO half. Every decision it makes comes from
-// `scripts/release/*`, which is pure and tested; this file only reads git,
-// writes files and talks to `gh`.
+// The app release track's IO half. Every decision comes from the pure modules
+// beside it; this file reads git, writes the manifest and changelog, and talks
+// to `gh`.
 //
 //   plan     read-only: what would the next release be?
-//   prepare  write the version, changelog and release branch
-//   publish  tag the merged commit and create the GitHub Release
+//   prepare  write package.json + CHANGELOG.md and fold changelog.d/ (no git)
+//   publish  create the GitHub Release for the tagged commit (CI runs this)
 //
-// `prepare` and `publish` are deliberately separate operations: preparing opens
-// a PR whose parent SHA freezes the release contents, and publishing runs in CI
-// against that exact tested commit. A laptop is never the release authority.
+// The branch, the commit, the PR and the tag belong to whoever runs the release
+// — the maintainer's release tool, or a person following RELEASING.md. The
+// `Release · publish` workflow runs `publish` when a `vX.Y.Z` tag is pushed,
+// which is the same split the CLI track (`cliRelease.ts`) uses.
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { parseCadence, isReleaseDue } from './cadence.ts'
-import { isReleaseCommitSubject } from './conventional.ts'
+import { withoutReleaseCommits } from './conventional.ts'
 import {
   addSummary,
-  git,
+  commitsSince,
+  createGithubRelease,
+  flag,
   gitQuiet,
+  githubReleaseExists,
   ReleaseError,
-  remoteTagTarget,
   ROOT,
-  run,
-  runLive,
+  repoUrl,
+  requireTaggedHead,
   setOutput,
+  untaggedRelease,
 } from './io.ts'
-import { extractRelease, insertRelease, renderReleaseNotes, splitChangelog } from './notes.ts'
+import {
+  extractRelease,
+  insertRelease,
+  releaseIndex,
+  renderReleaseNotes,
+  splitChangelog,
+} from './notes.ts'
 import type { Fragment } from './notes.ts'
 import { planRelease, summariseCounts } from './plan.ts'
 import type { ReleasePlan } from './plan.ts'
-import { highestVersion, toTag } from './semver.ts'
+import { highestVersion, parseSemVer, toTag, validateNextVersion } from './semver.ts'
 
 const CHANGELOG = join(ROOT, 'CHANGELOG.md')
 const FRAGMENTS = join(ROOT, 'changelog.d')
 const PACKAGE = join(ROOT, 'package.json')
 
-// ------------------------------------------------------------------ repo state
-
-type Manifest = { version?: string; repository?: { url?: string }; release?: unknown }
-
-const readManifest = (): Manifest => JSON.parse(readFileSync(PACKAGE, 'utf8')) as Manifest
-
-/** `https://github.com/owner/repo`, normalised from the package manifest. */
-function repoUrl(manifest: Manifest): string | undefined {
-  const url = manifest.repository?.url
-  if (!url) return undefined
-  return url.replace(/^git\+/, '').replace(/\.git$/, '')
+function manifestVersion(): string {
+  const manifest = JSON.parse(readFileSync(PACKAGE, 'utf8')) as { version?: string }
+  if (!manifest.version) throw new ReleaseError('package.json has no "version" field.')
+  return manifest.version
 }
 
 /** Newest `vX.Y.Z` tag, or null before the first release. */
@@ -54,47 +56,6 @@ function latestTag(): string | null {
   const tags = gitQuiet('tag', '--list', 'v*').split('\n').filter(Boolean)
   const highest = highestVersion(tags)
   return highest ? toTag(highest) : null
-}
-
-function tagExists(tag: string): boolean {
-  return gitQuiet('tag', '--list', tag) === tag
-}
-
-function tagPublishedAt(tag: string | null): Date | null {
-  if (!tag) return null
-  const annotated = gitQuiet(
-    'for-each-ref',
-    '--format=%(taggerdate:iso-strict)',
-    `refs/tags/${tag}`,
-  )
-  const value = annotated || gitQuiet('log', '-1', '--format=%cI', tag)
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-/** Whether a branch already exists on `origin`, without needing it fetched. */
-function remoteBranchExists(branch: string): boolean {
-  return gitQuiet('ls-remote', '--heads', 'origin', branch).includes(`refs/heads/${branch}`)
-}
-
-type RangeCommit = { sha: string; subject: string; body: string }
-
-/** Commits in `tag..HEAD`, or the whole history before the first release. */
-function commitsSince(tag: string | null): RangeCommit[] {
-  const range = tag ? `${tag}..HEAD` : 'HEAD'
-  // Record and unit separators keep multi-line bodies unambiguous.
-  const raw = gitQuiet('log', range, '--no-merges', '--format=%H%x1f%s%x1f%b%x1e')
-  if (!raw) return []
-
-  return raw
-    .split('\x1e')
-    .map((record) => record.replace(/^\n/, ''))
-    .filter((record) => record.trim())
-    .map((record) => {
-      const [sha = '', subject = '', body = ''] = record.split('\x1f')
-      return { sha: sha.trim(), subject: subject.trim(), body }
-    })
 }
 
 function readFragments(): Fragment[] {
@@ -110,387 +71,187 @@ function readFragments(): Fragment[] {
 
 type Resolved = {
   plan: ReleasePlan
-  manifest: Manifest
+  /** Version the range starts from: the newest tag, or the manifest before the first one. */
+  current: string
   previousTag: string | null
+  commits: { sha: string; subject: string }[]
   fragments: Fragment[]
-  firstRelease: boolean
 }
 
-function resolvePlan(options: { allowMajor?: boolean } = {}): Resolved {
-  const manifest = readManifest()
-  if (!manifest.version) {
-    throw new ReleaseError('package.json has no "version" field — the release pipeline needs one.')
-  }
-
+function resolve(options: { allowMajor?: boolean } = {}): Resolved {
   const previousTag = latestTag()
-  const firstRelease = previousTag === null
   // Before the first tag the manifest version *is* the release; after it, the
   // newest tag is the base so a hand-edited manifest can never skew the bump.
-  const currentVersion = previousTag ?? manifest.version
-
+  const current = previousTag?.replace(/^v/, '') ?? manifestVersion()
+  const commits = withoutReleaseCommits(commitsSince(previousTag))
   const plan = planRelease({
-    currentVersion,
-    commits: commitsSince(previousTag),
+    currentVersion: current,
+    commits,
     allowMajor: options.allowMajor ?? false,
-    firstRelease,
+    firstRelease: previousTag === null,
   })
-
-  return { plan, manifest, previousTag, fragments: readFragments(), firstRelease }
+  return { plan, current, previousTag, commits, fragments: readFragments() }
 }
 
-// --------------------------------------------------------------- GH plumbing
-
-/**
- * Commits the staged release files through GitHub's `createCommitOnBranch`
- * rather than `git commit`.
- *
- * A commit written locally by the workflow is unsigned and authored by
- * `github-actions[bot]`, which `main`'s ruleset counts as an *unattributed*
- * change (`require_extra_approval_for_unattributed_changes`). That demands an
- * approving review the release job can never obtain, so auto-merge parks the PR
- * forever and the job times out waiting for it. Commits created through the API
- * are signed by GitHub and attributed to the Actions app, which satisfies the
- * rule without weakening it for humans.
- *
- * Falls back to a local commit when no token is available, so `release:prepare`
- * still works on a laptop and in `--dry-run` rehearsals.
- */
-function commitRelease(branch: string, message: string): void {
-  if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
-    git('commit', '-m', message)
-    return
-  }
-
-  // The API writes the commit on top of the remote branch tip, so the branch
-  // has to exist there first — push the parent before adding the commit to it.
-  const parent = git('rev-parse', 'HEAD')
-  run('git', ['push', '--force-with-lease', 'origin', `${parent}:refs/heads/${branch}`])
-
-  // `--no-renames` keeps every entry a simple status/path pair, so a fragment
-  // that git would otherwise pair up as a rename still shows as delete + add.
-  const staged = git('diff', '--cached', '--name-status', '--no-renames')
-  const additions: { path: string; contents: string }[] = []
-  const deletions: { path: string }[] = []
-
-  for (const line of staged.split('\n').filter(Boolean)) {
-    const [status, path] = line.split('\t')
-    if (status === 'D') deletions.push({ path })
-    else additions.push({ path, contents: readFileSync(join(ROOT, path)).toString('base64') })
-  }
-
-  // `gh api graphql --input -` replaces the whole request body, so the query
-  // has to travel inside that JSON; a sibling `-f query=…` is silently dropped.
-  // Passing it this way also keeps a large changelog off the argv length limit.
-  const body = {
-    query:
-      'mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }',
-    variables: {
-      input: {
-        branch: { repositoryNameWithOwner: nameWithOwner(), branchName: branch },
-        message: { headline: message },
-        expectedHeadOid: parent,
-        fileChanges: { additions, deletions },
-      },
-    },
-  }
-
-  const oid = run(
-    'gh',
-    ['api', 'graphql', '--input', '-', '--jq', '.data.createCommitOnBranch.commit.oid'],
-    { input: JSON.stringify(body) },
-  )
-
-  // Move the local branch onto the commit GitHub just wrote, so the later
-  // `git push` of the branch is a no-op instead of a conflicting force-push.
-  // The mutation created that commit server-side, so this clone has never seen
-  // the object — fetch it before asking git to resolve it.
-  git('fetch', '--no-tags', 'origin', oid)
-  git('reset', '--hard', oid)
-}
-
-/** `owner/repo` for the repository the workflow is running against. */
-function nameWithOwner(): string {
-  const fromEnv = process.env.GITHUB_REPOSITORY
-  if (fromEnv) return fromEnv
-  const url = git('remote', 'get-url', 'origin')
-  const match = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/)
-  if (!match) throw new ReleaseError(`Cannot derive owner/repo from origin URL: ${url}`)
-  return match[1]
-}
-
-// ------------------------------------------------------------------- commands
-
-function describePlan(resolved: Resolved): string {
-  const { plan, previousTag } = resolved
+function describe({ plan, previousTag, fragments }: Resolved, pending: string | null): string {
   const lines = [
     `Current:  ${previousTag ?? `${plan.current} (no tags yet)`}`,
     `Range:    ${previousTag ? `${previousTag}..HEAD` : 'HEAD (full history)'}`,
     `Commits:  ${plan.total}${plan.total ? ` — ${summariseCounts(plan.counts)}` : ''}`,
   ]
-
   if (plan.breaking.length > 0) lines.push(`Breaking: ${plan.breaking.length}`)
   if (plan.unconventional.length > 0) {
     lines.push(`Unknown:  ${plan.unconventional.length} commit(s) with a non-conventional subject`)
   }
-  lines.push(`Fragments: ${resolved.fragments.length} in changelog.d/`)
-  lines.push('')
+  lines.push(`Fragments: ${fragments.length} in changelog.d/`, '')
+  if (pending) {
+    lines.push(`Pending:  ${pending} is merged but not tagged — tag it first.`)
+    return lines.join('\n')
+  }
   lines.push(
     plan.releasable ? `Next:     ${plan.tag}  (${plan.reason})` : `No release: ${plan.reason}`,
   )
-
   return lines.join('\n')
 }
 
 function commandPlan(argv: string[]): number {
-  const resolved = resolvePlan({ allowMajor: argv.includes('--allow-major') })
+  const resolved = resolve({ allowMajor: argv.includes('--allow-major') })
+  const { plan, current, previousTag, commits } = resolved
+  const pending = untaggedRelease(toTag(manifestVersion()))
 
   if (argv.includes('--json')) {
-    console.log(JSON.stringify({ ...resolved.plan, previousTag: resolved.previousTag }, null, 2))
+    console.log(
+      JSON.stringify(
+        {
+          package: null,
+          tagPrefix: 'v',
+          current,
+          previousTag,
+          next: plan.next,
+          tag: plan.tag,
+          bump: plan.bump,
+          releasable: plan.releasable,
+          reason: plan.reason,
+          pending,
+          commits: commits.map(({ sha, subject }) => ({ sha, subject })),
+        },
+        null,
+        2,
+      ),
+    )
   } else {
-    console.log(describePlan(resolved))
+    console.log(describe(resolved, pending?.tag ?? null))
   }
 
-  setOutput('releasable', String(resolved.plan.releasable))
-  setOutput('version', resolved.plan.next ?? '')
-  setOutput('tag', resolved.plan.tag ?? '')
-  setOutput('reason', resolved.plan.reason)
-
-  // `--check` makes "nothing to release" a non-zero exit for shell callers.
-  return argv.includes('--check') && !resolved.plan.releasable ? 1 : 0
-}
-
-function verify(): void {
-  console.log('\n→ Verifying (lint · typecheck · test · build)\n')
-  runLive('pnpm', ['exec', 'biome', 'ci', 'apps', 'packages', 'scripts'])
-  runLive('pnpm', ['typecheck'])
-  runLive('pnpm', ['test'])
-  runLive('pnpm', ['build'])
-}
-
-function commandPrepare(argv: string[]): number {
-  const dryRun = argv.includes('--dry-run')
-
-  // Cadence is checked before anything else so a non-release day costs one
-  // `git` call and nothing more.
-  if (argv.includes('--respect-cadence')) {
-    const tag = latestTag()
-    const verdict = isReleaseDue(
-      parseCadence(readManifest().release),
-      new Date(),
-      tagPublishedAt(tag),
-    )
-    if (!verdict.due) {
-      console.log(verdict.reason)
-      addSummary(`### No release\n\n${verdict.reason}`)
-      setOutput('prepared', 'false')
-      setOutput('reason', verdict.reason)
-      return 0
-    }
-    console.log(verdict.reason)
-  }
-
-  const resolved = resolvePlan({ allowMajor: argv.includes('--allow-major') })
-  const { plan, manifest } = resolved
-  console.log(describePlan(resolved))
-
-  if (!plan.releasable || !plan.next || !plan.tag) {
-    addSummary(`### No release\n\n${plan.reason}`)
-    setOutput('prepared', 'false')
-    setOutput('reason', plan.reason)
-    return 0
-  }
-
-  // Idempotency: a rerun after a partial failure must never build a second,
-  // different release under a version that already shipped.
-  if (tagExists(plan.tag)) {
-    throw new ReleaseError(
-      `${plan.tag} already exists. The range moved but the version did not — ` +
-        'delete the stale tag or land another commit before preparing again.',
-    )
-  }
-
-  // The cadence window stays open for the rest of the release day, so a later
-  // scheduled run would otherwise prepare the same version a second time.
-  const branch = `release/${plan.tag}`
-  if (remoteBranchExists(branch)) {
-    const message = `${branch} already exists — resuming preparation for ${plan.tag}.`
-    console.log(message)
-    addSummary(`### Resuming ${plan.tag}\n\n${message}`)
-    setOutput('prepared', 'existing')
-    setOutput('version', plan.next)
-    setOutput('tag', plan.tag)
-    setOutput('branch', branch)
-    setOutput('reason', message)
-    return 0
-  }
-
-  if (!argv.includes('--skip-verify')) verify()
-
-  const source = notesSource(argv)
-  // Bullets under `## Unreleased` and `changelog.d/` fragments often describe the
-  // same work, so the source is explicit rather than blindly concatenated.
-  const { carried } = splitChangelog(readFileSync(CHANGELOG, 'utf8'))
-  const notes = renderReleaseNotes({
-    plan,
-    fragments: source === 'unreleased' ? [] : resolved.fragments,
-    carried: source === 'fragments' ? [] : carried,
-    repoUrl: repoUrl(manifest),
-    previousTag: resolved.previousTag,
-  })
-
-  if (dryRun) {
-    console.log(`\n--- ${branch} would contain ---\n`)
-    console.log(notes)
-    setOutput('prepared', 'false')
-    return 0
-  }
-
-  writeRelease(plan.next, notes)
-
-  git('checkout', '-B', branch)
-  git('add', 'package.json', 'CHANGELOG.md', 'changelog.d')
-  commitRelease(branch, `chore(release): ${plan.tag}`)
-
-  console.log(`\nPrepared ${plan.tag} on ${branch}.`)
-  addSummary(
-    `### Prepared ${plan.tag}\n\n${plan.reason}\n\n<details><summary>Release notes</summary>\n\n${notes}\n</details>`,
-  )
-
-  setOutput('prepared', 'true')
-  setOutput('version', plan.next)
-  setOutput('tag', plan.tag)
-  setOutput('branch', branch)
-  setOutput('notes', notes)
+  setOutput('releasable', String(plan.releasable))
+  setOutput('version', plan.next ?? '')
+  setOutput('tag', plan.tag ?? '')
   setOutput('reason', plan.reason)
-  return 0
+  // `--check` makes "nothing to release" a non-zero exit for shell callers.
+  return argv.includes('--check') && !plan.releasable ? 1 : 0
 }
+
+// --------------------------------------------------------------------- prepare
 
 type NotesSource = 'both' | 'fragments' | 'unreleased'
 
 /**
- * Which prose source feeds the release notes.
- *
- * `both` is right once `## Unreleased` is empty and fragments are the only
- * inflow; a first release that has been tracking the same work in both places
- * picks one to avoid printing every entry twice.
+ * Which prose source feeds the release notes. `both` is right once
+ * `## Unreleased` is empty and fragments are the only inflow; pick one when the
+ * same work is tracked in both places, so no entry prints twice.
  */
 function notesSource(argv: string[]): NotesSource {
-  const flag = argv.find((arg) => arg.startsWith('--notes-from='))?.split('=')[1] ?? 'both'
-  if (flag !== 'both' && flag !== 'fragments' && flag !== 'unreleased') {
-    throw new ReleaseError(`--notes-from must be both, fragments or unreleased; got "${flag}".`)
+  const value = flag(argv, 'notes-from') ?? 'both'
+  if (value !== 'both' && value !== 'fragments' && value !== 'unreleased') {
+    throw new ReleaseError(`--notes-from must be both, fragments or unreleased; got "${value}".`)
   }
-  return flag
+  return value
 }
 
-/** Writes the version, folds the changelog, and consumes the fragments. */
-function writeRelease(version: string, notes: string): void {
-  const source = readFileSync(PACKAGE, 'utf8')
+/**
+ * Writes the release into the working tree and nothing else — the caller owns
+ * the branch, the commit and the PR, so a dry run and a real run differ only in
+ * whether these files change.
+ */
+function commandPrepare(argv: string[]): number {
+  const resolved = resolve({ allowMajor: argv.includes('--allow-major') })
+  const { plan, current, previousTag } = resolved
+  console.log(describe(resolved, null))
+
+  const version = flag(argv, 'version')?.replace(/^v/, '') ?? plan.next
+  if (!version) {
+    throw new ReleaseError(`Nothing to release (${plan.reason}). Pass --version= to force one.`)
+  }
+  const invalid = validateNextVersion(version, current, previousTag !== null)
+  if (invalid) throw new ReleaseError(invalid)
+  const tag = toTag(version)
+  if (gitQuiet('tag', '--list', tag)) throw new ReleaseError(`${tag} already exists.`)
+
+  const source = notesSource(argv)
+  const { carried } = splitChangelog(readFileSync(CHANGELOG, 'utf8'))
+  const notes = renderReleaseNotes({
+    plan: { ...plan, next: version, tag },
+    fragments: source === 'unreleased' ? [] : resolved.fragments,
+    carried: source === 'fragments' ? [] : carried,
+    repoUrl: repoUrl(),
+    previousTag,
+  })
+
+  if (argv.includes('--dry-run')) {
+    console.log(`\n--- CHANGELOG.md would gain ---\n\n${notes}`)
+    setOutput('prepared', 'false')
+    return 0
+  }
+
+  const manifest = readFileSync(PACKAGE, 'utf8')
   const field = /^(\s*"version":\s*)"[^"]*"/m
-  // Test for the field rather than for a changed string: a first release
-  // publishes the version already in the manifest, and that no-op is legitimate.
-  if (!field.test(source)) throw new ReleaseError('package.json has no "version" field to rewrite.')
   // A string edit rather than a JSON round-trip, so key order and formatting survive.
-  writeFileSync(PACKAGE, source.replace(field, `$1"${version}"`))
-
-  const changelog = readFileSync(CHANGELOG, 'utf8')
-  writeFileSync(CHANGELOG, insertRelease(changelog, notes))
-
+  writeFileSync(PACKAGE, manifest.replace(field, `$1"${version}"`))
+  writeFileSync(CHANGELOG, insertRelease(readFileSync(CHANGELOG, 'utf8'), notes))
   for (const fragment of readFragments()) rmSync(join(FRAGMENTS, fragment.name))
   // Keep the directory in git so the next contributor still has somewhere to write.
   writeFileSync(join(FRAGMENTS, '.gitkeep'), '')
+
+  console.log(`\nPrepared ${tag}: package.json, CHANGELOG.md, changelog.d/`)
+  setOutput('prepared', 'true')
+  setOutput('version', version)
+  setOutput('tag', tag)
+  return 0
 }
 
+// --------------------------------------------------------------------- publish
+
 function commandPublish(argv: string[]): number {
-  const dryRun = argv.includes('--dry-run')
-  const manifest = readManifest()
-  const version = manifest.version
-  if (!version) throw new ReleaseError('package.json has no "version" field.')
-
+  const version = manifestVersion()
   const tag = toTag(version)
-  const expectedTag = argv.find((arg) => arg.startsWith('--expect='))?.slice('--expect='.length)
-  if (expectedTag && expectedTag !== tag) {
-    throw new ReleaseError(`Expected ${expectedTag}, but package.json identifies ${tag}.`)
+  const expected = flag(argv, 'expect')
+  if (expected && expected !== tag) {
+    throw new ReleaseError(`Expected ${expected}, but package.json identifies ${tag}.`)
   }
-
-  const releaseCommit = gitQuiet('log', '--format=%H%x1f%s')
-    .split('\n')
-    .map((line) => line.split('\x1f'))
-    .find(([, subject = '']) => isReleaseCommitSubject(subject, tag))?.[0]
-  if (!releaseCommit) {
-    if (expectedTag)
-      throw new ReleaseError(`No release commit for ${tag} exists in HEAD's history.`)
-    console.log(`No release commit for ${tag} exists in HEAD's history — nothing to publish.`)
-    setOutput('published', 'false')
-    return 0
-  }
+  requireTaggedHead(tag)
 
   const notes = extractRelease(readFileSync(CHANGELOG, 'utf8'), version)
   if (!notes) throw new ReleaseError(`CHANGELOG.md has no "## v${version}" section to publish.`)
 
-  const existingTagTarget = remoteTagTarget(tag)
-  if (existingTagTarget) {
-    const target = existingTagTarget
-    if (target !== releaseCommit) {
-      throw new ReleaseError(
-        `${tag} points to ${target}, expected release commit ${releaseCommit}.`,
-      )
-    }
-  }
-
-  const releaseExists = Boolean(
-    run('gh', ['release', 'view', tag, '--json', 'tagName'], { allowFailure: true }),
-  )
-  if (existingTagTarget && releaseExists) {
-    console.log(`${tag} and its GitHub Release already exist at ${releaseCommit}.`)
+  if (githubReleaseExists(tag)) {
+    console.log(`The ${tag} GitHub Release already exists.`)
     setOutput('published', 'false')
-    setOutput('released', 'true')
-    setOutput('tag', tag)
-    setOutput('version', version)
     return 0
   }
-
-  if (dryRun) {
-    console.log(`Would tag ${tag} at ${releaseCommit} with:\n\n${notes}`)
+  if (argv.includes('--dry-run')) {
+    console.log(`Would create GitHub Release ${tag}:\n\n${releaseIndex(notes)}`)
     setOutput('published', 'false')
     return 0
   }
 
-  if (!existingTagTarget) {
-    git('tag', '-f', '-a', tag, releaseCommit, '-m', `Open Run ${tag}`)
-    // Another publisher may win between the lookup and this push. Re-read the
-    // remote target below instead of turning that harmless race into a failure.
-    run('git', ['push', 'origin', tag], { allowFailure: true })
-    const target = remoteTagTarget(tag)
-    if (target !== releaseCommit) {
-      throw new ReleaseError(
-        target
-          ? `${tag} points to ${target}, expected release commit ${releaseCommit}.`
-          : `${tag} was not pushed to origin.`,
-      )
-    }
-  }
+  const prerelease = parseSemVer(version)?.prerelease ? ['--prerelease'] : []
+  createGithubRelease(tag, `Open Run ${tag}`, releaseIndex(notes), prerelease)
+  if (!githubReleaseExists(tag)) throw new ReleaseError(`gh did not create the ${tag} Release.`)
 
-  const notesFile = join(ROOT, '.release-notes.md')
-  writeFileSync(notesFile, notes)
-  try {
-    if (!releaseExists) {
-      run(
-        'gh',
-        ['release', 'create', tag, '--title', `Open Run ${tag}`, '--notes-file', notesFile],
-        { allowFailure: true },
-      )
-    }
-  } finally {
-    rmSync(notesFile, { force: true })
-  }
-
-  run('gh', ['release', 'view', tag, '--json', 'tagName'])
-  console.log(`Published and verified ${tag} at ${releaseCommit}.`)
+  console.log(`Published ${tag}.`)
   addSummary(`### Published ${tag}\n\n${notes}`)
   setOutput('published', 'true')
-  setOutput('released', 'true')
   setOutput('tag', tag)
-  setOutput('version', version)
   return 0
 }
 
@@ -499,15 +260,15 @@ function commandPublish(argv: string[]): number {
 const USAGE = `Usage: pnpm release:<command>
 
   plan     [--json] [--check] [--allow-major]   What the next release would be
-  prepare  [--dry-run] [--skip-verify]          Write the release onto release/vX.Y.Z
-           [--respect-cadence] [--allow-major]
-           [--notes-from=both|fragments|unreleased]
-  publish  [--dry-run] [--expect=vX.Y.Z]        Reconcile the tag and GitHub Release
+  prepare  [--version=X.Y.Z] [--dry-run]        Write the version, changelog and
+           [--notes-from=both|fragments|unreleased]  fold changelog.d/ (no git)
+           [--allow-major]
+  publish  [--dry-run] [--expect=vX.Y.Z]        Create the GitHub Release for the
+                                                tagged commit
 `
 
 function main(): number {
   const [command = '', ...argv] = process.argv.slice(2)
-
   switch (command) {
     case 'plan':
       return commandPlan(argv)

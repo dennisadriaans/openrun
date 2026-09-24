@@ -2,7 +2,7 @@
  * Turning a commit range into a release decision.
  *
  * This module is the whole of the "what version is next" question, and it is a
- * pure function on purpose: the scheduled job, the `pnpm release:plan` command
+ * pure function on purpose: the release tool, the `pnpm release:plan` command
  * and any UI that previews the pending release all get the same answer for the
  * same input, and none of them consults a model to get it.
  *
