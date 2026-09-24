@@ -11,6 +11,7 @@ import {
 } from './commands/args.ts'
 import { cliHelp } from './commands/help.ts'
 import type { CliSession } from './session/session.ts'
+import { setProcessTitle } from './terminal/processTitle.ts'
 import { launchTerminalRuntime } from './terminal/terminalRuntime.ts'
 import {
   accent,
@@ -1602,6 +1603,7 @@ async function entry(
   }
 }
 
+setProcessTitle('openrun')
 const argv = process.argv.slice(2)
 if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')) {
   // `../package.json` is apps/cli/package.json from source and the published

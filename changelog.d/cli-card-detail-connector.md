@@ -1,0 +1,1 @@
+You no longer have to guess which line belongs to which task in the CLI chat. A scheduled or started task's details hang off its headline with a `⎿` connector and stay dimmed, so the headline stands out and wrapped details stay aligned.
