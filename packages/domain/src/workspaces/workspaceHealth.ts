@@ -41,6 +41,8 @@ export type WorkspaceHealth = {
   actualBranch: string
   /** True when the working tree has uncommitted or untracked changes. */
   dirty: boolean
+  /** Paths `git status` reports, for `dirty`. Submodules carry a " (submodule)" suffix. */
+  changes?: string[]
   /** Recorded quarantine reason, for `blocked`. Empty otherwise. */
   detail: string
 }
@@ -76,10 +78,19 @@ export function workspaceHealthMessage(health: WorkspaceHealth): string {
     case 'branch-drift':
       return `The workspace is on "${health.actualBranch || 'an unknown branch'}" but this automation is configured for "${health.configuredBranch}". A previous run or a manual checkout switched it.`
     case 'dirty':
-      return 'The workspace has uncommitted changes left over from earlier work. An unattended run would inherit them — commit, discard, or restore the workspace first.'
+      return `The workspace has uncommitted changes${changeList(health.changes)}. An unattended run would inherit them — commit, discard, or restore the workspace first.`
     case 'blocked':
       return health.detail || 'The workspace is quarantined after a failed run.'
   }
+}
+
+const LISTED_CHANGES = 3
+
+function changeList(changes: readonly string[] | undefined): string {
+  if (!changes?.length) return ''
+  const shown = changes.slice(0, LISTED_CHANGES).join(', ')
+  const more = changes.length - LISTED_CHANGES
+  return `: ${shown}${more > 0 ? ` and ${more} more` : ''}`
 }
 
 /**

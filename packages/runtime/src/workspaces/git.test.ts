@@ -14,6 +14,7 @@ import {
   createPullRequest,
   discard,
   discardHunk,
+  dirtyPaths,
   fileDiff,
   pullRequestForBranchAsync,
   push,
@@ -184,6 +185,29 @@ describe('discard scoped to run delta', () => {
     assert.equal(readFileSync(join(cwd, 'clean.txt'), 'utf8'), 'clean\n')
     assert.equal(readFileSync(join(cwd, 'pre.txt'), 'utf8'), 'pre\n')
     assert.ok(!existsSync(join(cwd, 'agent.txt')))
+  })
+})
+
+describe('dirtyPaths', () => {
+  it('lists modified, renamed and untracked paths, including spaces', () => {
+    const cwd = makeRepo()
+    writeFileSync(join(cwd, 'tracked.txt'), 'dirty\n')
+    git(cwd, ['mv', 'clean.txt', 'moved.txt'])
+    writeFileSync(join(cwd, 'new file.txt'), 'new\n')
+    assert.deepEqual(dirtyPaths(cwd).sort(), ['moved.txt', 'new file.txt', 'tracked.txt'])
+  })
+
+  it('marks a submodule whose recorded commit moved', () => {
+    const sub = makeRepo()
+    const cwd = makeRepo()
+    git(cwd, ['-c', 'protocol.file.allow=always', 'submodule', 'add', sub, 'lib'])
+    git(cwd, ['commit', '-m', 'add submodule'])
+    git(join(cwd, 'lib'), ['commit', '--allow-empty', '-m', 'bump'])
+    assert.deepEqual(dirtyPaths(cwd), ['lib (submodule)'])
+  })
+
+  it('is empty for a clean tree', () => {
+    assert.deepEqual(dirtyPaths(makeRepo()), [])
   })
 })
 

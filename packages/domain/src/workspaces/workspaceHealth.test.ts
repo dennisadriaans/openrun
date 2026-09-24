@@ -71,6 +71,19 @@ describe('workspaceHealth', () => {
     assert.ok(message.includes('main'))
   })
 
+  it('dirt names the changed paths and counts the rest', () => {
+    assert.ok(
+      workspaceHealthMessage(
+        health('dirty', { dirty: true, changes: ['app (submodule)'] }),
+      ).includes('uncommitted changes: app (submodule).'),
+    )
+    const many = workspaceHealthMessage(
+      health('dirty', { dirty: true, changes: ['a', 'b', 'c', 'd', 'e'] }),
+    )
+    assert.ok(many.includes(': a, b, c and 2 more.'))
+    assert.ok(workspaceHealthMessage(health('dirty', { dirty: true })).includes('changes. '))
+  })
+
   it('a quarantine reports the recorded reason', () => {
     assert.equal(
       workspaceHealthMessage(health('blocked', { detail: 'left red by "nightly docs"' })),

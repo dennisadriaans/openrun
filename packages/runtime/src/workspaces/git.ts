@@ -182,6 +182,27 @@ export function isRepo(cwd: string): boolean {
   return git(cwd, ['rev-parse', '--is-inside-work-tree']).stdout.trim() === 'true'
 }
 
+/** Leading space-separated fields before the path, per `git status --porcelain=v2` record type. */
+const STATUS_V2_FIELDS: Record<string, number> = { '1': 8, '2': 9, u: 10, '?': 1 }
+
+/** Paths `git status` reports as changed or untracked, submodules marked " (submodule)". */
+export function dirtyPaths(cwd: string): string[] {
+  const out = git(cwd, ['status', '--porcelain=v2', '-z']).stdout
+  const records = out.split('\0')
+  const paths: string[] = []
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]!
+    const fields = STATUS_V2_FIELDS[record[0] ?? '']
+    if (fields === undefined) continue
+    const parts = record.split(' ')
+    const path = parts.slice(fields).join(' ')
+    if (record[0] === '2') i++
+    if (!path) continue
+    paths.push(parts[2]?.startsWith('S') ? `${path} (submodule)` : path)
+  }
+  return paths
+}
+
 export function currentBranch(cwd: string): string {
   if (!isRepo(cwd)) return ''
   return git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim()

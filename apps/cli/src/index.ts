@@ -40,6 +40,8 @@ import {
 import {
   guideRun,
   manageRuntimes,
+  checkoutRoot,
+  registerCheckout,
   registerProject,
   selectWorkspace,
   ensureProjectChecks,
@@ -222,7 +224,12 @@ async function scheduleInterpreted(ctx: Context, intent: CliIntent): Promise<num
   }
   if (!runtime.ok) throw new Error(runtime.error)
   const rows = await listOf<WorkspaceChoice>(ctx.client, 'workspaces.list', {})
-  const workspace = resolveWorkspace(intent.workspaceHint, process.cwd(), rows)
+  const workspace = resolveWorkspace(
+    intent.workspaceHint,
+    process.cwd(),
+    rows,
+    checkoutRoot(process.cwd()),
+  )
   if (!workspace.ok && !ctx.flags.dryRun) {
     const project = await registerProject(
       ctx.client,
@@ -352,7 +359,12 @@ async function plan(ctx: Context, intent: CliIntent) {
   const runtime = resolveRuntime(intent.runtimeHint, runtimes)
   if (!runtime.ok) return { ok: false as const, error: runtime.error }
 
-  const workspace = resolveWorkspace(intent.workspaceHint, ctx.url ? '' : process.cwd(), workspaces)
+  const cwd = ctx.url ? '' : process.cwd()
+  let workspace = resolveWorkspace(intent.workspaceHint, cwd, workspaces, checkoutRoot(cwd))
+  if (!workspace.ok && !intent.workspaceHint && !ctx.flags.dryRun) {
+    const registered = await registerCheckout(ctx.client, cwd, ctx.ui)
+    if (registered) workspace = { ok: true, value: registered }
+  }
   if (!workspace.ok) return { ok: false as const, error: workspace.error }
 
   return {
@@ -943,7 +955,8 @@ async function cmdWhere(ctx: Context): Promise<number> {
     listOf<RuntimeChoice>(ctx.client, 'runtimes.list'),
     listOf<WorkspaceChoice>(ctx.client, 'workspaces.list', {}),
   ])
-  const here = resolveWorkspace('', ctx.url ? '' : process.cwd(), workspaces)
+  const cwd = ctx.url ? '' : process.cwd()
+  const here = resolveWorkspace('', cwd, workspaces, checkoutRoot(cwd))
 
   if (ctx.flags.json) {
     console.log(

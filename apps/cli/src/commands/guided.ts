@@ -62,6 +62,39 @@ export async function registerProject(
   return (await client.call('projects.add', { mode: 'register', path })) as Project
 }
 
+/** Top of the Git checkout holding `cwd`; empty outside one or when `cwd` is empty. */
+export function checkoutRoot(cwd: string): string {
+  if (!cwd) return ''
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Register the checkout holding `cwd` as a project and return its workspace,
+ * so starting openrun inside an unregistered repository needs no
+ * `openrun init`. Null outside a Git checkout.
+ */
+export async function registerCheckout(
+  client: CliClient,
+  cwd: string,
+  ui: FlowUi,
+): Promise<WorkspaceChoice | null> {
+  const root = checkoutRoot(cwd)
+  if (!root) return null
+  const project = await registerProject(client, root, false, ui)
+  ui.info(`Registered ${project.path} as a project.`)
+  const rows = (await client.call('workspaces.list', {})) as WorkspaceChoice[]
+  const resolved = resolveWorkspace('', cwd, rows, root)
+  return resolved.ok ? resolved.value : null
+}
+
 export async function selectRuntime(
   client: CliClient,
   hint: string,
@@ -212,8 +245,13 @@ export async function selectWorkspace(
 ): Promise<WorkspaceChoice> {
   const rows = (await client.call('workspaces.list', {})) as WorkspaceChoice[]
   // A local cwd must never silently choose a workspace on a remote machine.
-  const resolved = resolveWorkspace(hint, remote ? '' : process.cwd(), rows)
+  const cwd = remote ? '' : process.cwd()
+  const resolved = resolveWorkspace(hint, cwd, rows, checkoutRoot(cwd))
   if (resolved.ok && (!force || !ui.interactive)) return resolved.value
+  if (!resolved.ok && !hint && !force && !dryRun) {
+    const registered = await registerCheckout(client, cwd, ui)
+    if (registered) return registered
+  }
   if (!ui.interactive) throw new Error(resolved.ok ? 'Choose a workspace.' : resolved.error)
   if (hint && !resolved.ok) ui.info(resolved.error)
   const available = rows.filter((row) => row.status !== 'archived')
