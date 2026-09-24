@@ -6,6 +6,19 @@ those releases are described in the repository's CHANGELOG.md.
 
 ## Unreleased
 
+## v0.5.0 — 2026-09-24
+
+[compare changes](https://github.com/dennisadriaans/openrun/compare/cli-v0.4.1...cli-v0.5.0)
+
+### 🚀 Features
+
+- **tasks:** isolate scheduled runs and ship verified prs ([#155](https://github.com/dennisadriaans/openrun/pull/155))
+- **cli:** add clear-history and quieter request echo ([#153](https://github.com/dennisadriaans/openrun/pull/153))
+
+### 🩹 Fixes
+
+- **cli:** scope workspace to the repo you start in ([#154](https://github.com/dennisadriaans/openrun/pull/154))
+
 ## v0.4.1 — 2026-09-24
 
 [compare changes](https://github.com/dennisadriaans/openrun/compare/cli-v0.4.0...cli-v0.4.1)
