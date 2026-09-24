@@ -1,0 +1,1 @@
+You no longer have the CLI pick the parent workspace when you start it inside a submodule or nested repository, which left every recurring schedule failing as "dirty" with no hint why. The CLI now stays in the Git checkout you started in, registers it when it is new, and a dirty-workspace refusal names the changed paths.
