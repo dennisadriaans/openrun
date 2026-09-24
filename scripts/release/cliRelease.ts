@@ -40,7 +40,7 @@ import {
   setOutput,
   untaggedRelease,
 } from './io.ts'
-import { extractRelease, insertRelease } from './notes.ts'
+import { extractRelease, insertRelease, releaseIndex } from './notes.ts'
 import type { ReleasePlan } from './plan.ts'
 import { summariseCounts } from './plan.ts'
 import { validateNextVersion } from './semver.ts'
@@ -232,7 +232,7 @@ async function commandPublish(argv: string[]): Promise<number> {
   const distTag = npmDistTag(version)
   if (dryRun) {
     if (!onNpm) console.log(`Would publish ${config.package}@${version} (dist-tag ${distTag}).`)
-    if (!releaseExists) console.log(`Would create GitHub Release ${tag}:\n\n${notes}`)
+    if (!releaseExists) console.log(`Would create GitHub Release ${tag}:\n\n${releaseIndex(notes)}`)
     setOutput('published', 'false')
     return 0
   }
@@ -266,7 +266,7 @@ async function commandPublish(argv: string[]): Promise<number> {
       createGithubRelease(
         tag,
         `Open Run CLI ${tag}`,
-        `${notes}\n\nInstall: \`npm install -g ${config.package}@${version}\`\n`,
+        `${releaseIndex(notes)}\n\n📦 \`npm install -g ${config.package}@${version}\`\n`,
         // The app's release is the repository's headline; a CLI patch must not replace it.
         ['--latest=false', ...(distTag === 'next' ? ['--prerelease'] : []), tarball],
       )

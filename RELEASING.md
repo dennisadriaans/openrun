@@ -36,6 +36,8 @@ git tag -a vX.Y.Z <merged sha> -m "Open Run vX.Y.Z" && git push origin vX.Y.Z
 - Tag the squashed `chore(release): …` commit. Publish refuses any other commit.
 - Keep that exact PR title. `plan` uses it to spot a release that merged but
   was never tagged.
+- GitHub Release pages show only the emoji-grouped commit list. The `changelog.d/`
+  prose goes to `CHANGELOG.md`.
 - `X.Y.Z-beta.N` is a prerelease: GitHub marks it so, npm publishes it under `next`.
 - Never move or delete a pushed tag. A bad release gets a `fix` and a new patch.
 

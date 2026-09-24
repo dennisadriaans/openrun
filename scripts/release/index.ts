@@ -29,7 +29,13 @@ import {
   setOutput,
   untaggedRelease,
 } from './io.ts'
-import { extractRelease, insertRelease, renderReleaseNotes, splitChangelog } from './notes.ts'
+import {
+  extractRelease,
+  insertRelease,
+  releaseIndex,
+  renderReleaseNotes,
+  splitChangelog,
+} from './notes.ts'
 import type { Fragment } from './notes.ts'
 import { planRelease, summariseCounts } from './plan.ts'
 import type { ReleasePlan } from './plan.ts'
@@ -233,13 +239,13 @@ function commandPublish(argv: string[]): number {
     return 0
   }
   if (argv.includes('--dry-run')) {
-    console.log(`Would create GitHub Release ${tag}:\n\n${notes}`)
+    console.log(`Would create GitHub Release ${tag}:\n\n${releaseIndex(notes)}`)
     setOutput('published', 'false')
     return 0
   }
 
   const prerelease = parseSemVer(version)?.prerelease ? ['--prerelease'] : []
-  createGithubRelease(tag, `Open Run ${tag}`, notes, prerelease)
+  createGithubRelease(tag, `Open Run ${tag}`, releaseIndex(notes), prerelease)
   if (!githubReleaseExists(tag)) throw new ReleaseError(`gh did not create the ${tag} Release.`)
 
   console.log(`Published ${tag}.`)

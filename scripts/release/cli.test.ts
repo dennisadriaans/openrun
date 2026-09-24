@@ -114,8 +114,10 @@ test('notes carry the summary, compare the CLI tags, and read back for publish',
     repoUrl: 'https://github.com/o/r',
     date: '2026-09-23',
   })
-  assert.match(notes, /^## v0\.4\.1 — 2026-09-23\n\n- You no longer lose quoted paths\.\n/)
-  assert.match(notes, /compare\/cli-v0\.4\.0\.\.\.cli-v0\.4\.1/)
+  assert.match(
+    notes,
+    /^## v0\.4\.1 — 2026-09-23\n\n\[compare changes\]\(.*\/compare\/cli-v0\.4\.0\.\.\.cli-v0\.4\.1\)\n\n- You no longer lose quoted paths\.\n/,
+  )
   assert.match(extractRelease(notes, '0.4.1') ?? '', /quote paths/)
 })
 

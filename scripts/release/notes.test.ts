@@ -5,6 +5,7 @@ import { planRelease } from './plan.ts'
 import {
   extractRelease,
   insertRelease,
+  releaseIndex,
   renderReleaseNotes,
   splitChangelog,
   toBullet,
@@ -40,7 +41,7 @@ test('renders a version heading, prose and a commit index', () => {
     /- \*\*tasks:\*\* select and bulk delete automations \(\[#42\]\(.*\/pull\/42\)\)/,
   )
   assert.match(notes, /### 🩹 Fixes/)
-  assert.match(notes, /\/compare\/v0\.1\.0\.\.\.v0\.2\.0/)
+  assert.match(notes, /^\[compare changes\]\(.*\/compare\/v0\.1\.0\.\.\.v0\.2\.0\)$/m)
 })
 
 test('omits the compare link on a first release', () => {
@@ -50,7 +51,7 @@ test('omits the compare link on a first release', () => {
     repoUrl: REPO,
     previousTag: null,
   })
-  assert.doesNotMatch(notes, /Full changelog/)
+  assert.doesNotMatch(notes, /compare changes/)
 })
 
 test('renders PR numbers unlinked when no repo url is known', () => {
@@ -86,7 +87,7 @@ test('carries hand-written Unreleased bullets into the release', () => {
 
 test('lists unconventional commits rather than hiding them', () => {
   const notes = renderReleaseNotes({ plan: plan('feat: a', 'Added a thing'), fragments: [] })
-  assert.match(notes, /### Uncategorised/)
+  assert.match(notes, /### 🧩 Other/)
   assert.match(notes, /- Added a thing/)
 })
 
@@ -182,4 +183,38 @@ test('extraction stops at the next release heading', () => {
 test('a version is not confused with one it prefixes', () => {
   const changelog = insertRelease(CHANGELOG, '## v0.2.10\n\n- Ten.\n')
   assert.equal(extractRelease(changelog, '0.2.1'), null)
+})
+
+test('the GitHub Release body is the commit index without the prose', () => {
+  const notes = renderReleaseNotes({
+    plan: plan('feat(tasks): bulk delete (#42)', 'fix!: drop legacy flag'),
+    fragments: [{ name: 'a.md', body: 'You no longer delete automations one at a time.' }],
+    repoUrl: REPO,
+    previousTag: 'v0.1.0',
+  })
+  const body = releaseIndex(notes)
+  assert.doesNotMatch(body, /You no longer/)
+  assert.doesNotMatch(body, /^## v/m)
+  assert.match(
+    body,
+    /^\[compare changes\]\(.*\/compare\/v0\.1\.0\.\.\.v0\.2\.0\)\n\n> \*\*1 breaking change/,
+  )
+  assert.match(body, /### 🚀 Features\n\n- \*\*tasks:\*\* bulk delete/)
+})
+
+test('older sections with the compare link at the bottom read the same', () => {
+  const section = [
+    'You no longer wait.',
+    '',
+    '### 🩹 Fixes',
+    '',
+    '- repair scheduler (#7)',
+    '',
+    `**Full changelog**: [\`v0.2.0...v0.2.1\`](${REPO}/compare/v0.2.0...v0.2.1)`,
+  ].join('\n')
+  assert.equal(
+    releaseIndex(section),
+    `[compare changes](${REPO}/compare/v0.2.0...v0.2.1)\n\n### 🩹 Fixes\n\n- repair scheduler (#7)`,
+  )
+  assert.equal(releaseIndex('Only prose.'), 'Only prose.')
 })
