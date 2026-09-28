@@ -1,13 +1,8 @@
 name: Release · CLI
 
-# Publishes @dennisadriaans/openrun from a cli-vX.Y.Z tag. The tag, not a
-# branch, is the trigger: npm versions are immutable, so the bytes behind one
-# must come from a ref nobody moves. Re-running is safe — the publish step
-# skips npm and the GitHub Release when either already exists.
+# Manual publishing only. Select an existing cli-vX.Y.Z tag when dispatching.
 
 on:
-  push:
-    tags: ['cli-v*']
   workflow_dispatch:
     inputs:
       tag:

@@ -1,13 +1,15 @@
 version: 2
 
 updates:
-  # Grouped so a week of patch bumps arrives as one reviewable PR rather than
-  # twenty. Security advisories still open their own PR immediately.
+  # Automated version and security-update PRs are disabled.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
+    rebase-strategy: disabled
+    ignore:
+      - dependency-name: '*'
     groups:
       codemirror:
         patterns:
@@ -29,3 +31,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
+    rebase-strategy: disabled
+    ignore:
+      - dependency-name: '*'
