@@ -1,13 +1,8 @@
 name: Release · publish
 
-# Creates the GitHub Release for a vX.Y.Z tag. The tag, not a branch, is the
-# trigger: the maintainer tags the merged `chore(release): vX.Y.Z` commit, and
-# the Release must describe exactly that commit. Re-running is safe — publish
-# skips a Release that already exists.
+# Manual publishing only. Select an existing vX.Y.Z tag when dispatching.
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:

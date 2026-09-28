@@ -7,14 +7,17 @@ Two tracks, each with its own version and tag. They release the same way.
 | Version | `package.json` | `apps/cli/package.json` |
 | Tag | `vX.Y.Z` | `cli-vX.Y.Z` |
 | Scripts | `pnpm release:plan\|prepare\|publish` | `pnpm release:cli:plan\|prepare\|publish` |
-| Tag push runs | `Release · publish` → GitHub Release | `Release · CLI` → npm + GitHub Release |
+| Manual workflow | `Release · publish` → GitHub Release | `Release · CLI` → npm + GitHub Release |
 
-Nothing releases on a schedule. A release happens when a maintainer pushes a tag.
+Automatic releases are disabled. Pushing a tag does not publish anything.
+After pushing a tag, manually run the matching release workflow from `main`
+in **Actions → Release · publish / Release · CLI → Run workflow**, entering the tag.
 
 ## Release
 
 Maintainers run `pnpm release` from the private root. It asks which track and
-walks every step below.
+prepares the release and pushes its tag. Publishing then requires the manual
+workflow dispatch described above.
 
 By hand (`release:cli:*` for the CLI):
 
